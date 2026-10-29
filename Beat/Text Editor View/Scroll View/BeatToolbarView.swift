@@ -46,6 +46,7 @@ class BeatToolbarView:NSView {
 		infoButton.target = self
 		infoButton.action = #selector(showInfo(_:))
 		addSubview(infoButton)
+		placeInfoButton()
 	}
 	
 	/// Buttons in the right-hand group, left to right
@@ -55,6 +56,17 @@ class BeatToolbarView:NSView {
 			.sorted { $0.frame.minX < $1.frame.minX }
 	}
 	
+	/// The Info button sits to the left of the other buttons on the right, with the same size and spacing.
+	/// It resizes with the toolbar the same way they do.
+	private func placeInfoButton() {
+		let buttons = rightButtons
+		guard let first = buttons.first else { return }
+		let spacing = buttons.count > 1 ? max(2, buttons[1].frame.minX - first.frame.maxX) : 6
+		infoButton.autoresizingMask = first.autoresizingMask
+		let frame = first.frame.offsetBy(dx: -(first.frame.width + spacing), dy: 0)
+		if infoButton.frame != frame { infoButton.frame = frame }
+	}
+	
 	@objc func showInfo(_ sender: NSButton) {
 		ViralInfoController.show(from: sender)
 	}
@@ -62,12 +74,7 @@ class BeatToolbarView:NSView {
 	override func layout() {
 		super.layout()
 		
-		// The Info button sits to the left of the other buttons on the right, with the same spacing
-		let buttons = rightButtons
-		if let first = buttons.first {
-			let spacing = buttons.count > 1 ? max(2, buttons[1].frame.minX - first.frame.maxX) : 6
-			infoButton.frame = first.frame.offsetBy(dx: -(first.frame.width + spacing), dy: 0)
-		}
+		placeInfoButton()
 		updateBackgrounds()
 	}
 	

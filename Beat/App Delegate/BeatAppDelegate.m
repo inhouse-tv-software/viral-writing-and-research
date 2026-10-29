@@ -7,9 +7,6 @@
 //	Released under GPL license
 
 
-#ifdef ADHOC
-#import <Sparkle/Sparkle.h>
-#endif
 
 #import <os/log.h>
 #import <BeatParsing/BeatParsing.h>
@@ -49,12 +46,6 @@
 
 @property (nonatomic) BeatTest *tests;
 
-#ifdef ADHOC
-// Ad hoc distribution vector uses Sparkle to deliver updates
-@property (nonatomic) IBOutlet SPUUpdater *updater;
-@property (nonatomic) IBOutlet SPUStandardUserDriver *userDriver;
-#endif
-
 @property (nonatomic) IBOutlet NSMenuItem *checkForUpdatesItem;
 
 @end
@@ -62,7 +53,6 @@
 @implementation BeatAppDelegate
 
 #define DEVELOPMENT NO
-#define LATEST_VERSION_KEY @"Latest Version"
 
 #pragma mark - Help
 
@@ -126,11 +116,6 @@
 		[center requestAuthorizationWithOptions:UNAuthorizationOptionBadge | UNAuthorizationOptionAlert completionHandler:^(BOOL granted, NSError * _Nullable error) {
 		}];
 	}
-		
-#ifdef ADHOC
-	// Run Sparkle if this is an ad hoc distribution
-	if (self.updater.automaticallyChecksForUpdates) [self.updater checkForUpdatesInBackground];
-#endif
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification
@@ -139,10 +124,6 @@
 
 	// Show launch screen
 	[self showLaunchScreen];
-	
-	// Lastly, open patch notes if the app was recently updated
-	// Viral: no Beat patch notes / App Store popup on launch
-	// [self checkVersion];
 	
 	// Add to launch count
 	NSInteger timesLaunched = [NSUserDefaults.standardUserDefaults integerForKey:@"LaunchCount"] + 1;
@@ -180,45 +161,7 @@
 	_checkForUpdatesItem = nil;
 }
 
-#ifdef ADHOC
-- (void)setupSparkle
-{
-	// Init Sparkle
-	self.userDriver = [[SPUStandardUserDriver alloc] initWithHostBundle:NSBundle.mainBundle delegate:nil];
-	self.updater = [[SPUUpdater alloc] initWithHostBundle:NSBundle.mainBundle applicationBundle:NSBundle.mainBundle userDriver:self.userDriver delegate:nil];
-	
-	// Start updater
-	NSError *error;
-	[self.updater startUpdater:&error];
-	if (error) NSLog(@"Sparkle error: %@", error);
-	
-	// Add selector to check updates item
-	_checkForUpdatesItem.action = @selector(checkForUpdates:);
-}
-#endif
 
-
-#pragma mark - Updates
-
--(void)checkForUpdates:(id)sender
-{
-#ifdef ADHOC
-	// Only allow this in ad hoc distribution
-	[self.updater checkForUpdates];
-#endif
-}
-
--(void)checkVersion
-{
-	NSInteger latestVersion = [[NSUserDefaults.standardUserDefaults objectForKey:LATEST_VERSION_KEY] integerValue];
-	NSInteger currentVersion = [[NSBundle.mainBundle.infoDictionary objectForKey:@"CFBundleVersion"] integerValue];
-	
-	// Show patch notes if it's the first time running Beat or if the app has been updated
-	if (latestVersion == 0 || currentVersion > latestVersion) {
-		[[NSUserDefaults standardUserDefaults] setValue:[NSString stringWithFormat:@"%lu", currentVersion] forKey:LATEST_VERSION_KEY];
-		[self.resources showPatchNotesWithSender:nil];
-	}
-}
 
 
 #pragma mark - Handoff

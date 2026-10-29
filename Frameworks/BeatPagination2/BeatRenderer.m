@@ -463,7 +463,8 @@
 + (CGFloat)embedVideoAspect:(NSString*)url
 {
     NSString* u = url.lowercaseString;
-    if ([u containsString:@"/shorts/"] || [u containsString:@"/reel"]) return 16.0 / 9.0;
+    // Same rules as the editor
+    if ([u containsString:@"/shorts/"] || [u containsString:@"/reel"] || [u containsString:@"/share/r/"]) return 16.0 / 9.0;
     if ([u containsString:@"instagram.com/p/"] || [u containsString:@"instagram.com/tv/"]) return 1.25;
     return 9.0 / 16.0;
 }
@@ -525,21 +526,6 @@
     }
 #endif
     return aspect;
-}
-
-+ (NSArray*)embedItem:(BXImage*)image width:(CGFloat)width
-{
-    CGFloat aspect = 0.75;
-#if TARGET_OS_OSX
-    if (image != nil) {
-        NSImageRep* rep = image.representations.firstObject;
-        CGFloat pw = (rep.pixelsWide > 0) ? rep.pixelsWide : image.size.width;
-        CGFloat ph = (rep.pixelsHigh > 0) ? rep.pixelsHigh : image.size.height;
-        if (pw > 0 && ph > 0) aspect = ph / pw;
-    }
-#endif
-    id img = (image != nil) ? image : NSNull.null;
-    return @[img, @(width), @(floor(width * aspect))];
 }
 
 + (BXImage*)embedImageWithID:(NSString*)ID settings:(BeatExportSettings*)settings

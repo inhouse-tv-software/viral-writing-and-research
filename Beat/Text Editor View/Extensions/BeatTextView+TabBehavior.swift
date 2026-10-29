@@ -106,7 +106,8 @@ fileprivate struct BeatTableModel {
 	func emptyRow() -> [String] { return Array(repeating: "", count: columnCount) }
 	
 	static func isRow(_ s: String) -> Bool {
-		let t = s.trimmingCharacters(in: .whitespaces)
+		// Only spaces, like the layout manager and the printed version
+		let t = s.trimmingCharacters(in: CharacterSet(charactersIn: " "))
 		return t.count >= 2 && t.hasPrefix("|") && t.hasSuffix("|")
 	}
 	
@@ -856,6 +857,12 @@ public extension BeatTextView {
 	
 	// MARK: Placing table views
 	
+	/// True when the text at this location is inside a folded section
+	fileprivate func isFolded(_ location: Int) -> Bool {
+		guard let storage = textStorage, location < storage.length else { return false }
+		return storage.attribute(NSAttributedString.Key("BeatFolded"), at: location, effectiveRange: nil) != nil
+	}
+	
 	fileprivate func updateTableViews() {
 		guard let lm = layoutManager, let tc = textContainer else { return }
 		let blocks = tableBlocks()
@@ -875,10 +882,11 @@ public extension BeatTextView {
 			}
 		}
 		for view in unused {
-			// Don't throw away a table that's being edited
+			// A table that no longer exists in the text (undo, cut) is dropped, even if one of its cells has focus
 			if let responder = window?.firstResponder as? BeatTableCellView, responder.table === view {
-				ordered.append(view)
-				continue
+				// Mid-write the text can be briefly out of step, so keep the view until the write is done
+				if isWritingTable { ordered.append(view); continue }
+				window?.makeFirstResponder(self)
 			}
 			view.removeFromSuperview()
 		}
@@ -910,6 +918,7 @@ public extension BeatTextView {
 							   width: width + BTMetrics.addButtonSize + 8,
 							   height: view.totalHeight)
 			if view.frame != frame { view.frame = frame }
+			view.isHidden = isFolded(block.range.location)
 		}
 		
 		tableViews = views
@@ -928,7 +937,8 @@ public extension BeatTextView {
 	fileprivate func replaceTableText(_ view: BeatTableView, with text: String) {
 		guard let textActions = editorDelegate?.textActions else { return }
 		let ns = self.string as NSString
-		guard NSMaxRange(view.tableRange) <= ns.length else { return }
+		// Only write if the text under the view is still the table it shows, never over other text
+		guard NSMaxRange(view.tableRange) <= ns.length, ns.substring(with: view.tableRange) == view.sourceText else { return }
 		
 		let selection = self.selectedRange()
 		let activeCell = window?.firstResponder as? BeatTableCellView
@@ -991,6 +1001,11 @@ public extension BeatTextView {
 		let delta = (text as NSString).length - range.length
 		view.tableRange.length = (text as NSString).length
 		
+		// The table height lives on its first line, so lay that line out again when rows grow or shrink
+		if range.location < (self.string as NSString).length {
+			layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
+		}
+		
 		// Keep typing in the cell even if something moved focus while the document was updated
 		if let activeCell, let cellSelection, window?.firstResponder !== activeCell {
 			window?.makeFirstResponder(activeCell)
@@ -1030,12 +1045,11 @@ public extension BeatTextView {
 		
 		let range = view.tableRange
 		if below {
-			var end = NSMaxRange(range)
+			let end = NSMaxRange(range)
 			let length = (self.string as NSString).length
 			if end >= length {
 				// Table is at the end of the document, add room below it
 				textActions.replace(NSRange(location: length, length: 0), with: "\n\n")
-				end = NSMaxRange(range)
 			}
 			let ns = self.string as NSString
 			var target = min(end + 1, ns.length)
@@ -1188,7 +1202,7 @@ public extension BeatTextView {
 		
 		// Never type into hidden table text
 		if selection.length == 0 {
-			for view in tableViews where selection.location > view.tableRange.location && selection.location < NSMaxRange(view.tableRange) {
+			for view in tableViews where selection.location > view.tableRange.location && selection.location <= NSMaxRange(view.tableRange) {
 				view.focus(row: 0, col: 0, atEnd: true)
 				return true
 			}
@@ -1358,16 +1372,9 @@ fileprivate enum ViralMedia {
 			.replacingOccurrences(of: "^", with: "%5E")
 	}
 	
-	static func decode(_ url: String) -> String {
-		return url.replacingOccurrences(of: "%20", with: " ")
-			.replacingOccurrences(of: "%2C", with: ",")
-			.replacingOccurrences(of: "%28", with: "(")
-			.replacingOccurrences(of: "%29", with: ")")
-			.replacingOccurrences(of: "%5E", with: "^")
-	}
-	
+	/// The link part of an entry. It stays percent-encoded, which is still a valid address and never turns `%2C` in a pasted link into something else.
 	static func url(_ entry: String) -> String {
-		return decode(entry.components(separatedBy: "^").first ?? entry)
+		return entry.components(separatedBy: "^").first ?? entry
 	}
 	
 	static func thumbnail(_ entry: String) -> String? {
@@ -1548,7 +1555,7 @@ fileprivate enum ViralWeb {
 		}
 		let html = """
 		<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-		<style>html,body{margin:0;padding:0;height:100%;background:\(info.provider == "Instagram" || info.provider == "Facebook" ? "#fff" : "#000");overflow:hidden}
+		<style>html,body{margin:0;padding:0;height:100%;background:\(info.provider == "Facebook" ? "#fff" : "#000");overflow:hidden}
 		iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head>
 		<body><iframe src="\(info.embed)" allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>
 		"""
@@ -1656,11 +1663,22 @@ fileprivate final class ViralLoginWindow: NSWindowController, NSWindowDelegate {
 
 fileprivate enum ViralImages {
 	static var cache: [String: NSImage] = [:]
+	/// Stored image data by ID, shared by all open documents
+	static var stored: [String: String] = [:]
 	
 	static func image(_ id: String, settings: BeatDocumentSettings?) -> NSImage? {
+		let dict = settings?.get(ViralImagesKey) as? [String: Any] ?? [:]
+		if let encoded = dict[id] as? String {
+			stored[id] = encoded
+		} else if let settings, let encoded = stored[id] {
+			// The text uses an image this document doesn't hold (undo after a save pruned it, or pasted from another document). Put it back.
+			var updated = dict
+			updated[id] = encoded
+			settings.set(ViralImagesKey, as: updated)
+		}
+		
 		if let image = cache[id] { return image }
-		guard let dict = settings?.get(ViralImagesKey) as? [String: Any],
-			  let encoded = dict[id] as? String,
+		guard let encoded = stored[id],
 			  let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters),
 			  let image = NSImage(data: data)
 		else { return nil }
@@ -1723,8 +1741,10 @@ fileprivate enum ViralImages {
 		
 		let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
 		var dict = settings.get(ViralImagesKey) as? [String: Any] ?? [:]
-		dict[id] = data.base64EncodedString()
+		let encoded = data.base64EncodedString()
+		dict[id] = encoded
 		settings.set(ViralImagesKey, as: dict)
+		stored[id] = encoded
 		cache[id] = NSImage(data: data) ?? image
 		return id
 	}
@@ -1839,8 +1859,9 @@ fileprivate class ViralEmbedView: NSView {
 	func addVideos(_ urls: [String]) {}
 	@objc func reloadVideos(_ notification: Notification?) {}
 	
-	override func becomeFirstResponder() -> Bool { redraw(); return true }
-	override func resignFirstResponder() -> Bool { redraw(); return true }
+	// The window only switches its first responder after these return, so redraw on the next turn
+	override func becomeFirstResponder() -> Bool { DispatchQueue.main.async { [weak self] in self?.redraw() }; return true }
+	override func resignFirstResponder() -> Bool { DispatchQueue.main.async { [weak self] in self?.redraw() }; return true }
 	
 	func redraw() {
 		needsDisplay = true
@@ -2939,6 +2960,7 @@ public extension BeatTextView {
 				? NSRect(x: origin.x + 2, y: origin.y + lineRect.minY, width: tc.size.width - 4, height: view.totalHeight)
 				: NSRect(x: origin.x + tc.lineFragmentPadding, y: origin.y + lineRect.minY, width: width + 24, height: view.totalHeight)
 			if view.frame != frame { view.frame = frame }
+			view.isHidden = isFolded(block.range.location)
 		}
 		
 		embedViews = ordered
@@ -3216,6 +3238,7 @@ fileprivate var ViralSaveTimerKey: UInt8 = 0
 fileprivate let ViralSaveFolderBookmarkKey = "ViralSaveFolderBookmark"
 fileprivate var ViralSaveFolderAccess: URL? = nil
 fileprivate var ViralSaveFolderAsking = false
+fileprivate var ViralSaveFolderDeclined = false
 
 public extension BeatTextView {
 	
@@ -3247,7 +3270,9 @@ public extension BeatTextView {
 	fileprivate func scheduleSaveAs() {
 		guard saveAsName != nil else { return }
 		(objc_getAssociatedObject(self, &ViralSaveTimerKey) as? Timer)?.invalidate()
-		let timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+		// A new document asks for a folder, so give the name more time to be finished first
+		let untitled = (window?.windowController?.document as? NSDocument)?.fileURL == nil
+		let timer = Timer.scheduledTimer(withTimeInterval: untitled ? 4 : 1.5, repeats: false) { [weak self] _ in
 			self?.performSaveAs()
 		}
 		objc_setAssociatedObject(self, &ViralSaveTimerKey, timer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
@@ -3321,7 +3346,8 @@ public extension BeatTextView {
 			}
 		}
 		
-		guard !ViralSaveFolderAsking, let window else { completion(nil); return }
+		// Asked and cancelled already: don't keep asking, a normal save still works
+		guard !ViralSaveFolderAsking, !ViralSaveFolderDeclined, let window else { completion(nil); return }
 		ViralSaveFolderAsking = true
 		
 		let panel = NSOpenPanel()
@@ -3334,7 +3360,11 @@ public extension BeatTextView {
 		panel.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
 		panel.beginSheetModal(for: window) { response in
 			ViralSaveFolderAsking = false
-			guard response == .OK, let url = panel.url else { completion(nil); return }
+			guard response == .OK, let url = panel.url else {
+				ViralSaveFolderDeclined = true
+				completion(nil)
+				return
+			}
 			if let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
 				UserDefaults.standard.set(data, forKey: ViralSaveFolderBookmarkKey)
 			}
@@ -3354,7 +3384,6 @@ public extension BeatTextView {
 	static let presets: [(title: String, width: Int)] = [("Narrow", 55), ("Normal", 67), ("Wide", 80), ("Extra Wide", 95)]
 	static let minimum = 45
 	static let maximum = 110
-	static let changedNotification = Notification.Name("ViralPageWidthChanged")
 	private var menuInstalled = false
 	
 	var current: Int { return BeatUserDefaults.shared().getInteger(BeatSettingViralPageWidth) }
@@ -3377,7 +3406,6 @@ public extension BeatTextView {
 			}
 			if object.responds(to: NSSelectorFromString("updateLayout")) { object.perform(NSSelectorFromString("updateLayout")) }
 		}
-		NotificationCenter.default.post(name: ViralPageWidth.changedNotification, object: nil)
 	}
 	
 	@objc func choosePreset(_ sender: NSMenuItem) { set(sender.tag) }

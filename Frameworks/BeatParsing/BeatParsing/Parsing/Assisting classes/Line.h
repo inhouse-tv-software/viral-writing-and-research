@@ -473,7 +473,7 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 /// Rounded corners (`r`)
 - (bool)embedRounded;
 /// Set by pagination: the image lines laid out on one row, stored in the first line of the row
-@property (nonatomic) NSArray<Line*>* embedRow;
+@property (nonatomic, nullable) NSArray<Line*>* embedRow;
 /// Set by pagination: this image is drawn by an earlier line on the same row
 @property (nonatomic) bool embedHidden;
 /// Set by pagination: this row is followed by the header separator

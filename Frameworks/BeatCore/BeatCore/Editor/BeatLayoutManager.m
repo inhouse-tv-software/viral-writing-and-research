@@ -899,13 +899,13 @@ static NSInteger BeatEmbedKindForString(NSString* string)
 /// Generate customized glyphs, includes all-caps lines for scene headings and hiding markup.
 -(NSUInteger)layoutManager:(NSLayoutManager *)layoutManager shouldGenerateGlyphs:(const CGGlyph *)glyphs properties:(const NSGlyphProperty *)props characterIndexes:(const NSUInteger *)charIndexes font:(BXFont *)aFont forGlyphRange:(NSRange)glyphRange
 {
-    // Tables are drawn by a view, so table text is hidden. Line breaks are kept so lines stay separate.
+#if TARGET_OS_OSX
+    // Tables and images are drawn by views (macOS only), so their text is hidden. Line breaks are kept so lines stay separate.
     {
         NSString* storageString = self.textStorage.string;
         NSRange paragraph = NSMakeRange(NSNotFound, 0);
         bool paragraphIsTable = false;
         bool foundTable = false;
-        bool singleParagraph = true;
         NSGlyphProperty* tableProps = CopyGlyphProperties(props, glyphRange);
         
         for (NSInteger i = 0; i < glyphRange.length; i++) {
@@ -913,7 +913,6 @@ static NSInteger BeatEmbedKindForString(NSString* string)
             if (ci >= storageString.length) continue;
             
             if (paragraph.location == NSNotFound || ci < paragraph.location || ci > NSMaxRange(paragraph)) {
-                if (paragraph.location != NSNotFound) singleParagraph = false;
                 paragraph = [self tableParagraphRangeAt:ci];
                 paragraphIsTable = [self isTableParagraph:paragraph];
             }
@@ -930,8 +929,8 @@ static NSInteger BeatEmbedKindForString(NSString* string)
             return glyphRange.length;
         }
         free(tableProps);
-        (void)singleParagraph;
     }
+#endif
     
     // SOME WEIRD GUARDRAILS
     NSArray<Line*>* lines = [self.editorDelegate.parser linesInRange:glyphRange];
@@ -948,7 +947,6 @@ static NSInteger BeatEmbedKindForString(NSString* string)
     if (foldedCharacters != NSNotFound) return foldedCharacters;
     
     LineType type = line.type;
-    bool isTable = (type == action && line.isTableRow);
     bool currentlyEditing = NSLocationInRange(_editorDelegate.selectedRange.location, line.range) || NSIntersectionRange(_editorDelegate.selectedRange, line.range).length > 0;
             
     // Clear formatting characters etc.
@@ -971,8 +969,7 @@ static NSInteger BeatEmbedKindForString(NSString* string)
     // Nothing to do (TODO: To avoid extra range calculations after every change to attributes, retrieve markup ranges AFTER checking if hiding markup is on)
     if (line.macroRanges.count == 0 && muIndices.count == 0 && markerIndices.count == 0 &&
         !(type == heading || type == transitionLine || type == character) &&
-        !(line.string.containsOnlyWhitespace && line.string.length > 1) &&
-        !isTable
+        !(line.string.containsOnlyWhitespace && line.string.length > 1)
         ) return 0;
     
     // Get string reference
@@ -1000,7 +997,7 @@ static NSInteger BeatEmbedKindForString(NSString* string)
     if (line.string.containsOnlyWhitespace && line.string.length >= 2) {
         // Show bullets instead of spaces on lines which contain whitespace only
         CFStringFindAndReplace(modifiedStr, CFSTR(" "), CFSTR("•"), CFRangeMake(0, CFStringGetLength(modifiedStr)), 0);
-    } else if (_editorDelegate.hideFountainMarkup && !currentlyEditing && !isTable) {
+    } else if (_editorDelegate.hideFountainMarkup && !currentlyEditing) {
         // Hide markdown characters for the line we're not currently editing
         for (NSInteger i = 0; i < glyphRange.length; i++) {
             NSUInteger index = charIndexes[i];
@@ -1094,7 +1091,14 @@ CGGlyph* GetGlyphsForCharacters(CTFontRef font, CFStringRef string)
     NSRange range = [self characterRangeForGlyphRange:glyphRange actualGlyphRange:nil];
     NSDictionary* attrs = [self.textStorage attributesAtIndex:range.location effectiveRange:nil];
     
-    // Tables: the first line holds the space for the table view, other lines are collapsed
+    if (attrs[@"BeatFolded"]) {
+        // Folded sections hide everything, tables and images too
+        lineFragmentRect->size.height = 0.0;
+        return true;
+    }
+    
+#if TARGET_OS_OSX
+    // Tables and images: the first line holds the space for the view, other lines are collapsed
     NSRange tableParagraph = [self tableParagraphRangeAt:range.location];
     NSInteger embedKind = [self embedKindOf:tableParagraph];
     if (embedKind != 0) {
@@ -1104,10 +1108,9 @@ CGGlyph* GetGlyphsForCharacters(CTFontRef font, CFStringRef string)
         lineFragmentUsedRect->size.height = height;
         return true;
     }
+#endif
     
-    if (attrs[@"BeatFolded"]) {
-        lineFragmentRect->size.height = 0.0;
-    } else if (attrs[BeatRepresentedLineKey]) {
+    if (attrs[BeatRepresentedLineKey]) {
         Line* line = ((BeatWeakLine*)attrs[BeatRepresentedLineKey]).line;
         if (line != nil) {
             RenderStyle* style = [self.editorDelegate.editorStyles forLine:line];

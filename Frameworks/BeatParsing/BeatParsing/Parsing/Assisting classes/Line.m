@@ -898,10 +898,13 @@
     NSMutableArray* cells = NSMutableArray.new;
     NSMutableString* current = NSMutableString.new;
     
+    // Same rules as the editor: \| \- and \\ are escapes, any other backslash is kept
     for (NSInteger i = 0; i < t.length; i++) {
         unichar c = [t characterAtIndex:i];
-        if (c == '\\' && i + 1 < t.length && [t characterAtIndex:i + 1] == '|') {
-            [current appendString:@"|"];
+        if (c == '\\' && i + 1 < t.length) {
+            unichar next = [t characterAtIndex:i + 1];
+            if (next != '|' && next != '-' && next != '\\') [current appendString:@"\\"];
+            [current appendFormat:@"%C", next];
             i++;
         } else if (c == '|') {
             [cells addObject:current];
