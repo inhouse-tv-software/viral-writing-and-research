@@ -594,6 +594,8 @@ Line *cachedRectLine;
 - (void)scrollRangeToVisible:(NSRange)range
 {
 	if (self.editorDelegate.formatting.formatting) return;
+	// Don't jump to the hidden caret while typing in a table
+	if (self.isEditingTable) return;
 	[super scrollRangeToVisible:range];
 }
 

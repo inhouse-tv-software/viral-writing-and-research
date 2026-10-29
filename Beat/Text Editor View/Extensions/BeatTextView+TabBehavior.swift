@@ -79,6 +79,7 @@ public extension BeatTextView {
 fileprivate let BeatTableMenuItemTag = 947_100
 fileprivate var BeatTableViewsKey: UInt8 = 0
 fileprivate var BeatTableUpdateScheduledKey: UInt8 = 0
+fileprivate var BeatTableWritingKey: UInt8 = 0
 fileprivate var BeatTableObserversKey: UInt8 = 0
 fileprivate var BeatTableHeightCacheKey: UInt8 = 0
 fileprivate var BeatTablePendingFocusKey: UInt8 = 0
@@ -722,6 +723,20 @@ public extension BeatTextView {
 		set { objc_setAssociatedObject(self, &BeatTableHeightCacheKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
 	}
 	
+	/// `true` while a table view writes its text into the document
+	fileprivate var isWritingTable: Bool {
+		get { return (objc_getAssociatedObject(self, &BeatTableWritingKey) as? Bool) ?? false }
+		set { objc_setAssociatedObject(self, &BeatTableWritingKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+	}
+	
+	/// `true` when the user is typing in a table (or a table is writing into the document).
+	/// The main text view must not scroll to its own hidden caret then.
+	@objc var isEditingTable: Bool {
+		if isWritingTable { return true }
+		if let cell = window?.firstResponder as? BeatTableCellView, cell.table?.host === self { return true }
+		return false
+	}
+	
 	/// Table start position and cell to focus once the table view exists
 	fileprivate var pendingTableFocus: [Int]? {
 		get { return objc_getAssociatedObject(self, &BeatTablePendingFocusKey) as? [Int] }
@@ -938,6 +953,14 @@ public extension BeatTextView {
 		while suffix < min(old.count, new.count) - prefix && old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
 		
 		view.sourceText = text
+		
+		// Park the hidden main caret at the start of this table. If the caret was somewhere below (like in a later table),
+		// any scrolling to it while the document updates would jump down the document.
+		isWritingTable = true
+		defer { isWritingTable = false }
+		if window?.firstResponder !== self {
+			self.setSelectedRange(NSRange(location: range.location, length: 0))
+		}
 		btLog("REPLACE \(range.location)+\(range.length) old=\(old.count) new=\(new.count) prefix=\(prefix) suffix=\(suffix)")
 		
 		if old.count == new.count {
@@ -980,8 +1003,8 @@ public extension BeatTextView {
 			activeCell.setSelectedRange(cellSelection)
 		}
 		
-		// Keep the main caret where it was (outside the table)
-		if selection.location > range.location {
+		// Keep the main caret where it was if the main view is the one being edited
+		if activeCell == nil && selection.location > range.location {
 			let loc = min(max(selection.location + delta, 0), (self.string as NSString).length)
 			self.setSelectedRange(NSRange(location: loc, length: 0))
 		}
@@ -1031,7 +1054,7 @@ public extension BeatTextView {
 	
 	/// If the caret lands in hidden table text (arrow keys etc.), move into the table view instead
 	fileprivate func caretMovedIntoTableIfNeeded() {
-		guard window?.firstResponder === self else { return }
+		guard window?.firstResponder === self, !isWritingTable else { return }
 		let selection = self.selectedRange()
 		guard selection.length == 0 else { return }
 		
@@ -1040,7 +1063,12 @@ public extension BeatTextView {
 			if selection.location >= range.location && selection.location <= NSMaxRange(range) && range.length > 0 {
 				btLog("CARET INTO TABLE at \(selection.location)")
 				let row = selection.location == range.location ? 0 : view.model.rows.count - 1
-				DispatchQueue.main.async { view.focus(row: row, col: 0, atEnd: true) }
+				DispatchQueue.main.async { [weak self] in
+					// Only if the caret is still there and nobody is typing in a table
+					guard let self, self.window?.firstResponder === self, !self.isWritingTable,
+						  self.selectedRange().location == selection.location else { return }
+					view.focus(row: row, col: 0, atEnd: true)
+				}
 				return
 			}
 		}
