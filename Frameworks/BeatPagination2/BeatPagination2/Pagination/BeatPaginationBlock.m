@@ -23,8 +23,6 @@
 
 @end
 
-/// Width of printed tables in characters (action lines are 60 characters wide)
-#define BEAT_TABLE_PRINT_WIDTH 60
 
 @implementation BeatPaginationBlock
 
@@ -131,14 +129,11 @@
         CGFloat tableWidth = [tableStyle widthWithPageSize:tablePaper];
         if (tableWidth == 0.0) tableWidth = [self.delegate.styles.page defaultWidthWithPageSize:tablePaper];
         BXFont* tableFont = (_delegate.fonts.regular) ? _delegate.fonts.regular : BeatFontManager.shared.defaultFonts.regular;
-        bool first = [BeatRenderer isFirstTableRow:line inLines:self.lines];
-        NSAttributedString* row = [BeatRenderer tableRowFor:line font:tableFont indent:0.0 width:tableWidth header:[BeatRenderer isTableHeaderRow:line inLines:self.lines] topBorder:first];
+        NSAttributedString* row = [BeatRenderer tableRowFor:line font:tableFont indent:0.0 width:tableWidth header:line.tableHeaderRow topBorder:line.tableFirstRow];
         CGFloat rowHeight = [BeatRenderer layoutHeightFor:row width:tableWidth + 20.0] + 1.0;
         self.lineHeights[line.uuid] = @(rowHeight);
         return rowHeight;
     }
-#else
-    if (line.type == action && line.isTableSeparator) return 2.0;
 #endif
         
     // If this is a *dual dialogue column*, we'll need to convert the style.
@@ -190,11 +185,6 @@
     
     NSString* stringWithoutFormatting = [line stripFormattingWithSettings:self.delegate.settings];
     
-    // Table rows are rendered as wrapped fixed-width text
-    if (line.type == action && line.isTableRow) {
-        stringWithoutFormatting = [line tableRowStringForWidth:BEAT_TABLE_PRINT_WIDTH];
-    }
-    
     NSAttributedString* string = [NSMutableAttributedString.alloc initWithString:stringWithoutFormatting attributes:@{
         NSFontAttributeName: font,
         NSParagraphStyleAttributeName: pStyle
@@ -214,7 +204,7 @@
     }
 	
 #if TARGET_OS_OSX
-    if ([BeatRenderer lineFollowsTable:line inLines:self.lines]) height += BeatRenderer.tableBottomSpacing;
+    if (line.followsTable) height += BeatRenderer.tableBottomSpacing;
 #endif
 	self.lineHeights[line.uuid] = [NSNumber numberWithFloat:height];
 	return height;

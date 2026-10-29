@@ -21,8 +21,8 @@ page {
     margin-top: 40;
     margin-bottom: 60;
     
-    default-width-a4: 71ch;
-    default-width-us: 72ch;
+    default-width-a4: userSetting(viralPageWidth)ch;
+    default-width-us: userSetting(viralPageWidth)ch + 1ch;
     
     line-height: 15;
     
@@ -30,8 +30,8 @@ page {
 }
 
 heading {
-    width-a4: 71ch - 2ch;
-    width-us: 72ch - 2ch;
+    width-a4: userSetting(viralPageWidth)ch - 2ch;
+    width-us: userSetting(viralPageWidth)ch - 1ch;
     
     bold: userSetting(headingStyleBold);
     underline: userSetting(headingStyleUnderline);

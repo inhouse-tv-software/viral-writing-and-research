@@ -336,24 +336,19 @@
     }
     
     // Tables are rendered as real text tables (macOS)
-    if (line.type == action && (line.isTableRow || line.isTableSeparator)) {
 #if TARGET_OS_OSX
+    if (line.type == action && (line.isTableRow || line.isTableSeparator)) {
         if (line.isTableSeparator) return NSAttributedString.new;
         NSParagraphStyle* pStyle = (attributedString.length > 0) ? [attributedString attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil] : nil;
         CGFloat indent = (pStyle != nil) ? pStyle.headIndent : 0.0;
         BXFont* font = (self.fonts.regular != nil) ? self.fonts.regular : BeatFontManager.shared.defaultFonts.regular;
-        NSArray* lines = block.lines;
         return [BeatRenderer tableRowFor:line font:font indent:indent width:[self widthFor:line]
-                                  header:[BeatRenderer isTableHeaderRow:line inLines:lines]
-                               topBorder:([BeatRenderer isFirstTableRow:line inLines:lines] || firstElementOnPage)];
-#else
-        attributedString = [self renderTableRow:line content:attributedString];
-#endif
+                                  header:line.tableHeaderRow
+                               topBorder:(line.tableFirstRow || firstElementOnPage)];
     }
     
-#if TARGET_OS_OSX
     // Give the text after a table some room
-    if (line.type != heading && [BeatRenderer lineFollowsTable:line inLines:block.lines] && attributedString.length > 0) {
+    if (line.type != heading && line.followsTable && attributedString.length > 0) {
         NSParagraphStyle* original = [attributedString attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil];
         NSMutableParagraphStyle* pStyle = (original != nil) ? original.mutableCopy : NSMutableParagraphStyle.new;
         pStyle.paragraphSpacingBefore = BeatRenderer.tableBottomSpacing;
@@ -663,11 +658,6 @@
 #endif
 + (CGFloat)tableBottomSpacing { return 10.0; }
 
-+ (bool)isTableLine:(Line*)l { return l.type == action && (l.isTableRow || l.isTableSeparator); }
-
-+ (bool)isFirstTableRow:(Line*)line inLines:(NSArray<Line*>*)lines { return line.tableFirstRow; }
-+ (bool)isTableHeaderRow:(Line*)line inLines:(NSArray<Line*>*)lines { return line.tableHeaderRow; }
-+ (bool)lineFollowsTable:(Line*)line inLines:(NSArray<Line*>*)lines { return line.followsTable; }
 
 #if TARGET_OS_OSX
 + (NSMutableAttributedString*)tableRowFor:(Line*)line font:(BXFont*)baseFont indent:(CGFloat)indent width:(CGFloat)width header:(bool)header topBorder:(bool)topBorder
@@ -792,51 +782,6 @@
 }
 #endif
 
-
-/// Replaces `|` characters with spaces (which keeps column positions in a monospaced font) and adds a `BeatTableRow` attribute with local separator positions.
-- (NSMutableAttributedString*)renderTableRow:(Line*)line content:(NSMutableAttributedString*)content
-{
-    bool separator = line.isTableSeparator;
-    NSMutableArray<NSNumber*>* pipes = NSMutableArray.new;
-    
-    // Rebuild content rows as wrapped fixed-width text (columns share 60 characters equally)
-    if (!separator && content.length > 0) {
-        NSDictionary* attrs = [content attributesAtIndex:0 effectiveRange:nil];
-        NSString* rowString = [[line tableRowStringForWidth:60] stringByAppendingString:@"\n"];
-        content = [NSMutableAttributedString.alloc initWithString:rowString attributes:attrs];
-    }
-    
-    NSInteger length = content.length;
-    if (length > 0 && [content.string characterAtIndex:length - 1] == '\n') length -= 1;
-    
-    for (NSInteger i = 0; i < length; i++) {
-        unichar c = [content.string characterAtIndex:i];
-        if (c == '|') {
-            [pipes addObject:@(i)];
-            [content replaceCharactersInRange:NSMakeRange(i, 1) withString:@" "];
-        } else if (separator) {
-            [content replaceCharactersInRange:NSMakeRange(i, 1) withString:@" "];
-        }
-    }
-    
-    if (length == 0) return content;
-    
-    bool rowSeparator = separator && [line.string containsString:@":"];
-    [content addAttribute:@"BeatTableRow" value:@{ @"pipes": pipes, @"separator": @(separator), @"rowSeparator": @(rowSeparator) } range:NSMakeRange(0, length)];
-    
-    // Header separator rows are collapsed into a thin strip
-    if (separator) {
-        NSParagraphStyle* original = [content attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil];
-        NSMutableParagraphStyle* pStyle = (original != nil) ? original.mutableCopy : NSMutableParagraphStyle.new;
-        pStyle.minimumLineHeight = 2.0;
-        pStyle.maximumLineHeight = 2.0;
-        pStyle.paragraphSpacingBefore = 0.0;
-        pStyle.paragraphSpacing = 0.0;
-        [content addAttribute:NSParagraphStyleAttributeName value:pStyle range:NSMakeRange(0, content.length)];
-    }
-    
-    return content;
-}
 
 - (void)applyInlineFormattingWithStyleNames:(NSSet*)styleNames range:(NSRange)range attributedString:(inout NSMutableAttributedString*)attributedString
 {

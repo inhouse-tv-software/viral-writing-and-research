@@ -888,16 +888,6 @@
     return hasDash;
 }
 
-- (NSArray<NSNumber*>*)tableSeparatorIndices
-{
-    NSMutableArray* indices = NSMutableArray.new;
-    NSString* string = self.string;
-    for (NSInteger i = 0; i < string.length; i++) {
-        if ([string characterAtIndex:i] == '|') [indices addObject:@(i)];
-    }
-    return indices;
-}
-
 - (NSArray<NSString*>*)tableCells
 {
     NSString* t = [self.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
@@ -931,32 +921,6 @@
         [result addObject:c];
     }
     return result;
-}
-
-/// Wraps a cell into lines of given width
-static NSArray<NSString*>* BeatWrapTableCell(NSString* text, NSInteger width)
-{
-    NSMutableArray* lines = NSMutableArray.new;
-    for (NSString* paragraph in [text componentsSeparatedByString:@"\n"]) {
-        NSMutableString* current = NSMutableString.new;
-        for (NSString* w in [paragraph componentsSeparatedByString:@" "]) {
-            NSString* word = w;
-            if (word.length == 0) continue;
-            
-            while (word.length > width) {
-                if (current.length > 0) { [lines addObject:current]; current = NSMutableString.new; }
-                [lines addObject:[word substringToIndex:width]];
-                word = [word substringFromIndex:width];
-            }
-            
-            if (current.length == 0) [current appendString:word];
-            else if (current.length + 1 + word.length <= width) [current appendFormat:@" %@", word];
-            else { [lines addObject:current]; current = [NSMutableString stringWithString:word]; }
-        }
-        [lines addObject:current];
-    }
-    if (lines.count == 0) [lines addObject:@""];
-    return lines;
 }
 
 #pragma mark - Viral images
@@ -1030,35 +994,6 @@ static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
     return 100;
 }
 
-- (NSString*)tableRowStringForWidth:(NSInteger)totalWidth
-{
-    NSArray<NSString*>* cells = self.tableCells;
-    NSInteger n = MAX(cells.count, 1);
-    NSInteger colWidth = MAX(3, (totalWidth - 1 - 3 * n) / n);
-    
-    NSMutableArray<NSArray<NSString*>*>* wrapped = NSMutableArray.new;
-    NSInteger height = 1;
-    for (NSInteger i = 0; i < n; i++) {
-        NSString* cell = (i < cells.count) ? cells[i] : @"";
-        NSArray* w = BeatWrapTableCell(cell, colWidth);
-        [wrapped addObject:w];
-        height = MAX(height, w.count);
-    }
-    
-    NSMutableArray* rows = NSMutableArray.new;
-    for (NSInteger k = 0; k < height; k++) {
-        NSMutableString* row = [NSMutableString stringWithString:@"| "];
-        for (NSInteger i = 0; i < n; i++) {
-            NSString* part = (k < wrapped[i].count) ? wrapped[i][k] : @"";
-            [row appendString:part];
-            for (NSInteger p = part.length; p < colWidth; p++) [row appendString:@" "];
-            [row appendString:(i < n - 1) ? @" | " : @" |"];
-        }
-        [rows addObject:row];
-    }
-    
-    return [rows componentsJoinedByString:@"\u2028"];
-}
 
 #pragma mark - Copy
 

@@ -10,6 +10,7 @@ import Foundation
 import AppKit
 import UniformTypeIdentifiers
 import WebKit
+import BeatCore
 
 public extension BeatTextView {
 	@objc func handleTabPress() {
@@ -94,14 +95,6 @@ fileprivate enum BTMetrics {
 	static let marginBottom: CGFloat = 26
 	static let addButtonSize: CGFloat = 18
 	static let border: CGFloat = 1
-}
-
-// MARK: Debug log
-
-fileprivate func btLog(_ message: @autoclosure () -> String) {
-	#if DEBUG
-	NSLog("[BeatTables] %@", message())
-	#endif
 }
 
 // MARK: Table model
@@ -826,7 +819,6 @@ public extension BeatTextView {
 		if let cached = tableHeightCache[key] { return cached }
 		
 		let height = btTableHeight(BeatTableModel.parse(strings), tableWidth: width, font: tableFont)
-		btLog("HEIGHT at \(location) lines=\(strings.count) h=\(Int(height))")
 		var cache = tableHeightCache
 		if cache.count > 200 { cache.removeAll() }
 		cache[key] = height
@@ -869,7 +861,6 @@ public extension BeatTextView {
 		let blocks = tableBlocks()
 		var views = tableViews
 		
-		btLog("UPDATE blocks=\(blocks.map { "\($0.range.location)+\($0.range.length):\($0.lines.count)" }) views=\(views.map { $0.tableRange.location }) fr=\(String(describing: type(of: window?.firstResponder ?? self)))")
 		
 		// Reuse views for tables that still exist (matched by position), so editing and focus survive updates
 		var unused = views
@@ -886,7 +877,6 @@ public extension BeatTextView {
 		for view in unused {
 			// Don't throw away a table that's being edited
 			if let responder = window?.firstResponder as? BeatTableCellView, responder.table === view {
-				btLog("KEEP edited view")
 				ordered.append(view)
 				continue
 			}
@@ -967,7 +957,6 @@ public extension BeatTextView {
 		if window?.firstResponder !== self {
 			self.setSelectedRange(NSRange(location: range.location, length: 0))
 		}
-		btLog("REPLACE \(range.location)+\(range.length) old=\(old.count) new=\(new.count) prefix=\(prefix) suffix=\(suffix)")
 		
 		if old.count == new.count {
 			for i in stride(from: old.count - 1 - suffix, through: prefix, by: -1) where old[i] != new[i] {
@@ -1004,7 +993,6 @@ public extension BeatTextView {
 		
 		// Keep typing in the cell even if something moved focus while the document was updated
 		if let activeCell, let cellSelection, window?.firstResponder !== activeCell {
-			btLog("FOCUS restored")
 			window?.makeFirstResponder(activeCell)
 			activeCell.setSelectedRange(cellSelection)
 		}
@@ -1087,7 +1075,6 @@ public extension BeatTextView {
 		for view in tableViews {
 			let range = view.tableRange
 			if selection.location >= range.location && selection.location <= NSMaxRange(range) && range.length > 0 {
-				btLog("CARET INTO TABLE at \(selection.location)")
 				let row = selection.location == range.location ? 0 : view.model.rows.count - 1
 				DispatchQueue.main.async { [weak self] in
 					// Only if the caret is still there and nobody is typing in a table
@@ -1450,6 +1437,19 @@ fileprivate enum ViralVideo {
 	}
 }
 
+/// A web view for players: no download items in its menu
+fileprivate final class ViralWebView: WKWebView {
+	override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+		for item in menu.items {
+			let identifier = item.identifier?.rawValue.lowercased() ?? ""
+			if identifier.contains("download") || item.title.lowercased().contains("download") {
+				menu.removeItem(item)
+			}
+		}
+		super.willOpenMenu(menu, with: event)
+	}
+}
+
 fileprivate enum ViralWeb {
 	static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 	static let baseURL = URL(string: "https://inhousetv.us/")!
@@ -1463,7 +1463,7 @@ fileprivate enum ViralWeb {
 	}
 	
 	static func makeView() -> WKWebView {
-		let view = WKWebView(frame: .zero, configuration: configuration())
+		let view = ViralWebView(frame: .zero, configuration: configuration())
 		view.customUserAgent = userAgent
 		view.underPageBackgroundColor = .black
 		view.wantsLayer = true
@@ -1525,7 +1525,7 @@ fileprivate enum ViralWeb {
 		var body = ""
 		if let video {
 			let poster = image.map { " poster=\"\(escapeAttribute($0))\"" } ?? ""
-			body = "<video src=\"\(escapeAttribute(video))\"\(poster) controls playsinline loop preload=\"metadata\"></video>"
+			body = "<video src=\"\(escapeAttribute(video))\"\(poster) controls controlslist=\"nodownload noremoteplayback\" playsinline loop preload=\"metadata\"></video>"
 		} else if let image {
 			body = "<img src=\"\(escapeAttribute(image))\">"
 		}
@@ -1598,6 +1598,25 @@ fileprivate final class ViralVideoLoader: NSObject, WKNavigationDelegate, WKUIDe
 				self.onSnapshot?(image)
 			}
 		}
+	}
+	
+	/// Downloads are blocked, and links that leave the player open in the browser instead
+	func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+		if #available(macOS 11.3, *), navigationAction.shouldPerformDownload {
+			decisionHandler(.cancel)
+			return
+		}
+		if navigationAction.navigationType == .linkActivated, navigationAction.targetFrame?.isMainFrame ?? true,
+		   let url = navigationAction.request.url {
+			NSWorkspace.shared.open(url)
+			decisionHandler(.cancel)
+			return
+		}
+		decisionHandler(.allow)
+	}
+	
+	func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+		decisionHandler(navigationResponse.canShowMIMEType ? .allow : .cancel)
 	}
 	
 	/// Links that open new windows go to the browser
@@ -2218,7 +2237,7 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	}
 	
 	override func addVideos(_ urls: [String]) {
-		insertItems(urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 100) })
+		insertItems(urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 33) })
 	}
 	
 	func deleteSelected() {
@@ -2300,10 +2319,14 @@ fileprivate final class ViralCarouselOverlay: NSView {
 		let fade = ThemeManager.shared().backgroundColor.effectiveColor()
 		
 		if carousel.scrollX > 0.5 || carousel.maxScroll > 0.5 {
-			let left = NSGradient(starting: fade, ending: fade.withAlphaComponent(0))
-			left?.draw(in: NSRect(x: strip.minX, y: strip.minY, width: EMetrics.fade, height: strip.height), angle: 0)
-			let right = NSGradient(starting: fade.withAlphaComponent(0), ending: fade)
-			right?.draw(in: NSRect(x: strip.maxX - EMetrics.fade, y: strip.minY, width: EMetrics.fade, height: strip.height), angle: 0)
+			// A solid edge first, so nothing (like a video's black background) peeks out at the page edge
+			fade.setFill()
+			NSRect(x: strip.minX, y: strip.minY, width: 3, height: strip.height).fill()
+			NSRect(x: strip.maxX - 3, y: strip.minY, width: 3, height: strip.height).fill()
+			let left = NSGradient(colors: [fade, fade.withAlphaComponent(0.85), fade.withAlphaComponent(0)], atLocations: [0, 0.35, 1], colorSpace: .sRGB)
+			left?.draw(in: NSRect(x: strip.minX + 3, y: strip.minY, width: EMetrics.fade, height: strip.height), angle: 0)
+			let right = NSGradient(colors: [fade.withAlphaComponent(0), fade.withAlphaComponent(0.85), fade], atLocations: [0, 0.65, 1], colorSpace: .sRGB)
+			right?.draw(in: NSRect(x: strip.maxX - 3 - EMetrics.fade, y: strip.minY, width: EMetrics.fade, height: strip.height), angle: 0)
 		}
 		
 		if carousel.isActive, let frame = carousel.visibleFrame(of: carousel.selectedIndex) {
@@ -2896,11 +2919,11 @@ public extension BeatTextView {
 			
 			// Carousels run from edge to edge of the page, everything else stays within the text
 			let isCarousel = (block.kind == .carousel)
-			let viewWidth = isCarousel ? tc.size.width : width
+			let viewWidth = isCarousel ? tc.size.width - 4 : width
 			var widthChanged = view.embedWidth != viewWidth
 			view.embedWidth = viewWidth
-			if let carousel = view as? ViralCarouselView, carousel.textInset != tc.lineFragmentPadding {
-				carousel.textInset = tc.lineFragmentPadding
+			if let carousel = view as? ViralCarouselView, carousel.textInset != tc.lineFragmentPadding - 2 {
+				carousel.textInset = tc.lineFragmentPadding - 2
 				widthChanged = true
 			}
 			
@@ -2913,7 +2936,7 @@ public extension BeatTextView {
 			let lineRect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
 			let origin = textContainerOrigin
 			let frame = isCarousel
-				? NSRect(x: origin.x, y: origin.y + lineRect.minY, width: tc.size.width, height: view.totalHeight)
+				? NSRect(x: origin.x + 2, y: origin.y + lineRect.minY, width: tc.size.width - 4, height: view.totalHeight)
 				: NSRect(x: origin.x + tc.lineFragmentPadding, y: origin.y + lineRect.minY, width: width + 24, height: view.totalHeight)
 			if view.frame != frame { view.frame = frame }
 		}
@@ -3081,7 +3104,7 @@ public extension BeatTextView {
 	}
 	
 	fileprivate func insertVideos(_ urls: [String]) {
-		let lines = urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 100).text }
+		let lines = urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 33).text }
 		insertEmbedLines(lines)
 	}
 	
@@ -3319,5 +3342,263 @@ public extension BeatTextView {
 			ViralSaveFolderAccess = url
 			completion(url)
 		}
+	}
+}
+
+
+// MARK: - Page width
+
+/// The width of the editor page, in characters. Printing keeps the paper width.
+@objc final class ViralPageWidth: NSObject, NSMenuItemValidation {
+	@objc static let shared = ViralPageWidth()
+	static let presets: [(title: String, width: Int)] = [("Narrow", 55), ("Normal", 67), ("Wide", 80), ("Extra Wide", 95)]
+	static let minimum = 45
+	static let maximum = 110
+	static let changedNotification = Notification.Name("ViralPageWidthChanged")
+	private var menuInstalled = false
+	
+	var current: Int { return BeatUserDefaults.shared().getInteger(BeatSettingViralPageWidth) }
+	
+	func set(_ value: Int) {
+		let width = min(max(value, ViralPageWidth.minimum), ViralPageWidth.maximum)
+		guard width != current else { return }
+		BeatUserDefaults.shared().save(NSNumber(value: width), forKey: BeatSettingViralPageWidth)
+		apply()
+	}
+	
+	/// Re-reads the styles in every open document and lays the page out again
+	func apply() {
+		for document in NSDocumentController.shared.documents {
+			let object = document as NSObject
+			if object.responds(to: NSSelectorFromString("resetStyles")) { object.perform(NSSelectorFromString("resetStyles")) }
+			if object.responds(to: NSSelectorFromString("formatting")),
+			   let formatting = object.value(forKey: "formatting") as? NSObject, formatting.responds(to: NSSelectorFromString("formatAllLines")) {
+				formatting.perform(NSSelectorFromString("formatAllLines"))
+			}
+			if object.responds(to: NSSelectorFromString("updateLayout")) { object.perform(NSSelectorFromString("updateLayout")) }
+		}
+		NotificationCenter.default.post(name: ViralPageWidth.changedNotification, object: nil)
+	}
+	
+	@objc func choosePreset(_ sender: NSMenuItem) { set(sender.tag) }
+	@objc func wider(_ sender: Any?) { set(current + 5) }
+	@objc func narrower(_ sender: Any?) { set(current - 5) }
+	
+	func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+		if menuItem.action == #selector(choosePreset(_:)) { menuItem.state = (menuItem.tag == current) ? .on : .off }
+		if menuItem.action == #selector(wider(_:)) { return current < ViralPageWidth.maximum }
+		if menuItem.action == #selector(narrower(_:)) { return current > ViralPageWidth.minimum }
+		return true
+	}
+	
+	/// Adds View > Page Width to the main menu
+	@objc func installMenu() {
+		guard !menuInstalled, let viewMenu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "View" || $0.title == "View" })?.submenu else { return }
+		menuInstalled = true
+		
+		let submenu = NSMenu(title: "Page Width")
+		for preset in ViralPageWidth.presets {
+			let item = NSMenuItem(title: preset.title, action: #selector(choosePreset(_:)), keyEquivalent: "")
+			item.tag = preset.width
+			item.target = self
+			submenu.addItem(item)
+		}
+		submenu.addItem(NSMenuItem.separator())
+		let wider = NSMenuItem(title: "Wider", action: #selector(wider(_:)), keyEquivalent: "]")
+		wider.keyEquivalentModifierMask = [.command, .option]
+		wider.target = self
+		submenu.addItem(wider)
+		let narrower = NSMenuItem(title: "Narrower", action: #selector(narrower(_:)), keyEquivalent: "[")
+		narrower.keyEquivalentModifierMask = [.command, .option]
+		narrower.target = self
+		submenu.addItem(narrower)
+		
+		let item = NSMenuItem(title: "Page Width", action: nil, keyEquivalent: "")
+		item.submenu = submenu
+		viewMenu.addItem(NSMenuItem.separator())
+		viewMenu.addItem(item)
+	}
+}
+
+// MARK: - Info
+
+/// The Info popover: page width and everything you can do in Viral
+@objc final class ViralInfoController: NSViewController {
+	private let slider = NSSlider(value: 67, minValue: Double(ViralPageWidth.minimum), maxValue: Double(ViralPageWidth.maximum), target: nil, action: nil)
+	private let valueLabel = NSTextField(labelWithString: "")
+	
+	@objc static func show(from button: NSView) {
+		let popover = NSPopover()
+		popover.behavior = .transient
+		popover.contentViewController = ViralInfoController()
+		popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+	}
+	
+	override func loadView() {
+		let width: CGFloat = 470
+		let height: CGFloat = 560
+		let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+		
+		let title = NSTextField(labelWithString: "Page width")
+		title.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+		title.frame = NSRect(x: 16, y: height - 34, width: 90, height: 18)
+		root.addSubview(title)
+		
+		slider.frame = NSRect(x: 104, y: height - 36, width: 250, height: 22)
+		slider.integerValue = ViralPageWidth.shared.current
+		slider.target = self
+		slider.action = #selector(sliderChanged(_:))
+		slider.isContinuous = false
+		root.addSubview(slider)
+		
+		valueLabel.frame = NSRect(x: 362, y: height - 34, width: 92, height: 18)
+		valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+		valueLabel.textColor = .secondaryLabelColor
+		root.addSubview(valueLabel)
+		updateValueLabel()
+		
+		let separator = NSBox(frame: NSRect(x: 16, y: height - 50, width: width - 32, height: 1))
+		separator.boxType = .separator
+		root.addSubview(separator)
+		
+		let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height - 54))
+		scroll.hasVerticalScroller = true
+		scroll.drawsBackground = false
+		scroll.borderType = .noBorder
+		let text = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: height - 54))
+		text.isEditable = false
+		text.isSelectable = true
+		text.drawsBackground = false
+		text.textContainerInset = NSSize(width: 12, height: 10)
+		text.textStorage?.setAttributedString(ViralInfoController.guide())
+		scroll.documentView = text
+		root.addSubview(scroll)
+		
+		self.view = root
+	}
+	
+	private func updateValueLabel() {
+		let width = ViralPageWidth.shared.current
+		let preset = ViralPageWidth.presets.first(where: { $0.width == width })?.title
+		valueLabel.stringValue = preset.map { "\(width) · \($0)" } ?? "\(width) characters"
+	}
+	
+	@objc private func sliderChanged(_ sender: NSSlider) {
+		ViralPageWidth.shared.set(sender.integerValue)
+		updateValueLabel()
+	}
+	
+	// MARK: Guide text
+	
+	static func guide() -> NSAttributedString {
+		let result = NSMutableAttributedString()
+		let paragraph = NSMutableParagraphStyle()
+		paragraph.tabStops = [NSTextTab(textAlignment: .left, location: 150)]
+		paragraph.headIndent = 150
+		paragraph.paragraphSpacing = 3
+		let headerStyle = NSMutableParagraphStyle()
+		headerStyle.paragraphSpacingBefore = 10
+		headerStyle.paragraphSpacing = 4
+		
+		func header(_ text: String) {
+			result.append(NSAttributedString(string: text + "\n", attributes: [
+				.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.labelColor, .paragraphStyle: headerStyle
+			]))
+		}
+		func row(_ keys: String, _ text: String) {
+			result.append(NSAttributedString(string: keys, attributes: [
+				.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph
+			]))
+			result.append(NSAttributedString(string: "\t" + text + "\n", attributes: [
+				.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph
+			]))
+		}
+		
+		header("Writing")
+		row("INT. EXT. BRAND\nFACT THOUGHT", "Start a line with one of these to make a scene heading")
+		row("Title:", "Title page. Put it on the first line")
+		row("Save As: Name", "In the title page. Saves the document as Name and keeps it saved while you write")
+		
+		header("Blocks")
+		row("/table  ↩", "Insert a table. /table 4x3 sets columns and rows")
+		row("/image  ↩", "Add images from files")
+		row("/carousel  ↩", "Insert a carousel")
+		row("⌘V or drop", "Images, or links to YouTube, Vimeo, Instagram and Facebook videos")
+		row("Right-click", "Insert Image, Insert Carousel or Insert Table")
+		
+		header("Tables")
+		row("⇥   ⇧⇥", "Next / previous cell. Tab on the last cell adds a row")
+		row("↩", "Cell below. Adds a row at the end")
+		row("⇧↩", "New line inside a cell")
+		row("↑  ↓", "Move between rows, or out of the table")
+		row("⎋", "Leave the table")
+		row("Right-click", "Add or delete rows and columns, or delete the table")
+		
+		header("Images and videos")
+		row("Click", "Select (videos: use the ••• button)")
+		row("Drag the corner", "Resize. The shape stays the same")
+		row("⌫", "Delete the selected image or video")
+		row("←  →", "Select the previous / next one")
+		row("Right-click", "Size, rounded corners, open in browser, sign in to Instagram or Facebook")
+		
+		header("Carousels")
+		row("‹  ›  or swipe", "Scroll through the images")
+		row("Drag the corner", "Change the height")
+		row("Right-click", "Height, rounded corners, add or remove images")
+		
+		header("Page")
+		row("⌥⌘]   ⌥⌘[", "Wider / narrower page (View ▸ Page Width)")
+		row("⌘+   ⌘−", "Zoom in / out")
+		
+		// Everything else comes from the menus, so it's always up to date
+		for top in NSApp.mainMenu?.items ?? [] {
+			guard let menu = top.submenu else { continue }
+			var rows: [(String, String)] = []
+			collectShortcuts(menu, into: &rows)
+			guard !rows.isEmpty else { continue }
+			header(top.title.isEmpty ? menu.title : top.title)
+			for (keys, title) in rows { row(keys, title) }
+		}
+		return result
+	}
+	
+	private static func collectShortcuts(_ menu: NSMenu, into rows: inout [(String, String)]) {
+		for item in menu.items where !item.isHidden && !item.isSeparatorItem {
+			if let submenu = item.submenu {
+				collectShortcuts(submenu, into: &rows)
+			} else if let keys = shortcut(for: item), !item.title.isEmpty {
+				rows.append((keys, item.title))
+			}
+		}
+	}
+	
+	private static func shortcut(for item: NSMenuItem) -> String? {
+		let key = item.keyEquivalent
+		guard !key.isEmpty else { return nil }
+		let mask = item.keyEquivalentModifierMask
+		var shift = mask.contains(.shift)
+		if key.count == 1, key.uppercased() == key, key.lowercased() != key { shift = true }
+		
+		var symbol: String
+		switch key.unicodeScalars.first.map({ Int($0.value) }) ?? 0 {
+		case 0x0D, 0x03: symbol = "↩"
+		case 0x1B: symbol = "⎋"
+		case 0x09: symbol = "⇥"
+		case 0x08, 0x7F: symbol = "⌫"
+		case 0x20: symbol = "Space"
+		case NSUpArrowFunctionKey: symbol = "↑"
+		case NSDownArrowFunctionKey: symbol = "↓"
+		case NSLeftArrowFunctionKey: symbol = "←"
+		case NSRightArrowFunctionKey: symbol = "→"
+		case NSF1FunctionKey...NSF12FunctionKey: symbol = "F\((Int(key.unicodeScalars.first!.value) - NSF1FunctionKey) + 1)"
+		default: symbol = key.uppercased()
+		}
+		
+		var result = ""
+		if mask.contains(.control) { result += "⌃" }
+		if mask.contains(.option) { result += "⌥" }
+		if shift { result += "⇧" }
+		if mask.contains(.command) { result += "⌘" }
+		return result + symbol
 	}
 }

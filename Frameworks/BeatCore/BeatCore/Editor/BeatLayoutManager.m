@@ -35,7 +35,7 @@
 @end
 
 #if TARGET_OS_OSX
-    #define X_OFFSET 12.0
+    #define X_OFFSET 16.0
 #else
     #define X_OFFSET 25.0
 #endif

@@ -58,12 +58,6 @@ NS_ASSUME_NONNULL_BEGIN
 + (CGFloat)tableFontSize;
 /// Space below a table before following text
 + (CGFloat)tableBottomSpacing;
-/// Returns `true` if this is the first table row in a block (or after a non-table line)
-+ (bool)isFirstTableRow:(Line*)line inLines:(NSArray<Line*>* __nullable)lines;
-/// Returns `true` if the table row is followed by a header separator
-+ (bool)isTableHeaderRow:(Line*)line inLines:(NSArray<Line*>* __nullable)lines;
-/// Returns `true` if the line directly follows a table inside the same block
-+ (bool)lineFollowsTable:(Line*)line inLines:(NSArray<Line*>* __nullable)lines;
 #if TARGET_OS_OSX
 /// Builds a table row as a real `NSTextTable` row. Used for both rendering and height calculation, so they always match.
 + (NSMutableAttributedString*)tableRowFor:(Line*)line font:(BXFont*)font indent:(CGFloat)indent width:(CGFloat)width header:(bool)header topBorder:(bool)topBorder;

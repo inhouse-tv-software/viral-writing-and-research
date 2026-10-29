@@ -44,6 +44,7 @@ NSString* const BeatSettingDefaultPageSize 				= @"defaultPageSize";
 NSString* const BeatSettingDisableFormatting 			= @"disableFormatting";
 NSString* const BeatSettingShowMarkersInScrollbar 		= @"showMarkersInScrollbar";
 NSString* const BeatSettingSceneHeadingSpacing 			= @"sceneHeadingSpacing";
+NSString* const BeatSettingViralPageWidth 				= @"viralPageWidth";
 NSString* const BeatSettingNovelLineSpacing             = @"novelLineSpacing";
 NSString* const BeatSettingScreenplayItemMore 			= @"screenplayItemMore";
 NSString* const BeatSettingScreenplayItemContd 			= @"screenplayItemContd";
@@ -155,6 +156,7 @@ NSString* const BeatSettingDontHideBars                 = @"dontHideBars";
             BeatSettingDisableFormatting: @NO,
             BeatSettingShowMarkersInScrollbar: @NO,
             BeatSettingSceneHeadingSpacing: @2,
+            BeatSettingViralPageWidth: @67,
             BeatSettingNovelLineSpacing: @(2.0),
             BeatSettingScreenplayItemMore: @"MORE",
             BeatSettingScreenplayItemContd: @"CONT'D",

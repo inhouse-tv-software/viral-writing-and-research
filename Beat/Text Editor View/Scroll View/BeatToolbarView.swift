@@ -16,15 +16,58 @@ class BeatToolbarView:NSView {
 	
 	@IBOutlet weak var excludedView:NSView?
 	
+	/// Viral: shows the Info popover with shortcuts and page width
+	let infoButton = NSButton(frame: .zero)
+	
 	override func awakeFromNib() {
 		super.awakeFromNib()
 		
 		self.layer?.addSublayer(leftBackground)
 		self.layer?.addSublayer(rightBackground)
+		
+		setupInfoButton()
+		ViralPageWidth.shared.installMenu()
+	}
+	
+	func setupInfoButton() {
+		// Copy the look of the existing buttons on the right
+		let template = rightButtons.first
+		infoButton.bezelStyle = template?.bezelStyle ?? .regularSquare
+		infoButton.isBordered = template?.isBordered ?? false
+		infoButton.title = ""
+		infoButton.imagePosition = .imageOnly
+		infoButton.imageScaling = template?.imageScaling ?? .scaleProportionallyDown
+		infoButton.contentTintColor = template?.contentTintColor
+		let pointSize = template?.image.map { max(11, $0.size.height * 0.8) } ?? 13
+		if let image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Info") {
+			infoButton.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)) ?? image
+		}
+		infoButton.toolTip = "Info and shortcuts"
+		infoButton.target = self
+		infoButton.action = #selector(showInfo(_:))
+		addSubview(infoButton)
+	}
+	
+	/// Buttons in the right-hand group, left to right
+	var rightButtons: [NSButton] {
+		return subviews.compactMap { $0 as? NSButton }
+			.filter { $0 !== infoButton && $0 !== excludedView && $0.frame.minX > frame.width / 2 && !$0.isHidden && $0.frame.height > 10 && $0.frame.width > 10 }
+			.sorted { $0.frame.minX < $1.frame.minX }
+	}
+	
+	@objc func showInfo(_ sender: NSButton) {
+		ViralInfoController.show(from: sender)
 	}
 		
 	override func layout() {
 		super.layout()
+		
+		// The Info button sits to the left of the other buttons on the right, with the same spacing
+		let buttons = rightButtons
+		if let first = buttons.first {
+			let spacing = buttons.count > 1 ? max(2, buttons[1].frame.minX - first.frame.maxX) : 6
+			infoButton.frame = first.frame.offsetBy(dx: -(first.frame.width + spacing), dy: 0)
+		}
 		updateBackgrounds()
 	}
 	

@@ -454,12 +454,8 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (bool)isTableRow;
 /// Returns `true` if this line is the header separator row of a table, ie. `|---|---|`
 - (bool)isTableSeparator;
-/// Local indices of every column separator (`|`) on this line
-- (NSArray<NSNumber*>*)tableSeparatorIndices;
 /// Cell contents of a table row. `\|` is unescaped and `<br>` becomes a line break.
 - (NSArray<NSString*>*)tableCells;
-/// Table row rendered as fixed-width text for printing: columns share the width equally, cell text wraps, and wrapped lines are joined with U+2028.
-- (NSString*)tableRowStringForWidth:(NSInteger)totalWidth;
 /// Viral images: `![image](viral:ID 50)` (width in percent of the text width)
 - (bool)isEmbedImageLine;
 /// Viral videos: `![video](viral:URL^THUMBNAIL 50)`. Also counts as an image line.

@@ -15,22 +15,22 @@
 page {
     padding-left: 60;
     
-    margin-left: 15;
-    margin-right: 12;
-    margin-top: 20;
-    margin-bottom: 25;
+    margin-left: 20;
+    margin-right: 18;
+    margin-top: 30;
+    margin-bottom: 35;
     margin-bottom-us: 0;
-    margin-bottom-a4: 5;
+    margin-bottom-a4: 7;
     
-    default-width-a4: 71ch;
-    default-width-us: 72ch;
+    default-width-a4: 67ch;
+    default-width-us: 68ch;
     
     line-height: 12;
     
-    content-padding: 4ch;
+    content-padding: 5ch;
  
-    margin-left-a4: 10;
-    margin-left-us: 14;
+    margin-left-a4: 14;
+    margin-left-us: 19;
 }
 
 titlePage {
@@ -43,8 +43,8 @@ titlePage {
 }
 
 heading {
-    width-a4: 71ch - 5ch;
-    width-us: 72ch - 5ch;
+    width-a4: 67ch - 5ch;
+    width-us: 68ch - 5ch;
     
     margin-top: userSetting(sceneHeadingSpacing)l;
     bold: userSetting(headingStyleBold);
@@ -83,8 +83,8 @@ action {
 }
 
 centered {
-    width-a4: 71ch;
-    width-us: 72ch;
+    width-a4: 67ch;
+    width-us: 68ch;
 
     margin-top: 1l;
     text-align: center;
