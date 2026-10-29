@@ -1,0 +1,243 @@
+/*
+Copyright (c) 2012-2013 Nima Yousefi & John August
+Parts copyright  © 2019-2021 Lauri-Matti Parppei
+Parts copyright © 2021-2022 Fredrik T Olsson
+ 
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+*/
+
+* {
+	/* -webkit-touch-callout: none; */
+	-webkit-user-select: none;
+}
+
+/*
+ 
+body p {
+	background: repeating-linear-gradient(
+	  0deg,
+	  white 0px,
+	  white 12pt,
+	  #465298 12.1pt,
+	  #465298 12.5pt
+	);
+}
+
+body p::after {
+	display: absolute;
+	left: -10px;
+	color: red;
+	content: attr(paginatedHeight);
+}
+*/
+
+body {
+	zoom: 70%;
+
+	--page-height: 29.7cm;
+
+	background: #333;
+	color: black !important;
+
+	margin-right: auto;
+	margin-left: auto;
+	margin-top: 2em;
+
+	width: 21cm; /* this differs from the printCSS, which removes 2 x 50pt to avoid shrinkage */
+}
+
+body.us-letter{  /* all values not present here are the same as for A4 */
+
+	--page-height: 11in;
+	width: 8.5in; /* this differs from the printCSS, which removes 2 x 50pt to avoid shrinkage */
+}
+
+article {
+	padding: 0px 0px;
+	margin: 0px;
+}
+
+section {
+	background-color: #fafafa;
+
+	min-height: var(--page-height);
+	height: var(--page-height);
+
+	padding-top: 25pt;
+	padding-left: 50pt;
+	padding-bottom: 20pt;
+	
+	margin-top: 0pt;
+	margin-bottom: 1em;
+	
+	border: solid 1px #ccc;
+		
+	box-shadow: 0 3px 10px #111;
+}
+
+.orange > .revisionMarker::after,
+.purple > .revisionMarker::after,
+.green > .revisionMarker::after {
+	background: #fafafa !important;
+	background-color: #fafafa !important;
+}
+
+/* .dual-dialogue-left */
+
+/* ================== */
+/*      TITLE PAGE    */
+/* ================== */
+
+#script-title * {
+	width: 100%;
+	padding: 0;
+}
+
+#script-title {
+	padding-bottom: 2.6em;
+	margin-bottom: 1em;
+}
+
+#script-title .mainTitle {
+	display: flex;
+	justify-content: center;
+	flex-direction: column;
+	flex: 1;
+	margin-bottom: 6em;
+}
+#script-title .title {
+	margin: 1.3em 0;
+}
+
+#script-title p.source {
+	margin: 0 0 .5em 0;
+}
+#script-title .versionInfo {
+	bottom: 3em;
+	right: 4em;
+	margin: 0;
+}
+
+#script-title .info {
+	position: absolute;
+	bottom: 3em;
+	left: 4em;
+
+	width: 40%;
+
+	margin: 0;
+}
+
+#script-title .info p {
+	margin: 0 0 .5em 0;
+}
+
+#script-title .versionInfo p {
+	margin: 0 0 .5em 0;
+}
+
+#script-title p.notes {
+	white-space: pre-line !important;
+}
+
+/* ================== */
+/*    DUAL DIALOGUE   */
+/* ================== */
+
+/* .dual-dialogue .dual-dialogue-left{
+	padding-left: calc(var(--left-whitespace) + 2ch);
+} */
+
+/* .dual-dialogue .character {
+	text-align: center;
+} */
+
+/* .dual-dialogue .parenthetical {
+	padding-left: 4ch;
+	padding-right: 0ch;
+	width: calc(var(--action-width) / 2 - 4);
+} */
+
+/* ================== */
+/* PAGE-RELATED STUFF */
+/* ================== */
+
+p.page-break-render {
+	padding-right: 0;
+	margin-top: 0;
+
+	/* padding-top: ? */
+	/* border-top: ? */
+
+}
+
+/*
+p.page-break-render {
+	padding-top: 20px;
+	margin-top: 20px;
+}
+*/
+
+.quickLook section {
+	background-color: white;
+	box-shadow: none;
+}
+.comparison section {
+	padding: 5%;
+}
+
+a:link, a:visited, a:active {
+	color: black;
+	text-decoration: none;
+}
+a:hover {
+	background-color: #ddd;
+}
+
+@media screen and (max-width: 400px) {
+	body.quickLook {
+		font-size: .3em;
+		background: white;
+	}
+	.quickLook section {
+		border: none;
+		padding: 0;
+		margin: 0;
+		min-height: 0;
+	}
+	.quickLook .character {
+		width: 35%;
+		
+	}
+	.quickLook .dialogue {
+		width: 60%;
+	}
+	.quickLook #script-title * {
+		margin: 0;
+		padding: 1em 0 1em 0;
+	}
+	.quickLook #script-title .versionInfo, .quickLook #script-title .info {
+		position: relative;
+		margin: 0;
+	}
+}
+
+.debug {
+	display: none;
+}

@@ -1,0 +1,386 @@
+/* 
+  Localizable.strings
+  Beat
+
+  Created by Lauri-Matti Parppei on 2.1.2022.
+  Copyright © 2022 Lauri-Matti Parppei. All rights reserved.
+*/
+
+
+"general.yes" = "Yes";
+"general.no" = "No";
+"general.OK" = "OK";
+"general.ok" = "OK";
+"general.cancel" = "Cancel";
+"general.undo" = "Undo";
+"general.redo" = "Redo";
+"general.close" = "Close";
+"general.untitled" = "Untitled";
+"app.manual" = "Manual";
+"app.patchNotes" = "Patch Notes";
+"general.revert" = "Revert";
+"general.selectAll" = "Select All";
+"general.new" = "New";
+"general.revealInFinder" = "Reveal in Finder";
+
+"plugins.errorRunningScript" = "Error running script";
+"plugins.input.select" = "Select...";
+
+"launch.newDocument.subtitle" = "Start a new, blank project";
+"launch.tutorial.subtitle" = "Begin here, if you are new to Beat";
+"launch.templates.subtitle" = "Learn Beat and get started quickly!";
+
+"unlock_document.title" = "Unlock Document";
+"unlock_document.confirm" = "Are you sure you want to unlock the document and allow changes?";
+
+"language.alert" = "Restart required";
+"language.informative" = "You need to restart Beat for language change to take effect.";
+
+"about.version" = "Version";
+"about.build" = "Build";
+
+"plugins.library" = "Plugin Library";
+"plugins.installed" = "Installed";
+"plugins.download" = "Download";
+"plugins.update" = "Update";
+"plugins.version" = "Version";
+"plugins.updateAvailable" = "Update available";
+"plugins.currentVersion" = "Currently installed";
+"plugins.compatibilityWarning" = "<b>Warning</b>: This plugin might not be compatible with your version of Beat. To ensure it works, download the latest version from App Store before continuing.";
+
+"plugins.libraryWelcome" = "<p>A selection of official plugins for Beat. Enabled (checked) plugins will be shown under <b>Tools</b> menu. Grayed out plugins are not yet installed. Click on their label to install and learn more.</p>\
+   <p class='small gray'>Click on the folder icon to manually manage your plugins. You can write your own plugins using JavaScript &mdash; learn more on Beat website.</p>";
+
+"storyline.placeholder" = "New Storyline Name";
+"storyline.add" = "Add Storyline...";
+
+"gender.other" = "Other";
+"gender.woman" = "Woman";
+"gender.man" = "Man";
+"gender.unspecified" = "Unspecified";
+
+"gender.other.plural" = "Other";
+"gender.woman.plural" = "Women";
+"gender.man.plural" = "Men";
+"gender.unspecified.plural" = "Unspecified";
+
+"lock.clickToUnlock" = "Click to unlock";
+"lock.documentLocked" = "Document is locked";
+
+
+"statistics.lines" = "lines";
+"statistics.scenes" = "scenes";
+"statisticsPanel.numberOfPages" = "Pages";
+
+"statisticsPanel.title" = "Screenplay Statistics";
+"statisticsPanel.averageSceneLength" = "Average scene length";
+"statisticsPanel.shortForPages" = "pgs";
+"statisticsPanel.longestScene" = "Longest scene";
+"statisticsPanel.stats.words" = "words";
+"statisticsPanel.stats.scenes" = "scenes";
+"statisticsPanel.stats.characters" = "characters";
+"statisticsPanel.linesByGender" = "Lines by Gender";
+"statisticsPanel.setGenderInfo" = "Set gender for characters on the left side";
+"statisticsPanel.linesPerCharacter" = "Lines per Character";
+"statisticsPanel.locations" = "Locations";
+"statisticsPanel.locations.interior" = "Interior";
+"statisticsPanel.locations.exterior" = "Exterior";
+"statisticsPanel.locations.other" = "Other";
+"statisticsPanel.noDialogue" = "No dialogue";
+
+"print.print" = "Print";
+"print.createPDF" = "Create PDF";
+"print.pdfButton" = "Create PDF";
+"print.printButton" = "Print";
+"print.pdfButton" = "PDF";
+
+"cardView.noScenes" = "No Scenes";
+"cardView.noScenesInformation" = "When you write some scenes, they will be visible as cards in this view";
+"cardView.print" = "Print";
+
+"color.none" = "None";
+"color.red" = "Red";
+"color.green" = "Green";
+"color.blue" = "Blue";
+"color.pink" = "Pink";
+"color.yellow" = "Yellow";
+"color.brown" = "Brown";
+"color.cyan" = "Cyan";
+"color.orange" = "Orange";
+"color.magenta" = "Magenta";
+"color.purple" = "Purple";
+"color.salmon" = "Salmon";
+"color.rose" = "Rose";
+"color.goldenrod" = "Goldenrod";
+"color.buff" = "Buff";
+"color.cherry" = "Cherry";
+
+"revision.1" = "First";
+"revision.2" = "Second";
+"revision.3" = "Third";
+"revision.4" = "Fourth";
+"revision.5" = "Fifth";
+"revision.6" = "Sixth";
+"revision.7" = "Seventh";
+"revision.8" = "Eighth";
+
+"revisionMode.reviseLine" = "Mark Current Line as Revised";
+"revisionMode.reviseSelection" = "Mark Current Selection as Revised";
+"revisionMode.clearSelection" = "Clear Revision Markers in Selection";
+"revisionMode.clearLine" = "Clear Revision Markers in Line";
+
+"revisions.commitPrompt.title" = "Commit all revisions";
+"revisions.commitPrompt.text" = "This will clear all revision markers and remove all ranges marked for removal. Are you sure you want to continue?";
+
+"mode.taggingMode" = "Tagging Mode";
+"mode.reviewMode" = "Review Mode";
+
+"backup.revertToSaved" = "Revert To Saved";
+"backup.backupVault" = "Open Backup Vault...";
+"backup.browseVersions" = "Browse versions...";
+"backup.saved" = "Saved";
+"backup.revertAction" = "Revert";
+
+"backup.reverting.title" = "Revert File";
+"backup.reverting.message" = "Any unsaved changes will be lost when reverting to an earlier version.";
+"revert.revertAction" = "Revert";
+
+"editor.setSceneNumber" = "Set Number For Scene";
+"editor.setSceneNumber.info" = "Custom scene number (can include letters, or press space for a scene with no scene number)";
+
+"force.character" = "Character";
+"force.heading" = "Scene Heading";
+"force.action" = "Action";
+"force.lyrics" = "Lyrics";
+
+"editor.goToSceneNumber.message" = "Go to scene number...";
+"editor.goToSceneNumber.placeholder" = "eg. 123";
+
+"export.prefix" = "Export";
+"import.prefix" = "Import";
+
+"timer.reset" = "Reset";
+"timer.start" = "Start";
+"timer.charactersRemoved" = "characters removed";
+"timer.charactersTyped" = "characters\ntyped";
+
+
+/* Tutorials */
+
+"templates.tutorials" = "Tutorials";
+"templates.templates" = "Templates";
+
+"templates.tutorial.title" = "Tutorial";
+"templates.tutorial.description" = "Quickstart guide to Beat!";
+
+"templates.outliningTutorial.title" = "Outlining Tutorial";
+"templates.outliningTutorial.description" = "Learn more advanced outlining tricks";
+
+"templates.comicBook.title" = "Comic Book";
+"templates.comicBook.description" = "A simple comic book template";
+
+"templates.onePageSynopsis.title" = "One-Page Synopsis";
+"templates.onePageSynopsis.description" = "Draft a condensed version of your story";
+
+"templates.threeActOutline.title" = "Three-Act Outline";
+"templates.threeActOutline.description" = "The classical story structure in 8 sequences";
+
+"templates.novel-tutorial.title" = "Novel Tutorial";
+"templates.novel-tutorial.description" = "Get started with writing novels in Beat";
+
+"templates.novel.title" = "Novel";
+"templates.novel.description" = "Bare-bones novel template";
+
+
+/* Selection / information */
+
+"textView.information.selection" = "Selection";
+"textView.information.document" = "Document";
+"textView.information.pages" = "Pages";
+"textView.information.page" = "Page";
+"textView.information.characters" = "Characters";
+"textView.information.words" = "Words";
+
+"export.includeInvisibleElements" = "Include Invisible Elements";
+"export.printSections" = "Sections";
+"export.printSynopsis" = "Synopsis";
+"export.printNotes" = "Notes";
+"export.printSceneNumbers" = "Scene Numbers";
+
+"templates.showTutorialsAndTemplates" = "Show Tutorials and Templates...";
+
+"revisions.downgrade.title" = "Downgrade Revisions";
+"revisions.downgrade.info" = "This operation downgrades the selected revision generation to become the first generation, and higher generations follow suit. This is useful when you've reached the highest generation level, and want to remove lower-level markings.";
+
+"revisions.downgrade.from" = "Lowest revision after downgrade:";
+
+"revisions.convert.title" = "Convert/Remove Revision Markers";
+"revisions.convert.info" = "The selected generation of revisions will be converted to another generation. If you leave the target generation empty, the selected revisions will be removed.";
+
+"revisions.convert.from" = "Current generation";
+"revisions.convert.to" = "Target generation";
+
+"revisions.convert.remove" = "(remove)";
+"revisions.convert.onlySelectedRange" = "Only in selected range";
+
+"license.title" = "Enter Donation Key";
+"license.info" = "A warm thank you for your donation! Copy and paste the key you received below.";
+
+/* Outline setings */
+
+"outline.settings" = "Outline Settings";
+"outline.settings.synopses" = "Synopses";
+"outline.settings.headings" = "Scene Headings";
+"outline.settings.sceneNumbers" = "Scene Numbers";
+"outline.settings.notes" = "Notes";
+"outline.settings.markers" = "Markers";
+"outline.settings.snapshots" = "Show Snapshots";
+
+"outline.settings.fontSize.small" = "Small";
+"outline.settings.fontSize.medium" = "Medium";
+"outline.settings.fontSize.big" = "Big";
+"outline.settings.fontSize.veryBig" = "Very Big";
+
+"character.editor.age" = "Age";
+"character.editor.biography" = "Biography";
+"character.editor.lines" = "Lines";
+"character.editor.highlight" = "Highlight Color";
+"character.editor.addAlias" = "Add Alias...";
+
+"backup.browseVersions" = "Browse versions...";
+
+"quickSettings.novelLineHeightMultiplier" = "Line Spacing";
+"quickSettings.novelContentAlignment" = "Alignment";
+
+"documentSettings.title" = "Document Settings";
+"documentSettings.style" = "Style";
+"documentSettings.pageSize" = "Page Size";
+"documentSettings.firstSceneNumber" = "First Scene Number";
+"documentSettings.firstPageNumber" = "First Page Number";
+"documentSettings.pageNumberingMode" = "Page Numbering Starts at...";
+"documentSettings.novelLineHeightMultiplier" = "Line Spacing";
+"documentSettings.novelContentAlignment" = "Alignment";
+
+"pagination.pageNumberingMode.anyContent" = "Any Content";
+"pagination.pageNumberingMode.firstScene" = "First Scene";
+"pagination.pageNumberingMode.forcedPageBreak" = "First Forced Page Break";
+"pagination.forcedNote" = "Note: With this setting all pages will remain non-numbered until the first page break (===)";
+
+"spelling.ignoreDialogue.title" = "Ignore Spell Checking in Dialogue";
+"spelling.ignoreDialogue.text" = "You might need to reopen the document for the changes to take effect.";
+
+"type.empty" = "Empty";
+"type.section" = "Section";
+"type.synopsis" = "Synopsis";
+"type.titlePageTitle" = "Title";
+"type.titlePageAuthor" = "Author";
+"type.titlePageCredit" = "Credit";
+"type.titlePageSource" = "Source";
+"type.titlePageContact" = "Contact Info";
+"type.titlePageDraftDate" = "Draft Date";
+"type.titlePageUnknown" = "Title Page";
+"type.heading" = "Scene Heading";
+"type.action" = "Action";
+"type.character" = "Character Cue";
+"type.parenthetical" = "Parenthetical";
+"type.dialogue" = "Dialogue";
+"type.dualDialogueCharacter" = "Dual Dialogue Cue";
+"type.dualDialogue" = "Dual Dialogue";
+"type.dualDialogueParenthetical" = "Dual Dialogue Parenthetical";
+"type.transition" = "Transition";
+"type.lyrics" = "Lyrics";
+"type.pageBreak" = "Page Break";
+"type.centered" = "Centered";
+"type.shot" = "Shot / Mini Slug";
+"type.multiple" = "(Multiple lines)";
+
+
+"tagManager.list.warning.noTypes" = "Add one or more tag types first";
+
+"tag.cast" = "Cast";
+"tag.prop" = "Props";
+"tag.costume" = "Costume";
+"tag.makeup" = "Makeup";
+"tag.vfx" = "VFX";
+"tag.sfx" = "Special effects";
+"tag.music" = "Music";
+"tag.animal" = "Animal";
+"tag.extras" = "Extras";
+"tag.vehicle" = "Vehicle";
+"tag.none" = "None";
+"tag.stunt" = "Stunt";
+"tag.setDesign" = "Set Design";
+"tag.camera" = "Camera";
+
+"tagManager.createReport" = "Create Tag Report";
+
+"tagManager.report.sceneByScene" = "Scene by scene";
+"tagManager.report.sceneByScene.details" = "List scenes in chronological order, each followed by list of selected tags";
+
+"tagManager.report.listScenesByTag" = "List scenes by tag";
+"tagManager.report.sceneByScene.details" = "List selected tag types, followed by scenes that contain them";
+
+"tagManager.report.screenplay" = "Screenplay";
+"tagManager.report.screenplay.details" = "Create a new document with all scenes that contain any of selected tag types";
+
+"tagManager.report.create" = "Create";
+
+"tagManager.rename" = "Rename";
+
+"tagManager.tab.edit" = "Edit Tags";
+"tagManager.tab.report" = "Tag Reports";
+
+"tagManager.windowTitle" = "Tag Manager";
+
+"versionControl.base" = "Base";
+"versionControl.current" = "Current";
+"versionControl.addExternalFile" = "Open File...";
+"versionControl.noVersionControl" = "No Version Control";
+
+"versionControl.reset" = "Reset";
+"versionControl.reset.confirm" = "Are you sure you want to reset version control?";
+"versionControl.reset.info" = "This will delete all your commits until this point. This action cannot be undone.";
+
+"pagination.paragraphPaginationMode.default" = "Break Actions Across Pages (Default)";
+"pagination.paragraphPaginationMode.avoid" = "Avoid Breaking Actions";
+
+"dataHealth.warning.title" = "Ranges Out Of Sync";
+"dataHealth.warning.informative" = "The file has revisions, reviews or tags, which have been moved out of place, probably because the file was edited outside of Beat.\n\nIt's not dangerous, but previous ranges might not make sense anymore";
+"dataHealth.warning.ignore" = "Ignore";
+"dataHealth.warning.remove" = "Remove All Ranges";
+
+"export.includeRevisions" = "Include Revision Markers";
+
+"export.highlightRevisions" = "Highlight Revisions";
+"export.highlightRevisions.none" = "None";
+"export.highlightRevisions.text" = "Text Color";
+"export.highlightRevisions.background" = "Background Color";
+"export.printHeadingColor" = "Colored Scene Headings";
+
+"review.keyword.none" = "No #keywords";
+
+"versionMenu.newVersion" = "Add New Alternative for This Line";
+"versionMenu.noVersions" = "No Alternative Versions";
+
+"cardView.grid" = "Grid";
+"cardView.kanban" = "Columns";
+"cardView.compact" = "Titles Only";
+"cardView.addScene" = "Add Scene";
+"cardView.addAct" = "Add Act";
+"cardView.addAct.placeholder" = "Act name";
+"cardView.deleteScene" = "Delete Scene";
+"cardView.deleteAct" = "Delete Act (Keep Scenes)";
+"versionControl.commit" = "Commit";
+"versionControl.commitMessage" = "Commit message (Optional)";
+"versionControl.addCommit" = "Add Commit";
+"versionControl.skip" = "Skip";
+"versionControl.commitChanges" = "Commit Changes";
+"versionControl.restoreVersion" = "Restore Version";
+"versionControl.confirmRevertMessage" = "Are you sure you want to revert the document to the state from %TIMESTAMP%? This can't be undone and any newer commits will be removed.";
+"versionControl.confirmResetTitle" = "Are you sure you want to reset version control?";
+"versionControl.confirmResetMessage" = "This will delete all your commits until this point. This action cannot be undone.";
+
+"export.printDialogueNumber" = "Number Dialogue Lines";
+
+"color.custom" = "Mukautettu";
+

@@ -1,0 +1,61 @@
+/* Class = "NSButtonCell"; title = "Tutorial"; ObjectID = "a4h-hr-bBC"; */
+"a4h-hr-bBC.title" = "Handledning";
+
+/* Class = "NSTextFieldCell"; title = "© Lauri-Matti Parppei 2019–2023"; ObjectID = "b0H-0Y-Klb"; */
+"b0H-0Y-Klb.title" = "© Lauri-Matti Parppei 2019–2024";
+
+/* Class = "NSTextFieldCell"; title = "Released under GPL license"; ObjectID = "b4P-Uh-CmK"; */
+"b4P-Uh-CmK.title" = "Utgiven under GPL-licens";
+
+/* Class = "NSTextFieldCell"; title = "Date"; ObjectID = "d9P-af-E8t"; */
+"d9P-af-E8t.title" = "Date";
+
+/* Class = "NSButtonCell"; title = "New Screenplay"; ObjectID = "DbX-Gm-m0E"; */
+"DbX-Gm-m0E.title" = "Nytt dokument";
+
+/* Class = "NSBox"; title = "Box"; ObjectID = "EmU-yf-ihA"; */
+"EmU-yf-ihA.title" = "Ruta";
+
+/* Class = "NSTextFieldCell"; title = "Filename"; ObjectID = "EY0-Ql-hX0"; */
+"EY0-Ql-hX0.title" = "Filnamn";
+
+/* Class = "NSTextFieldCell"; title = "Label"; ObjectID = "FRr-J8-xuv"; */
+"FRr-J8-xuv.title" = "Etikett";
+
+/* Class = "NSButtonCell"; title = "Tutorial"; ObjectID = "HWI-6m-SnF"; */
+"HWI-6m-SnF.title" = "Självstudie";
+
+/* Class = "NSTextFieldCell"; title = "Label"; ObjectID = "JWP-tG-3rC"; */
+"JWP-tG-3rC.title" = "Etikett";
+
+/* Class = "NSButtonCell"; title = "→ Discord Community"; ObjectID = "osl-e8-t6d"; */
+"osl-e8-t6d.title" = "→ Community på Discord";
+
+/* Class = "NSTextFieldCell"; title = "Tutorials & Templates"; ObjectID = "u0S-ze-FnT"; */
+"u0S-ze-FnT.title" = "Tutorials & Templates";
+
+/* Class = "NSTextFieldCell"; title = "Version"; ObjectID = "uau-QP-8yL"; */
+"uau-QP-8yL.title" = "Version";
+
+/* Class = "NSButtonCell"; title = "Browse..."; ObjectID = "w3a-gm-hjm"; */
+"w3a-gm-hjm.title" = "Öppna...";
+
+/* Class = "NSButtonCell"; title = "Button"; ObjectID = "Wvt-te-p5O"; */
+"Wvt-te-p5O.title" = "Knapp";
+
+/* Class = "NSTextFieldCell"; title = "Templates"; ObjectID = "XSB-VA-eAB"; */
+"XSB-VA-eAB.title" = "Mallar";
+"UjG-qn-mj6.title" = "Handledningar";
+
+/* Class = "NSTextFieldCell"; title = "No recent screenplays"; ObjectID = "Zf8-Dc-Df3"; */
+"Zf8-Dc-Df3.title" = "Inga senaste dokument";
+
+/* Class = "NSButtonCell"; title = "→ Support Beat"; ObjectID = "ZFK-os-h00"; */
+"ZFK-os-h00.title" = "→ Stöd Beat";
+
+"u0S-ze-FnT.title" = "Handledningar & mallar";
+
+"HWI-6m-SnF.title" = "Självstudie & mallar";
+
+"cWD-Ub-2Sa.title" = "→ Beat webbplats";
+

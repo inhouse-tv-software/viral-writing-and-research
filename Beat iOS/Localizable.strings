@@ -1,0 +1,139 @@
+/* 
+  Localizable.strings
+  Beat iOS
+
+  Created by Lauri-Matti Parppei on 19.12.2023.
+  Copyright © 2023 Lauri-Matti Parppei. All rights reserved.
+ 
+*/
+
+"templates.tutorials" = "Tutorials";
+"templates.templates" = "Templates";
+
+"templates.tutorial.title" = "Tutorial";
+"templates.tutorial.description" = "Get started quickly with Beat!";
+
+"templates.outliningTutorial.title" = "Outlining Tutorial";
+"templates.outliningTutorial.description" = "Learn more advanced outlining tricks";
+
+"templates.comicBook.title" = "Comic Book";
+"templates.comicBook.description" = "A simple comic book template";
+
+"templates.onePageSynopsis.title" = "One-Page Synopsis";
+"templates.onePageSynopsis.description" = "Draft a condensed version of your story";
+
+"templates.threeActOutline.title" = "Three-Act Outline";
+"templates.threeActOutline.description" = "The classical story structure in 8 sequences";
+
+"templates.newDocument.title" = "New Screenplay";
+"templates.newDocument.description" = "Create a new, blank document";
+
+"templates.novel-tutorial.title" = "Novel Tutorial";
+"templates.novel-tutorial.description" = "Get started with writing novels in Beat";
+
+"templates.novel.title" = "Novel";
+"templates.novel.description" = "Bare-bones novel template";
+
+"templates.heading.newDocument" = "Start a new project";
+"templates.heading.tutorials" = "Tutorials";
+"templates.heading.templates" = "Templates";
+
+"review.editor.done" = "Done";
+"review.editor.edit" = "Edit";
+
+"revision.1" = "First";
+"revision.2" = "Second";
+"revision.3" = "Third";
+"revision.4" = "Fourth";
+"revision.5" = "Fifth";
+"revision.6" = "Sixth";
+"revision.7" = "Seventh";
+"revision.8" = "Eighth";
+
+"statistics.lines" = "Lines";
+"statistics.scenes" = "Scenes";
+
+"statisticsPanel.title" = "Screenplay Statistics";
+"statisticsPanel.averageSceneLength" = "Average scene length";
+"statisticsPanel.shortForPages" = "pgs";
+"statisticsPanel.longestScene" = "Longest scene";
+"statisticsPanel.stats.words" = "words";
+"statisticsPanel.stats.scenes" = "scenes";
+"statisticsPanel.stats.characters" = "characters";
+"statisticsPanel.linesByGender" = "Lines by Gender";
+"statisticsPanel.setGenderInfo" = "Set gender for characters on the left side";
+"statisticsPanel.linesPerCharacter" = "Lines per Character";
+"statisticsPanel.locations" = "Locations";
+"statisticsPanel.locations.interior" = "Interior";
+"statisticsPanel.locations.exterior" = "Exterior";
+"statisticsPanel.locations.other" = "Other";
+"statisticsPanel.noDialogue" = "No dialogue";
+
+"menuItem.inputAssistant" = "Show Input Assistant Bar";
+
+"gender.other" = "Other";
+"gender.woman" = "Woman";
+"gender.man" = "Man";
+"gender.unspecified" = "Unspecified";
+
+"gender.other.plural" = "Other";
+"gender.woman.plural" = "Women";
+"gender.man.plural" = "Men";
+"gender.unspecified.plural" = "Unspecified";
+
+"color.none" = "None";
+"color.default" = "Default";
+"color.red" = "Red";
+"color.green" = "Green";
+"color.blue" = "Blue";
+"color.pink" = "Pink";
+"color.yellow" = "Yellow";
+"color.brown" = "Brown";
+"color.cyan" = "Cyan";
+"color.orange" = "Orange";
+"color.magenta" = "Magenta";
+"color.purple" = "Purple";
+"color.salmon" = "Salmon";
+"color.rose" = "Rose";
+"color.goldenrod" = "Goldenrod";
+"color.buff" = "Buff";
+"color.cherry" = "Cherry";
+
+"menuItem.createPDF" = "Create PDF…";
+"menuItem.export" = "Export";
+"menuItem.export.fdx" = "Export Final Draft File…";
+"menuItem.export.outline" = "Export Fountain Outline…";
+
+"menuItem.addTitlePage" = "Add Title Page";
+"menuItem.sceneNumbering" = "Scene Numbering";
+"menuItem.sceneNumbering.setFirstSceneNumber" = "Set First Scene Number…";
+"menuItem.sceneNumbering.lockSceneNumbers" = "Lock Scene Numbers";
+"menuItem.sceneNumbering.unlockSceneNumbers" = "Remove locked scene numbers";
+
+"menuItem.pagination" = "Pagination Options";
+"menuItem.pagination.numberingBeginsFrom" = "Page Numbering Begins From…";
+"menuItem.pagination.numberingBeginsFrom.anyContent" = "Any Content (Default)";
+"menuItem.pagination.numberingBeginsFrom.firstScene" = "First Scene";
+"menuItem.pagination.numberingBeginsFrom.firstPageBreak" = "First Forced Page Break";
+"menuItem.pagination.numberingBeginsFrom.firstPageBreak.note" = "All pages before === are non-numbered";
+"menuItem.pagination.setFirstPageNumber" = "Set First Page Number…";
+"menuItem.notepad" = "Notepad";
+"menuItem.statistics" = "Screenplay Statistics";
+"menuItem.allSettings" = "All Settings…";
+"menuItem.characterList" = "Characters…";
+
+"menuItem.paragraphPagination" = "Action Pagination";
+"menuItem.paragraphPagination.default" = "Break Actions Across Pages (Default)";
+"menuItem.paragraphPagination.avoid" = "Avoid Breaking Actions";
+
+"menuItem.editTheme" = "Customize Colors…";
+
+"cards.addScene" = "Add New Scene Here";
+"cards.addScenePrompt" = "Heading For New Scene";
+
+"character.editor.done" = "Done";
+"character.editor.age" = "Age";
+"character.editor.biography" = "Biography";
+"character.editor.lines" = "Lines";
+"character.editor.highlight" = "Highlight Color";
+"character.editor.addAlias" = "Add Alias…";

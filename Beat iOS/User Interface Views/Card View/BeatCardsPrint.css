@@ -1,0 +1,291 @@
+/*
+
+Beat Card View
+Print style sheet
+© 2019-202 Lauri-Matti Parppei / KAPITAN
+
+Released under GPL license.
+
+*/
+
+#debug {
+	color: white;
+}
+
+* {
+	box-sizing: border-box;
+	cursor: default;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	background-color: #26282a;
+	font-family: Courier, monospace;
+	font-size: 11pt;
+}
+
+@page {
+	size: A4 landscape;
+	margin: 0;
+}
+
+section {
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	page-break-after: always;
+	break-after: page;
+}
+
+section:last-child {
+	page-break-after: auto;
+	break-after: auto;
+}
+
+h2 {
+	width: 100%;
+	font-family: Helvetica, sans-serif;
+	font-size: 2em;
+	padding: 2rem 0 1rem .7rem;
+	margin: 0;
+	color: #eee;
+	font-weight: 300;
+}
+
+h3,
+p {
+	font-size: 1em;
+	margin: 0;
+	padding: 0;
+}
+
+h3 {
+	margin-top: 0;
+	margin-bottom: auto;
+	line-height: 1em;
+	text-transform: uppercase;
+}
+
+p,
+ul li {
+	font-family: Helvetica, sans-serif;
+}
+
+ul {
+	margin: 0;
+	padding: 0;
+}
+
+ul li {
+	margin: 0 0 0 1.4em;
+	font-style: italic;
+}
+
+.header {
+	margin-bottom: .5rem;
+	padding: 0;
+	display: flex;
+	align-items: center;
+}
+
+.sceneNumber {
+	width: 1.5rem;
+	height: 1.5rem;
+	margin-right: .5rem;
+	flex: 0 0 1rem;
+	font-size: .65em;
+	font-family: Helvetica, sans-serif;
+	color: #444;
+	background-color: #fff;
+	border-radius: 50%;
+	border: solid 1px black;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: bold;
+}
+
+.card.selected .sceneNumber {
+	background-color: #222;
+	color: #ddd;
+}
+
+.nightMode .sceneNumber {
+	background-color: #777;
+	color: #222;
+}
+
+.nightMode .card.selected .sceneNumber {
+	background-color: black;
+	color: #ddd;
+}
+
+.cardContainer {
+	width: calc(100% / 3);
+}
+
+.card {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	padding: 15px;
+	margin: 0;
+	color: black;
+	border: 1px solid black;
+	overflow: hidden;
+	z-index: 1;
+	background: white;
+}
+
+.pageCount {
+	margin-top: auto;
+	padding: 0.3em 0 0 0;
+	font-size: 0.75em;
+	font-family: Helvetica, sans-serif;
+	text-align: right;
+	background: white;
+}
+
+.color.none { background-color: transparent; }
+
+.selected h3 { color: #333 !important; }
+
+.red .sceneNumber { background-color: rgb(239, 0, 73); }
+.blue .sceneNumber { background-color: rgb(0, 129, 239); }
+.green .sceneNumber { background-color: rgb(0, 223, 121); }
+.pink .sceneNumber { background-color: rgb(250, 111, 193); }
+.magenta .sceneNumber { background-color: rgb(236, 0, 140); }
+.gray .sceneNumber { background-color: gray; }
+.purple .sceneNumber { background-color: rgb(181, 32, 218); }
+.yellow .sceneNumber { background-color: rgb(255, 162, 0); }
+.cyan .sceneNumber { background-color: rgb(7, 189, 236); }
+.teal .sceneNumber { background-color: rgb(12, 224, 227); }
+.orange .sceneNumber { background-color: rgb(255, 161, 13); }
+.brown .sceneNumber { background-color: rgb(169, 106, 7); }
+
+.synopse {
+	background-color: #111;
+	box-shadow: none;
+	color: #ddd;
+	border: solid 1px #444;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	text-align: center;
+}
+
+.synopse h3 {
+	font-weight: normal;
+	text-transform: none;
+}
+
+.pageBreak {
+	height: 1cm;
+	width: 100%;
+}
+
+@media print {
+	html,
+	body {
+		margin: 0 !important;
+		padding: 0 !important;
+		background: white !important;
+		color: black !important;
+		font-size: 18pt;
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+	}
+
+	.ui,
+	.pageBreak {
+		display: none !important;
+	}
+
+	section {
+		width: 297mm;
+		height: 210mm;
+		margin: 0 !important;
+		padding: 0 !important;
+		display: block !important;
+		font-size: 0;
+		page-break-after: always;
+		break-after: page;
+		page-break-inside: avoid;
+		break-inside: avoid;
+		overflow: hidden;
+	}
+
+	section:last-child {
+		page-break-after: auto !important;
+		break-after: auto !important;
+	}
+
+	section > h2 {
+		display: none !important;
+	}
+
+	.cardContainer {
+		display: inline-block !important;
+		vertical-align: top;
+		width: 33.3333%;
+		height: 70mm;
+		margin: 0 !important;
+		padding: 0 !important;
+		font-size: 11pt;
+		page-break-inside: avoid;
+		break-inside: avoid;
+	}
+
+	.card {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		height: 100%;
+		margin: 0 !important;
+		padding: 3.5mm;
+		overflow: hidden;
+		background: white !important;
+		color: black !important;
+		border: 1px solid black !important;
+		box-shadow: none !important;
+		outline: none !important;
+		border-radius: 0 !important;
+	}
+
+	h3 {
+		font-size: 15pt;
+		line-height: 1.1;
+	}
+
+	p,
+	ul li {
+		font-size: 15pt;
+		line-height: 1.2;
+	}
+
+	.header {
+		margin-bottom: 2mm;
+	}
+
+	.sceneNumber {
+		width: 5mm;
+		height: 5mm;
+		margin-right: 2mm;
+		font-size: 9pt;
+	}
+
+	.pageCount {
+		margin-top: auto;
+		font-size: 8pt;
+		padding-top: 2mm;
+	}
+}

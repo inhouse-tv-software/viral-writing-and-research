@@ -1,0 +1,95 @@
+/*
+
+ Novel Editor Stylesheet for Beat.
+ This is not actual CSS, just uses similar markup.
+
+ Changing values without knowing what you are doing can very
+ well cause a crash. Dread lightly.
+ 
+ "Class" names use .typeName identifieres, not .typeAsString names.
+ 
+ © Lauri-Matti Parppei 2021-2024
+
+*/
+
+document {
+    disabled-types: [character, dualDialogueCharacter, dialogue, dualDialogue, parenthetical, dualDialogueParenthetical, shot, transition];
+    additional-settings: [novelLineHeightMultiplier, novelContentAlignment];
+    reformat-following-paragraph-after-type-change: true;
+    disable-automatic-paragraphs: true;
+    significant-units: words;
+}
+
+page {
+    margin-left: 25;
+    margin-right: 25;
+    padding-left: 60;
+    margin-top: 40;
+    margin-bottom: 60;
+    
+    default-width-a4: 60ch;
+    default-width-us: 62ch;
+    
+    line-height: 12;
+    
+    content-padding: 7ch;
+ 
+    margin-left-a4: 0;
+    margin-left-us: 0;
+    
+    font-type: variable;
+}
+
+heading {
+    text-align: center;
+    scene-number: false;
+}
+
+section {
+    text-align: center;
+    bold: true;
+    italic: true;
+    fontSize: 24;
+    margin-bottom: 12;
+    
+    min-font-size: 12;
+    
+    if sectionDepth > 1 then fontSize: 20;
+    if sectionDepth > 2 then fontSize: 14;
+}
+
+synopsis {
+    font: system;
+    italic: true;
+}
+
+action, dialogue, character, parenthetical {
+    margin-left-a4: 0;
+    margin-left-us: 0;
+    
+    indent-split-elements: false;
+    unindent-fresh-paragraphs: true;
+    line-fragment-multiplier: documentSetting(novelLineHeightMultiplier);
+}
+
+empty {
+    line-fragment-multiplier: documentSetting(novelLineHeightMultiplier);
+}
+
+action {
+    first-line-indent: 3ch;
+    text-align: documentSetting(novelContentAlignment);
+}
+
+centered {
+    text-align: center;
+}
+
+lyrics {
+    text-align: center;
+}
+
+titlePageUnknown {
+    margin-left: 10ch;
+}
+

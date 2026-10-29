@@ -1,0 +1,412 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB" version="3.0" toolsVersion="24506" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES">
+    <dependencies>
+        <deployment identifier="macosx"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="24506"/>
+        <capability name="Image references" minToolsVersion="12.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--Window Controller-->
+        <scene sceneID="1cJ-Om-ZvP">
+            <objects>
+                <windowController storyboardIdentifier="DiffViewWindow" id="hRa-Ag-SZp" sceneMemberID="viewController">
+                    <window key="window" title="Window" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" releasedWhenClosed="NO" visibleAtLaunch="NO" frameAutosaveName="" animationBehavior="default" id="gqW-mv-M7f">
+                        <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES"/>
+                        <windowPositionMask key="initialPositionMask" leftStrut="YES" rightStrut="YES" topStrut="YES" bottomStrut="YES"/>
+                        <rect key="contentRect" x="179" y="323" width="675" height="270"/>
+                        <rect key="screenRect" x="0.0" y="0.0" width="1728" height="1079"/>
+                        <value key="minSize" type="size" width="675" height="270"/>
+                        <view key="contentView" id="yko-zP-o38">
+                            <rect key="frame" x="0.0" y="0.0" width="675" height="270"/>
+                            <autoresizingMask key="autoresizingMask"/>
+                        </view>
+                        <connections>
+                            <outlet property="delegate" destination="hRa-Ag-SZp" id="lRb-Zw-S9m"/>
+                        </connections>
+                    </window>
+                    <connections>
+                        <segue destination="bU7-R8-ocO" kind="relationship" relationship="window.shadowedContentViewController" id="r1O-YQ-rqD"/>
+                    </connections>
+                </windowController>
+                <customObject id="nay-LR-fOd" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="140" y="-344"/>
+        </scene>
+        <!--Diff Viewer View Controller-->
+        <scene sceneID="PEd-7d-5j0">
+            <objects>
+                <viewController id="bU7-R8-ocO" customClass="DiffViewerViewController" customModule="Beat" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" id="tOy-S4-hL0">
+                        <rect key="frame" x="0.0" y="0.0" width="844" height="599"/>
+                        <autoresizingMask key="autoresizingMask"/>
+                        <subviews>
+                            <scrollView fixedFrame="YES" borderType="none" horizontalLineScroll="10" horizontalPageScroll="10" verticalLineScroll="10" verticalPageScroll="10" hasHorizontalScroller="NO" translatesAutoresizingMaskIntoConstraints="NO" id="a7R-TR-UEJ">
+                                <rect key="frame" x="0.0" y="38" width="844" height="523"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                <clipView key="contentView" drawsBackground="NO" id="kMQ-Ma-G6L">
+                                    <rect key="frame" x="0.0" y="0.0" width="844" height="523"/>
+                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                    <subviews>
+                                        <textView wantsLayer="YES" editable="NO" importsGraphics="NO" richText="NO" verticallyResizable="YES" findStyle="bar" spellingCorrection="YES" smartInsertDelete="YES" id="qgB-Dv-OJS" customClass="DiffViewerTextView" customModule="Beat" customModuleProvider="target">
+                                            <rect key="frame" x="0.0" y="0.0" width="844" height="523"/>
+                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                            <color key="textColor" name="textColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                            <size key="minSize" width="844" height="523"/>
+                                            <size key="maxSize" width="844" height="10000000"/>
+                                        </textView>
+                                    </subviews>
+                                </clipView>
+                                <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="TfA-KX-ZTk">
+                                    <rect key="frame" x="-100" y="-100" width="240" height="16"/>
+                                    <autoresizingMask key="autoresizingMask"/>
+                                </scroller>
+                                <scroller key="verticalScroller" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="ni5-EO-VRA">
+                                    <rect key="frame" x="828" y="0.0" width="16" height="523"/>
+                                    <autoresizingMask key="autoresizingMask"/>
+                                </scroller>
+                            </scrollView>
+                            <popUpButton verticalHuggingPriority="750" id="UV3-ur-EKR" customClass="DiffTimestampMenu" customModule="Beat" customModuleProvider="target">
+                                <rect key="frame" x="613" y="565" width="225" height="25"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                <popUpButtonCell key="cell" type="push" title="Item 1" bezelStyle="rounded" alignment="left" lineBreakMode="truncatingTail" state="on" borderStyle="borderAndBezel" imageScaling="proportionallyDown" inset="2" selectedItem="XfT-ug-X3I" id="HUk-Wa-0ZI">
+                                    <behavior key="behavior" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="message"/>
+                                    <menu key="menu" id="drj-5B-w1f">
+                                        <items>
+                                            <menuItem title="Item 1" state="on" id="XfT-ug-X3I"/>
+                                            <menuItem title="Item 2" id="k8p-in-0E6"/>
+                                            <menuItem title="Item 3" id="cr3-ku-Qby"/>
+                                        </items>
+                                    </menu>
+                                </popUpButtonCell>
+                                <connections>
+                                    <action selector="selectVersion:" target="bU7-R8-ocO" id="NtV-u5-vud"/>
+                                </connections>
+                            </popUpButton>
+                            <button verticalHuggingPriority="750" id="KSi-ax-CEA">
+                                <rect key="frame" x="746" y="3" width="95" height="32"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES"/>
+                                <buttonCell key="cell" type="push" title="Close" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="uaI-Sg-0ZE">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <userDefinedRuntimeAttributes>
+                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="general.close"/>
+                                </userDefinedRuntimeAttributes>
+                                <connections>
+                                    <action selector="close:" target="bU7-R8-ocO" id="viI-PN-VKz"/>
+                                </connections>
+                            </button>
+                            <popUpButton verticalHuggingPriority="750" id="Rbe-4P-3Pz" customClass="DiffTimestampMenu" customModule="Beat" customModuleProvider="target">
+                                <rect key="frame" x="7" y="565" width="225" height="25"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <popUpButtonCell key="cell" type="push" title="Item 1" bezelStyle="rounded" alignment="left" lineBreakMode="truncatingTail" state="on" borderStyle="borderAndBezel" imageScaling="proportionallyDown" inset="2" selectedItem="Zsh-TF-t4f" id="NKF-wx-awI">
+                                    <behavior key="behavior" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="message"/>
+                                    <menu key="menu" id="lVv-Q3-IeG">
+                                        <items>
+                                            <menuItem title="Item 1" state="on" id="Zsh-TF-t4f"/>
+                                            <menuItem title="Item 2" id="fco-gY-NGQ"/>
+                                            <menuItem title="Item 3" id="w1N-5w-Yxz"/>
+                                        </items>
+                                    </menu>
+                                </popUpButtonCell>
+                                <connections>
+                                    <action selector="selectVersion:" target="bU7-R8-ocO" id="OCa-lB-tR3"/>
+                                </connections>
+                            </popUpButton>
+                            <segmentedControl verticalHuggingPriority="750" id="n8S-c3-RUo">
+                                <rect key="frame" x="365" y="567" width="113" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <segmentedCell key="cell" borderStyle="border" alignment="left" style="rounded" trackingMode="selectOne" id="YF5-oc-QU1">
+                                    <font key="font" metaFont="system"/>
+                                    <segments>
+                                        <segment toolTip="Comparison" image="arrow.left.arrow.right" catalog="system" width="52" selected="YES"/>
+                                        <segment toolTip="Full Text" image="text.justify.left" catalog="system" width="52" tag="1"/>
+                                    </segments>
+                                </segmentedCell>
+                                <connections>
+                                    <action selector="switchMode:" target="bU7-R8-ocO" id="t0D-NV-O1r"/>
+                                </connections>
+                            </segmentedControl>
+                            <customView hidden="YES" id="rLS-uB-DmS">
+                                <rect key="frame" x="277" y="219" width="290" height="162"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
+                                <subviews>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="pth-cW-oM5">
+                                        <rect key="frame" x="-2" y="141" width="294" height="21"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <textFieldCell key="cell" lineBreakMode="clipping" alignment="center" title="No Version Control" id="k5W-Cp-2rm">
+                                            <font key="font" metaFont="systemLight" size="18"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="7ei-HJ-z0W">
+                                        <rect key="frame" x="10" y="78" width="262" height="48"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <textFieldCell key="cell" alignment="center" title="Version control is not enabled for this document. Note that this is still a highly experimental feature." id="BoU-Np-mw7">
+                                            <font key="font" metaFont="smallSystem"/>
+                                            <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="9wt-Ww-lbl">
+                                        <rect key="frame" x="62" y="34" width="166" height="32"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="push" title="Begin Version Control" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="ORJ-gc-iyn">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="beginVersionControl:" target="bU7-R8-ocO" id="5us-6H-DZL"/>
+                                        </connections>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="zIw-U2-2lD">
+                                        <rect key="frame" x="55" y="2" width="182" height="32"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="push" title="Compare to Another File" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="syv-VT-CoL">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="openExternalFile:" target="bU7-R8-ocO" id="EAg-0h-ahL"/>
+                                        </connections>
+                                    </button>
+                                </subviews>
+                            </customView>
+                            <tabView drawsBackground="NO" type="noTabsNoBorder" id="CEb-qe-6gd">
+                                <rect key="frame" x="0.0" y="0.0" width="309" height="40"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                <font key="font" metaFont="system"/>
+                                <tabViewItems>
+                                    <tabViewItem label="Commit" identifier="" id="z97-cz-wvq">
+                                        <view key="view" id="uWk-bc-Pf8">
+                                            <rect key="frame" x="0.0" y="0.0" width="309" height="40"/>
+                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                            <subviews>
+                                                <customView id="AAn-1D-ajG" customClass="DiffViewerStatusView" customModule="Beat" customModuleProvider="target">
+                                                    <rect key="frame" x="0.0" y="0.0" width="319" height="40"/>
+                                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                                    <subviews>
+                                                        <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="d6t-XW-B5H">
+                                                            <rect key="frame" x="126" y="13" width="195" height="14"/>
+                                                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                            <textFieldCell key="cell" controlSize="small" lineBreakMode="clipping" title="Uncommitted Changes" id="JnN-Hd-ZkU">
+                                                                <font key="font" metaFont="smallSystem"/>
+                                                                <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                                                <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                            </textFieldCell>
+                                                        </textField>
+                                                        <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="LMx-W8-yTO">
+                                                            <rect key="frame" x="100" y="-1.5" width="27.5" height="44"/>
+                                                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                            <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" image="exclamationmark.triangle.fill" catalog="system" id="GB5-bh-aTf"/>
+                                                            <color key="contentTintColor" red="0.98431372549999996" green="0.75686274509999996" blue="0.13725490200000001" alpha="1" colorSpace="calibratedRGB"/>
+                                                        </imageView>
+                                                        <button verticalHuggingPriority="750" id="M5S-wu-Rjh">
+                                                            <rect key="frame" x="3" y="3" width="96" height="32"/>
+                                                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                                            <buttonCell key="cell" type="push" title="Commit" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="0Un-pe-ZSK">
+                                                                <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                                <font key="font" metaFont="system"/>
+                                                            </buttonCell>
+                                                            <userDefinedRuntimeAttributes>
+                                                                <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="versionControl.commit"/>
+                                                            </userDefinedRuntimeAttributes>
+                                                            <connections>
+                                                                <action selector="commit:" target="bU7-R8-ocO" id="hf9-03-2zp"/>
+                                                            </connections>
+                                                        </button>
+                                                    </subviews>
+                                                    <connections>
+                                                        <outlet property="icon" destination="LMx-W8-yTO" id="Hug-9n-5yv"/>
+                                                        <outlet property="text" destination="d6t-XW-B5H" id="tiS-lh-QN4"/>
+                                                    </connections>
+                                                </customView>
+                                            </subviews>
+                                        </view>
+                                    </tabViewItem>
+                                    <tabViewItem label="Restore" identifier="" id="4pA-Ii-vdC">
+                                        <view key="view" id="1ck-BV-DzW">
+                                            <rect key="frame" x="0.0" y="0.0" width="309" height="40"/>
+                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                        </view>
+                                    </tabViewItem>
+                                </tabViewItems>
+                            </tabView>
+                            <button verticalHuggingPriority="750" id="7dG-cd-9l2">
+                                <rect key="frame" x="578" y="3" width="165" height="32"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxY="YES"/>
+                                <buttonCell key="cell" type="push" title="Generate Markers" bezelStyle="rounded" imagePosition="leading" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="M6O-5k-N75">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                    <imageReference key="image" image="asterisk" catalog="system" symbolScale="small"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="showGenerateRevisionMenu:" target="bU7-R8-ocO" id="JJn-FC-1Gd"/>
+                                    <segue destination="wdw-kc-zIG" kind="sheet" identifier="GenerateMarkers" id="mbe-ZO-Ib3"/>
+                                </connections>
+                            </button>
+                            <button verticalHuggingPriority="750" id="v9p-yp-pGE">
+                                <rect key="frame" x="464" y="3" width="112" height="32"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxY="YES"/>
+                                <buttonCell key="cell" type="push" title="Restore" bezelStyle="rounded" imagePosition="left" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="EeU-eL-No6">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                    <imageReference key="image" image="clock.arrow.circlepath" catalog="system" symbolScale="small"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="revertToCurrentVersion:" target="bU7-R8-ocO" id="fwu-kT-Iaz"/>
+                                </connections>
+                            </button>
+                            <button verticalHuggingPriority="750" id="8MN-65-u3e">
+                                <rect key="frame" x="310" y="3" width="118" height="32"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES"/>
+                                <buttonCell key="cell" type="push" title="Reset" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="Zyo-Dc-v9A">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <userDefinedRuntimeAttributes>
+                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="versionControl.reset"/>
+                                </userDefinedRuntimeAttributes>
+                                <connections>
+                                    <action selector="resetVersionControl:" target="bU7-R8-ocO" id="uo4-Y9-rf4"/>
+                                </connections>
+                            </button>
+                        </subviews>
+                    </view>
+                    <connections>
+                        <outlet property="actionTabs" destination="CEb-qe-6gd" id="4eu-az-Omh"/>
+                        <outlet property="commitButton" destination="M5S-wu-Rjh" id="PW6-nZ-hfv"/>
+                        <outlet property="currentVersionMenu" destination="Rbe-4P-3Pz" id="ciY-ix-Tw6"/>
+                        <outlet property="generateRevisionsButton" destination="7dG-cd-9l2" id="NbM-RY-fPI"/>
+                        <outlet property="otherVersionMenu" destination="UV3-ur-EKR" id="H4f-jD-def"/>
+                        <outlet property="resetButton" destination="8MN-65-u3e" id="Vv5-t5-hCj"/>
+                        <outlet property="restoreButton" destination="v9p-yp-pGE" id="xMt-IR-hih"/>
+                        <outlet property="statusView" destination="AAn-1D-ajG" id="0ef-nN-r6m"/>
+                        <outlet property="textView" destination="qgB-Dv-OJS" id="Njm-v3-wzG"/>
+                        <outlet property="versionControlNotificationView" destination="rLS-uB-DmS" id="9w6-DY-6Pz"/>
+                        <outlet property="viewModeControl" destination="n8S-c3-RUo" id="5Vo-lR-nhP"/>
+                    </connections>
+                </viewController>
+                <customObject id="9uD-mB-xHs" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="218" y="280.5"/>
+        </scene>
+        <!--Diff Viewer Generate Markers View Controller-->
+        <scene sceneID="ZR7-h1-MEo">
+            <objects>
+                <viewController id="wdw-kc-zIG" customClass="DiffViewerGenerateMarkersViewController" customModule="Beat" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" id="dRp-bZ-zT7">
+                        <rect key="frame" x="0.0" y="0.0" width="318" height="295"/>
+                        <autoresizingMask key="autoresizingMask"/>
+                        <subviews>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="4Xs-o7-MSz">
+                                <rect key="frame" x="18" y="244" width="286" height="31"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" lineBreakMode="clipping" alignment="left" title="Generate Revision Markers" id="92s-ey-KGa">
+                                    <font key="font" metaFont="systemLight" size="21"/>
+                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="9Ca-rD-EKk">
+                                <rect key="frame" x="18" y="175" width="286" height="60"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" alignment="left" title="Revision markers will be added to where the document has changed compared to the selected commit." id="Szk-PU-Iek">
+                                    <font key="font" metaFont="system"/>
+                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="upM-2y-2oG">
+                                <rect key="frame" x="18" y="89" width="289" height="14"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" controlSize="small" alignment="left" title="Generation" id="DTn-LQ-J1F">
+                                    <font key="font" metaFont="smallSystem"/>
+                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
+                            <button id="19l-WH-gcJ">
+                                <rect key="frame" x="158" y="16" width="147" height="37"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" widthSizable="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="bevel" title="Generate" bezelStyle="regularSquare" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="26G-OC-IDB">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                    <string key="keyEquivalent" base64-UTF8="YES">
+DQ
+</string>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="generate:" target="wdw-kc-zIG" id="Ldx-XN-aGo"/>
+                                </connections>
+                            </button>
+                            <popUpButton verticalHuggingPriority="750" id="sk0-Mi-VT7">
+                                <rect key="frame" x="97" y="82" width="209" height="25"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <popUpButtonCell key="cell" type="push" title="Item 1" bezelStyle="rounded" alignment="left" lineBreakMode="truncatingTail" state="on" borderStyle="borderAndBezel" imageScaling="proportionallyDown" inset="2" selectedItem="Ug2-VQ-YXr" id="qCO-Up-0Bv">
+                                    <behavior key="behavior" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="message"/>
+                                    <menu key="menu" id="5ez-kP-QP5">
+                                        <items>
+                                            <menuItem title="Item 1" state="on" id="Ug2-VQ-YXr"/>
+                                            <menuItem title="Item 2" id="HJw-83-5C6"/>
+                                            <menuItem title="Item 3" id="1dJ-QV-LNg"/>
+                                        </items>
+                                    </menu>
+                                </popUpButtonCell>
+                            </popUpButton>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="kZC-Ir-ZRj">
+                                <rect key="frame" x="18" y="135" width="286" height="38"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" controlSize="small" alignment="left" title="NOTE: This action can't be undone and existing markers might be overwritten" id="Hq7-oF-swU">
+                                    <font key="font" metaFont="smallSystem"/>
+                                    <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
+                            <box verticalHuggingPriority="750" fixedFrame="YES" boxType="separator" translatesAutoresizingMaskIntoConstraints="NO" id="9Ka-gt-Eie">
+                                <rect key="frame" x="12" y="121" width="295" height="5"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES"/>
+                            </box>
+                            <box verticalHuggingPriority="750" fixedFrame="YES" boxType="separator" translatesAutoresizingMaskIntoConstraints="NO" id="fWv-vn-E8M">
+                                <rect key="frame" x="12" y="66" width="295" height="5"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES"/>
+                            </box>
+                            <button id="XYU-He-SFM">
+                                <rect key="frame" x="13" y="16" width="146" height="37"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="bevel" title="Cancel" bezelStyle="regularSquare" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="ONR-c1-aQa">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                    <string key="keyEquivalent" base64-UTF8="YES">
+Gw
+</string>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="dismissController:" target="wdw-kc-zIG" id="4b1-75-TXu"/>
+                                </connections>
+                            </button>
+                        </subviews>
+                    </view>
+                    <connections>
+                        <outlet property="generationMenu" destination="sk0-Mi-VT7" id="9D1-rH-iqo"/>
+                    </connections>
+                </viewController>
+                <customObject id="O1c-4D-YMO" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="930" y="301.5"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="arrow.left.arrow.right" catalog="system" width="16" height="17"/>
+        <image name="asterisk" catalog="system" width="12" height="13"/>
+        <image name="clock.arrow.circlepath" catalog="system" width="13" height="13"/>
+        <image name="exclamationmark.triangle.fill" catalog="system" width="17" height="15"/>
+        <image name="text.justify.left" catalog="system" width="16" height="13"/>
+    </resources>
+</document>

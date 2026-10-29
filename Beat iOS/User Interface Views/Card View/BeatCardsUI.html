@@ -1,0 +1,781 @@
+<html>
+	<head>
+		<style type='text/css'>
+			{{css}}
+			{{iOS-css}}
+		</style>
+		<script>
+			let modes = {
+				ios: 1,
+				window: 2,
+				container: 3
+			}
+
+			const mode = {{mode}}
+			const iOS = {{iOS}}
+			const kanbanEnabled = {{kanban}}
+			const compactEnabled = {{compact}}
+			
+			let sortables = []
+
+			let disabled = false
+			
+			let colors = ['none', 'red', 'blue', 'green', 'pink', 'brown', 'cyan', 'orange', 'magenta']
+			let colorName = ['#color.none#', '#color.red#', '#color.blue#', '#color.green#', '#color.pink#', '#color.brown#', '#color.cyan#', '#color.orange#', '#color.magenta#'];
+
+			setupContextMenu()
+
+			function getPosition(e) {
+				var posx = 0;
+				var posy = 0;
+				
+				if (!e) var e = window.event;
+				
+				if (e.pageX || e.pageY) {
+					posx = e.pageX;
+					posy = e.pageY;
+				} else if (e.clientX || e.clientY) {
+					posx = e.clientX + document.body.scrollLeft +
+					document.documentElement.scrollLeft;
+					posy = e.clientY + document.body.scrollTop +
+					document.documentElement.scrollTop;
+				}
+				
+				return {
+					x: posx,
+					y: posy
+				}
+			}
+
+			function disable() {
+				disabled = true
+				const spinner = document.querySelector("#spinner")
+				spinner.className = "visible"
+			}
+			
+			function updateSelection(selected, scroll, instant = false) {
+				let items = document.querySelectorAll(".item")
+				for (let i=0; i<items.length; i++) {
+					let item = items[i]
+					let uuid = item.getAttribute("uuid")
+					
+					if (uuid == selected) {
+						item.classList.add("selected")
+						if (scroll && !instant) item.scrollIntoView( { behavior: "smooth", block: "center" });
+						else if (scroll && instant)item.scrollIntoView( { block: "center" });
+
+					} else {
+						item.classList.remove("selected")
+					}
+				}
+			}
+			
+			function initDragDrop () {
+				for (const sortable of sortables) sortable.destroy()
+				sortables = []
+
+				const kanban = document.body.classList.contains("kanban")
+
+				// Every drag container is a sortable list, and cards can be moved between them
+				document.querySelectorAll(".dragContainer").forEach((dragContainer) => {
+					sortables.push(new Sortable(dragContainer, {
+						group: "cards",
+						animation: 200,
+						direction: (kanban) ? "vertical" : "horizontal",
+						filter: ".section",
+						
+						swapThreshold: 0.8,
+						delayOnTouchOnly: true,
+						delay: 300,
+						touchStartThreshold: 5,
+						supportPointer: false,
+						
+						easing: "cubic-bezier(1, 0, 0, 1)",
+						ghostClass: "sortable-ghost",
+						
+						onEnd: function (evt) {
+							if (evt.to == evt.from && evt.newIndex == evt.oldIndex) return;
+							
+							let item = evt.item
+							let sceneUUID = item.getAttribute("uuid")
+
+							// The scene will be moved before its next sibling. If the card was dropped
+							// at the end of a container, the target is the next outline item in the DOM.
+							let sibling = item.nextElementSibling
+							let siblingUUID = sibling?.getAttribute("uuid") ?? uuidAfter(evt.to)
+
+							Beat.call(`Beat.custom.moveScene("${sceneUUID}", "${siblingUUID}")`)
+						},
+					}))
+				})
+			}
+
+			// Returns the uuid of the first outline item following the given container in the DOM
+			function uuidAfter(container) {
+				const elements = document.querySelectorAll("#container [uuid]")
+				for (const element of elements) {
+					if (!container.contains(element) && (container.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+						return element.getAttribute("uuid")
+					}
+				}
+				return ""
+			}
+
+			function setKanbanMode(value) {
+				document.body.classList.toggle("kanban", value)
+				updateViewModeButtons()
+
+				Beat.call((v) => { Beat.custom.setKanbanMode(v) }, value)
+			}
+
+			// Collapses/expands a kanban column and persists the state in document settings
+			function toggleColumn(event, uuid) {
+				event.stopPropagation()
+
+				const column = document.querySelector(`.kanbanColumn[sectionUuid="${uuid}"]`)
+				if (column == null) return;
+
+				const collapsed = column.classList.toggle("collapsed")
+				Beat.call((u, c) => { Beat.custom.setColumnCollapsed(u, c) }, uuid, collapsed)
+			}
+
+			// Compact mode collapses every card to its title bar
+			function setCompactMode(value) {
+				document.body.classList.toggle("compact", value)
+				updateViewModeButtons()
+
+				// WebKit doesn't reliably recompute the cards' aspect-ratio height when toggling
+				// compact (the card content switches between absolute and normal flow), leaving them
+				// a few pixels off until the next full render. Detaching the container from layout and
+				// reattaching it forces a clean relayout so the height matches a fresh render.
+				const c = document.getElementById("container")
+				c.style.display = "none"
+				void c.offsetHeight
+				c.style.display = ""
+
+				Beat.call((v) => { Beat.custom.setCompactMode(v) }, value)
+			}
+
+			// Adds a new card at the end of a kanban column
+			function addCardToColumn(event, key) {
+				event.stopPropagation()
+
+				const column = document.querySelector(`.kanbanColumn[sectionUuid="${key}"]`)
+				if (column == null) return;
+
+				const cards = column.querySelectorAll(".card")
+				const lastCard = cards[cards.length - 1]
+
+				// Use the last card as the anchor. In an empty column we anchor to the section itself.
+				let uuid = lastCard?.getAttribute("uuid") ?? ((key != "unsorted") ? key : "")
+
+				Beat.call((u) => { Beat.custom.getNewCard(u) }, uuid)
+			}
+
+			function addAct(event) {
+				event.stopPropagation()
+				Beat.call(() => { Beat.custom.promptNewAct() })
+			}
+
+			function updateViewModeButtons() {
+				const kanban = document.body.classList.contains("kanban")
+				const compact = document.body.classList.contains("compact")
+				document.getElementById("gridModeButton")?.classList.toggle("selectedMode", !kanban)
+				document.getElementById("kanbanModeButton")?.classList.toggle("selectedMode", kanban)
+				document.getElementById("compactModeButton")?.classList.toggle("selectedMode", compact)
+			}
+
+			function filter(element) {
+				const value = element.checked;
+				let className = 'hide-' + element.name;
+				
+				if (value) {
+					document.body.classList.remove(className);
+				} else {
+					document.body.classList.add(className);
+				}
+			}
+
+			let zoomLevel = 1
+			function zoomIn () {
+				if (zoomLevel < 2) zoomLevel++;
+				setZoomClass()
+			}
+			function zoomOut () {
+				if (zoomLevel > 0) zoomLevel--;
+				setZoomClass()
+			}
+			function setZoomClass() {
+				// Only touch the zoom classes — the body can also carry the kanban class
+				document.body.classList.remove("zoomLevel-0", "zoomLevel-1", "zoomLevel-2")
+				document.body.classList.add("zoomLevel-" + zoomLevel)
+			}
+
+			function print() {
+				Beat.call(() => {
+					Beat.custom.printCards()
+				})
+			}
+
+			/// Setups context menu
+			function setupContextMenu() {
+				contextMenu = {};
+				contextMenu.init = function () {
+					contextMenu.menu = document.createElement('div');
+					contextMenu.menu.id = 'contextMenu';
+					
+					var content = '';
+
+					for (var i in colors) {
+						var color = colors[i];
+						let localizedColorName = colorName[i]
+						if (typeof color === 'string') {
+							content += `
+								<div onclick="contextMenu.setColor('${color}')" class='menuItem ${color}'>
+									<div class='color ${color}'></div> ${localizedColorName}
+								</div>`
+						}
+					}
+					
+					// No synopsis editing on iOS
+					if (!iOS) content += "<div onclick='contextMenu.addSynopsis()' class='menuItem'>+ synopsis</div>"
+
+					// Destructive actions — shown depending on the target type
+					content += "<div id='menuDeleteScene' onclick='contextMenu.deleteScene()' class='menuItem destructive'>#cardView.deleteScene#</div>"
+					content += "<div id='menuDeleteAct' onclick='contextMenu.deleteAct()' class='menuItem destructive'>#cardView.deleteAct#</div>"
+					
+					// macOS has a more elegant way of adding new scenes
+					if (iOS) content += "<div onclick='contextMenu.addSceneOnMobile()' class='menuItem'>+ #cards.addScene#</div>"
+					
+					contextMenu.menu.innerHTML = content;
+					document.body.appendChild(contextMenu.menu);
+				}
+
+				contextMenu.toggle = (e) => {
+					if (contextMenu.menu == null) contextMenu.init();
+					
+					if (contextMenu.open) {
+						contextMenu.close()
+					} else {
+						contextMenu.show(e)
+					}
+				}
+				
+				// e can be either an event or a div
+				contextMenu.show = (e) => {
+					let target, coordinates;
+					
+					if (!iOS) {
+						target = e.target;
+						
+						// Find the actual target scene, just in case
+						while (target) {
+							const uuid = target.getAttribute("uuid");
+							if (uuid) {
+								contextMenu.target = target;
+								contextMenu.uuid = uuid;
+								break;
+							}
+							target = target.parentNode;
+						}
+						
+						if (!contextMenu.target) return;
+						coordinates = getPosition(e);
+						
+					} else {
+						if (!e) return;
+						target = e;
+						
+						const uuid = target.getAttribute("uuid");
+						contextMenu.target = target;
+						contextMenu.uuid = uuid
+						
+						const rect = target.getBoundingClientRect();
+						coordinates = {
+							x: window.scrollX + rect.x,
+							y: window.scrollY + rect.bottom
+						};
+					}
+					
+					// Show the correct destructive action for the target type
+					const isSection = (contextMenu.target?.closest(".section") != null)
+					const deleteScene = document.getElementById("menuDeleteScene")
+					const deleteAct = document.getElementById("menuDeleteAct")
+					if (deleteScene) deleteScene.style.display = (isSection) ? "none" : "flex";
+					if (deleteAct) deleteAct.style.display = (isSection) ? "flex" : "none";
+
+					// Position and show the menu
+					contextMenu.menu.style.left = coordinates.x + "px";
+					contextMenu.menu.style.top = coordinates.y + "px";
+					contextMenu.menu.className = "visible";
+					contextMenu.open = true;
+					
+					// Avoid overflow
+					if (contextMenu.menu.clientWidth + coordinates.x > window.innerWidth) {
+						contextMenu.menu.style.left = (coordinates.x - contextMenu.menu.clientWidth) + "px";
+					}
+					
+					if (contextMenu.menu.clientHeight + coordinates.y > window.scrollY + document.body.clientHeight) {
+						contextMenu.menu.style.top = (coordinates.y - contextMenu.menu.clientHeight) + "px";
+					}
+				}
+				
+				contextMenu.close = function () {
+					if (contextMenu.menu == null) return;
+					
+					contextMenu.open = false;
+					contextMenu.menu.className = '';
+				}
+
+				contextMenu.setColor = function (color) {
+					//disable()
+					
+					let uuid = contextMenu.target.getAttribute("uuid")
+					Beat.call((uuid, color) => {
+						Beat.custom.setColor(uuid, color)
+					}, contextMenu.uuid, color)
+
+					contextMenu.close()
+					
+					//if (iOS) Beat.call("Beat.custom.refresh()")
+				}
+				
+				contextMenu.deleteScene = function () {
+					const uuid = contextMenu.uuid
+					contextMenu.close()
+					if (uuid == null) return;
+
+					Beat.call((u) => { Beat.custom.deleteScene(u) }, uuid)
+				}
+
+				contextMenu.deleteAct = function () {
+					const uuid = contextMenu.uuid
+					contextMenu.close()
+					if (uuid == null) return;
+
+					Beat.call((u) => { Beat.custom.deleteAct(u) }, uuid)
+				}
+
+				contextMenu.addSynopsis = function () {
+					// Add an empty synopsis item inside the card
+					let card = contextMenu.target.closest(".card")
+					contextMenu.close()
+					
+					addEditableSynopsis(card)
+				}
+				
+				contextMenu.addSceneOnMobile = () => {
+					contextMenu.close()
+					
+					let uuid = contextMenu.uuid
+					if (uuid == null) return;
+					
+					Beat.call((uuid) => {
+						Beat.custom.addSceneOnMobile(uuid)
+					}, uuid)
+					/*
+					Beat.log("Trying to prompt...")
+					let title = Beat.prompt("#cards.addScenePrompt#", "", "INT. ")
+					Beat.log(" -> " + title)
+					if (title == null || title == "") return;
+					
+					Beat.call((uuid, title) => {
+						Beat.custom.addScene(uuid, title)
+					}, prevUuid, title)
+					 */
+				}
+
+				contextMenu.open = false
+			}
+
+			
+			/* HOST CALLS */
+			
+			function scrollToLine(uuid) {
+				Beat.call("Beat.custom.scrollToLine('" + uuid + "')")
+			}
+
+			function restart() {
+				Beat.call("Beat.custom.restart()")
+			}
+
+	
+			/* SYNOPSIS FUNCTIONS */
+	
+			/// Adds an editable synopsis item
+			function addEditableSynopsis(card) {
+				let synopsisList = card.querySelector(".synopsis ul")
+				let item = document.createElement("li")
+				item.classList.add("synopsis-item")
+				item.contentEditable = true
+				synopsisList.appendChild(item)
+				
+				setupSynopsis(item)
+				
+				item.edit()
+				item.focus()
+			}
+			
+			function editFirstSynopsis(card) {
+				let item = card.querySelector(".synopsis-item")
+				setupSynopsis(item)
+				item.edit()
+				item.focus()
+			}
+			
+			/// Modifies the synopsis line with given UUID
+			function modifySynopsis(uuid, string) {
+				Beat.call((uuid, string) => {
+					Beat.custom.modifySynopsis(uuid, string)
+				}, uuid, string)
+			}
+			
+			/// Adds a new synopsis to given scene in host
+			function addSynopsis(sceneUUID, string) {
+				Beat.call((sceneUUID, string) => {
+					Beat.custom.addSynopsis(sceneUUID, string)
+				}, sceneUUID, string)
+			}
+						
+			function addScene(card) {
+				let uuid = card.getAttribute("uuid")
+				/*
+				Beat.call((uuid, card) => {
+					Beat.custom.addScene(uuid, card)
+				}, uuid, "New Scene")
+				*/
+				
+				// Now we need to request card code from the host plugin
+				let newCard = Beat.call((uuid) => {
+					Beat.custom.getNewCard(uuid)
+				}, uuid)
+			}
+			
+			// uuid: the card after which to add the new placeholder card, 
+			function addCard(uuid, html) {
+				let precedingCard = document.querySelector(`.card[uuid="${uuid}"]`)
+
+				// No card found — the anchor can also be an empty kanban column
+				if (precedingCard == null) {
+					const columnKey = (uuid.length > 0) ? uuid : "unsorted"
+					const container = document.querySelector(`.kanbanColumn[sectionUuid="${columnKey}"] .dragContainer`)
+					if (container == null) return;
+
+					const div = document.createElement("div")
+					div.innerHTML = html
+					const card = div.firstChild
+					card.setAttribute("prevUuid", uuid)
+
+					container.appendChild(card)
+					editTitle(card)
+					return
+				}
+
+				let nextCard = precedingCard.nextSibling
+				
+				// We need to support old browser,so here's a little trickery
+				const div = document.createElement("div")
+				div.innerHTML = html
+				const card = div.firstChild
+				
+				card.setAttribute("prevUuid", uuid)
+				
+				if (nextCard != null) {
+					precedingCard.parentNode.insertBefore(card, nextCard)
+				} else {
+					console.log("No next card")
+					precedingCard.parentNode.appendChild(card)
+				}
+				
+				editTitle(card)
+				
+				/* console.log("Preceding: ", precedingCard) */
+			}
+			
+		</script>
+	</head>
+	<body class='zoomLevel-1'>
+		<div id='menu'>
+			<button id='print' class='ui' onclick="print()">⎙ #cardView.print#</button>
+
+			<div id='filters'>
+				<input type='checkbox' name='scenes' onclick='filter(this)' checked> 🎬 
+				<input type='checkbox' name='section-1' onclick='filter(this)' checked> # 
+				<input type='checkbox' name='section-2' onclick='filter(this)' checked> ## 
+				<input type='checkbox' name='section-3' onclick='filter(this)' checked> ### 
+			</div>
+			
+			<div id='zoom'>
+			   <button onclick='zoomOut()'>-</button>
+			   <button onclick='zoomIn()'>+</button>
+			</div>
+
+			<div id='viewMode'>
+			   <!-- Layout: exclusive choice between grid and columns -->
+			   <div class='segmented'>
+			      <button id='gridModeButton' title='#cardView.grid#' onclick='setKanbanMode(false)'><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg></button>
+			      <button id='kanbanModeButton' title='#cardView.kanban#' onclick='setKanbanMode(true)'><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="3.6" height="14" rx="1"/><rect x="5.2" y="0" width="3.6" height="9" rx="1"/><rect x="10.4" y="0" width="3.6" height="12" rx="1"/></svg></button>
+			   </div>
+			   <!-- Density: independent on/off toggle, cumulative with either layout -->
+			   <button id='compactModeButton' class='toggleButton' title='#cardView.compact#' onclick='setCompactMode(!document.body.classList.contains("compact"))'><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="1" width="14" height="2.6" rx="1"/><rect x="0" y="5.7" width="14" height="2.6" rx="1"/><rect x="0" y="10.4" width="14" height="2.6" rx="1"/></svg></button>
+			</div>
+		</div>
+		<div id='spinner'><span class="loader"></span></div>
+		<div id='container'>
+			{{html}}
+		</div>
+
+		<script>
+			const container = document.getElementById('container')
+			
+			let touchedCard = null
+			let touchStartTime = null
+			
+			function load(html) {
+				var scrollPos = document.body.scrollTop
+
+				container.innerHTML = html.replaceAll("\\\"", "\"")
+				updateCardMenus()
+				initDragDrop()
+				
+				document.body.scrollTop = scrollPos
+
+				if (disabled) {
+					disabled = false
+					const spinner = document.querySelector("#spinner")
+					spinner.className = ""
+				}
+			}
+
+			// Updates
+			function updateCardMenus() {
+				let cards = document.querySelectorAll(".card")
+				let touching = false
+
+				document.body.ontouchmove = () => {
+					touching = true
+					touchedCard = null
+				}
+				
+				let sections = document.querySelectorAll(".section")
+				sections.forEach((section) => {
+					section.onclick = () => { contextMenu.close() }
+					section.ontouchstart = () => { contextMenu.close() }
+					section.oncontextmenu = (e) => {
+						e.preventDefault()
+						contextMenu.toggle(e)
+					}
+				})
+				
+				cards.forEach((card) => {
+					let uuid = card.getAttribute("uuid")
+
+					// Tap for iOS
+					card.ontouchend = () => {
+						touchedCard = null
+						
+						if (!touching && !contextMenu.open) {
+							scrollToLine(uuid);
+							Beat.call("Beat.custom.returnToEditor()");
+						}
+						touching = false
+					}
+					
+					card.ontouchstart = () => {
+						if (contextMenu.open) {
+							contextMenu.close()
+							return
+						}
+						
+						touchedCard = card
+						setTimeout(() => {
+							if (touchedCard == null) return;
+							
+							// Show context menu - not right now
+							contextMenu.toggle(card)
+						}, 1000)
+					}
+					
+					// Update click
+					card.onclick = () => {
+						if (contextMenu != null) contextMenu.close();
+						
+						// In non-container mode we'll scroll to the line, and on iOS we'll close the view
+						if (iOS || mode == modes.window) {
+							scrollToLine(uuid);
+							if (iOS) Beat.call("Beat.custom.returnToEditor()");
+						}
+					}
+					// Update double click (macOS)
+					card.ondblclick = (e) => {
+						// If we double-clicked a synopsis item, don't return to editor
+						if (e.target.classList.contains("synopsis-item")) return;
+
+						// In container mode we'll return to editor view
+						if (mode == modes.container && !iOS) {
+							Beat.call("Beat.custom.returnToEditor()")
+						}
+
+						scrollToLine(uuid)
+					}
+					// Update context menus
+					card.oncontextmenu = (e) => {
+						e.preventDefault()
+						contextMenu.toggle(e)
+					}
+					
+					// Update synopsis buttons
+					let synopses = card.querySelectorAll("li.synopsis-item")
+					synopses.forEach((synopsis) => {
+						setupSynopsis(synopsis)
+					})
+					
+					// Update add buttons
+					let addButton = card.querySelector(".addScene")
+					addButton.onclick = (e) => {
+						addScene(card)
+					}
+					
+					// Update edit button
+					card.querySelector(".editButton").onclick = (e) => {
+						editCard(card)
+					}
+				})
+				
+				document.getElementById("container").onclick = () => {
+					contextMenu.close();
+				}
+				
+				/*
+				document.getElementById("container").ontouchstart = () => {
+					if (contextMenu.open) contextMenu.close();
+				}
+				
+				document.getElementById("container").ontouchend = () => {
+					if (contextMenu.open) contextMenu.close();
+				}
+				 */
+			}
+						
+			function editCard(card) {
+				// If no synopsis lines exist, create one
+				let items = card.querySelectorAll("li.synopsis-item");
+				if (items.length == 0) {
+					addEditableSynopsis(card)
+				} else {
+					editFirstSynopsis(card)
+				}
+			}
+			
+			function editTitle(card) {
+				let title = card.querySelector(".title")
+				title.contentEditable = true
+				title.focus()
+				title.canceled = false
+				title.committed = false
+
+				// Single commit path — runs on Enter, Tab, clicking out, or when another control
+				// (Add Scene / Add Act) steals focus. Only Esc cancels. The placeholder card is
+				// removed afterwards either way: on commit the host re-renders with the real card.
+				title.commit = () => {
+					if (title.committed) return
+					title.committed = true
+
+					let text = title.innerText.trim()
+					if (!title.canceled && text.length > 0) {
+						let prevUuid = card.getAttribute("prevUuid")
+						Beat.call((prevUuid, text) => {
+							Beat.custom.addScene(prevUuid, text)
+						}, prevUuid, text)
+					}
+
+					if (card.parentNode) card.parentNode.removeChild(card)
+				}
+
+				title.onkeydown = (e) => {
+					if (e.keyCode == 13 || e.keyCode == 9) {		// Enter or Tab commit
+						e.preventDefault()
+						title.blur()
+					} else if (e.keyCode == 27) {					// Esc cancels
+						e.preventDefault()
+						title.canceled = true
+						title.blur()
+					}
+				}
+
+				title.onblur = () => {
+					title.commit()
+				}
+			}
+			
+			function setupSynopsis(synopsis) {
+				synopsis.ondblclick = () => {
+					synopsis.edit()
+				}
+				
+				synopsis.edit = () => {
+					// Store original
+					synopsis.original = synopsis.innerText
+					synopsis.canceled = false
+					
+					synopsis.classList.add("editing")
+					synopsis.contentEditable = true
+				}
+
+				synopsis.onblur = () => {
+					synopsis.classList.remove("editing")
+					synopsis.contentEditable = false
+
+					let uuid = synopsis.getAttribute("uuid")
+
+					// Esc restores the original text and skips saving
+					if (synopsis.canceled) {
+						synopsis.canceled = false
+						synopsis.innerText = synopsis.original
+						// A brand-new (unsaved) item is discarded
+						if (!(uuid?.length > 0)) synopsis.remove()
+						return
+					}
+
+					if (uuid?.length > 0) {
+						// Modify existing synopsis
+						modifySynopsis(uuid, synopsis.innerText)
+					} else if (synopsis.innerText.length > 0) {
+						// Add a new synopsis
+						let scene = synopsis.closest(".card").getAttribute("uuid")
+						addSynopsis(scene, synopsis.innerText)
+					} else {
+						// Remove temporary item
+						synopsis.remove()
+					}
+				}
+
+				synopsis.onkeydown = (e) => {
+					if (e.keyCode == 13 || e.keyCode == 9) {
+						// Enter or Tab commits
+						e.preventDefault()
+						synopsis.blur()
+					}
+					if (e.keyCode == 27) {
+						// Esc cancels
+						e.preventDefault()
+						synopsis.canceled = true
+						synopsis.blur()
+					}
+				}
+			}
+
+			// Initial setup
+			if (kanbanEnabled) document.body.classList.add("kanban");
+			if (compactEnabled) document.body.classList.add("compact");
+			updateViewModeButtons()
+
+			updateCardMenus()
+			initDragDrop()
+			
+			let currentScene = "{{current}}"
+			updateSelection(currentScene, true, true);
+
+		</script>
+	</body>
+</html>

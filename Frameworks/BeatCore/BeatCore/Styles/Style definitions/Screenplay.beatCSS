@@ -1,0 +1,220 @@
+/*
+
+ Rendering Stylesheet for Beat.
+ This is not actual CSS, just uses similar markup.
+
+ Changing values without knowing what you are doing can very
+ well cause a crash. Dread lightly.
+ 
+ "Class" names are internal type names, not .typeAsString names.
+ 
+ © Lauri-Matti Parppei 2021-2023
+
+*/
+
+page {
+    padding-left: 60;
+    
+    margin-left: 30;
+    margin-right: 25;
+    margin-top: 40;
+    margin-bottom: 50;
+    margin-bottom-us: 0;
+    margin-bottom-a4: 10;
+    
+    default-width-a4: 60ch;
+    default-width-us: 61ch;
+    
+    line-height: 12;
+    
+    content-padding: 7ch;
+ 
+    margin-left-a4: 20;
+    margin-left-us: 29;
+}
+
+titlePage {
+    margin-top: 40;
+    margin-bottom: 65;
+    margin-left: 40;
+    margin-right: 40;
+    
+    line-height: 12;
+}
+
+heading {
+    width-a4: 60ch - 5ch;
+    width-us: 61ch - 5ch;
+    
+    margin-top: userSetting(sceneHeadingSpacing)l;
+    bold: userSetting(headingStyleBold);
+    underline: userSetting(headingStyleUnderline);
+    
+    uppercase: true;
+}
+
+section {
+    margin-top: userSetting(sceneHeadingSpacing)l;
+    bold: true;
+    font: userSetting(sectionFontType);
+    fontSize: userSetting(sectionFontSize);
+    
+    if sectionDepth > 2 then fontSize: 12;
+    if sectionDepth > 1 then fontSize: userSetting(sectionFontSize) - 2;
+    
+    min-font-size: 12;
+    
+    trim: true;
+}
+
+synopsis {
+    margin-top: 1l;
+    italic: true;
+    color: darkGray;
+    
+    font: system;
+    font: userSetting(synopsisFontType);
+    
+    trim: true;
+}
+
+action {
+    margin-top: 1l;
+}
+
+centered {
+    width-a4: 60ch;
+    width-us: 61ch;
+
+    margin-top: 1l;
+    text-align: center;
+    
+    trim: true;
+}
+
+character {
+    width-a4: 38ch;
+    width-us: 40ch;
+    
+    margin-left: 19ch;
+    margin-top: 1l;
+    
+    trim: true;
+}
+
+parenthetical {
+    width-a4: 28ch;
+    width-us: 28ch;
+    
+    margin-left: 15ch;
+    margin-top: 0;
+    
+    trim:true;
+}
+
+dialogue {
+    width-a4: 35ch;
+    width-us: 35ch;
+    
+    margin-top: 0;
+    margin-left: 10ch;
+    
+    trim: true;
+}
+
+more {
+    width-a4: 38ch;
+    width-us: 38ch;
+    
+    margin-left: 136px;
+    margin-top: 0;
+}
+
+dualDialogueCharacter {
+    trim: true;
+    
+    width-a4: 20ch;
+    width-us: 21ch;
+
+    margin-top: 1l;
+    margin-left: 7ch;
+}
+dualDialogueMore {
+    width-a4: 20ch;
+    width-us: 21ch;
+
+    margin-top: 0;
+    margin-left: 6ch;
+}
+dualDialogueParenthetical {
+    width-a4: 25ch;
+    width-us: 26ch;
+    
+    margin-top: 0;
+    margin-left: 4ch;
+    
+    trim: true;
+}
+dualDialogue {
+    width-a4: 27ch;
+    width-us: 28ch;
+
+    margin-left: 0ch;
+    margin-right: 1ch;
+    
+    trim: true;
+}
+
+transition {
+    margin-top: 1l;
+    
+    text-align: right;
+    uppercase: true;
+}
+
+lyrics {
+    margin-top: 1l;
+    text-align: center;
+    italic: true;
+}
+
+shot {
+    uppercase: true;
+    
+    bold: userSetting(shotStyleBold);
+    underline: userSetting(shotStyleUnderline);
+    margin-top: 1l;
+}
+
+titlePageTitle {
+    margin-top: 20l;
+    margin-bottom: 2l;
+    text-align: center;
+    uppercase: true;
+}
+titlePageAuthor {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageCredit {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageSource {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageContact {
+    text-align: left;
+}
+titlePageDraftDate {
+    margin-top: 1l;
+    text-align: right;
+}
+titlePageUnknown {
+    margin-top: 1l;
+}
+
+note {
+    color: gray;
+}

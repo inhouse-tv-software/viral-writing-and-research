@@ -1,0 +1,147 @@
+
+
+
+/* Class = "NSToolbarItem"; label = "General"; ObjectID = "2No-Jf-9GH"; */
+"2No-Jf-9GH.label" = "Yleiset";
+
+/* Class = "NSToolbarItem"; paletteLabel = "General"; ObjectID = "2No-Jf-9GH"; */
+"2No-Jf-9GH.paletteLabel" = "Yleiset";
+
+/* Class = "NSTextFieldCell"; title = "Language"; ObjectID = "5o4-U4-n7H"; */
+"5o4-U4-n7H.title" = "Kieli";
+
+/* Class = "NSMenuItem"; title = "US Letter"; ObjectID = "3O7-zn-jUw"; */
+"3O7-zn-jUw.title" = "US Letter";
+
+/* Class = "NSButtonCell"; title = "Automatic paragraph breaks"; ObjectID = "5Bc-al-gWv"; */
+"Br1-nj-6zn.title" = "Automaattiset kappalejaot";
+
+"5Bc-al-gWv.title" = "Automaattiset CONT'D-päätteet";
+
+/* Class = "NSMenuItem"; title = "A4"; ObjectID = "7Xj-J1-Y92"; */
+"7Xj-J1-Y92.title" = "A4";
+
+/* Class = "NSTextFieldCell"; title = "Heading Spacing"; ObjectID = "EHa-PH-tc4"; */
+"EHa-PH-tc4.title" = "Otsikon välit";
+
+/* Class = "NSWindow"; title = "Preferences"; ObjectID = "F0z-JX-Cv5"; */
+"F0z-JX-Cv5.title" = "Asetukset";
+
+/* Class = "NSButtonCell"; title = "Match parentheses"; ObjectID = "Gir-t4-vbC"; */
+"Gir-t4-vbC.title" = "Täydennä parenteesit";
+
+/* Class = "NSButtonCell"; title = "Automatically hide Fountain markup"; ObjectID = "KAa-hh-Rua"; */
+"KAa-hh-Rua.title" = "Kätke Fountain-muotoilu";
+
+/* Class = "NSButtonCell"; title = "Bold"; ObjectID = "MPF-7c-b3u"; */
+"MPF-7c-b3u.title" = "Lihavoitu";
+
+/* Class = "NSTabViewItem"; label = "View"; ObjectID = "Mb6-nH-PQK"; */
+"Mb6-nH-PQK.label" = "Näkymä";
+
+/* Class = "NSTextFieldCell"; title = "Editor View"; ObjectID = "O3D-76-kt4"; */
+"O3D-76-kt4.title" = "Editorinäkymä";
+
+/* Class = "NSMenuItem"; title = "Courier Prime"; ObjectID = "VTU-wq-qyb"; */
+"VTU-wq-qyb.title" = "Courier Prime";
+
+/* Class = "NSTextFieldCell"; title = "Editor Font"; ObjectID = "Wyn-hc-s1G"; */
+"Wyn-hc-s1G.title" = "Editorin fontti";
+
+/* Class = "NSButtonCell"; title = "1 line"; ObjectID = "Yuw-0s-K2b"; */
+"Yuw-0s-K2b.title" = "1";
+
+/* Class = "NSButtonCell"; title = "Underlined"; ObjectID = "Zfa-HM-161"; */
+"Zfa-HM-161.title" = "Alleviivattu";
+
+/* Class = "NSButtonCell"; title = "Show scene numbers"; ObjectID = "a44-hn-h2m"; */
+"a44-hn-h2m.title" = "Näytä kohtausnumerot";
+
+/* Class = "NSButtonCell"; title = "Auto-complete scene headings and characters"; ObjectID = "d0m-zv-bHH"; */
+"d0m-zv-bHH.title" = "Ehdota kohtausotsikoita ja hahmoja";
+
+/* Class = "NSButtonCell"; title = "2 lines"; ObjectID = "fan-Jn-FOW"; */
+"fan-Jn-FOW.title" = "2";
+
+/* Class = "NSTextFieldCell"; title = "Automatically closes elements like () and [[]]"; ObjectID = "fxb-nx-hJp"; */
+"fxb-nx-hJp.title" = "Sulkee automaattisesti sulkeet ja hakasulkeet, kuten () ja [[]]";
+
+/* Class = "NSToolbarItem"; label = "Layout"; ObjectID = "ha1-yG-obd"; */
+"ha1-yG-obd.label" = "Muotoilu";
+
+/* Class = "NSToolbarItem"; paletteLabel = "Layout"; ObjectID = "ha1-yG-obd"; */
+"ha1-yG-obd.paletteLabel" = "Muotoilu";
+
+/* Class = "NSTextFieldCell"; title = "Editor Behavior"; ObjectID = "lzW-qc-hjs"; */
+"lzW-qc-hjs.title" = "Editorin toiminta";
+
+/* Class = "NSTextFieldCell"; title = "INT. SCENE - DAY"; ObjectID = "m9T-8O-t6l"; */
+"m9T-8O-t6l.title" = "INT. KOHTAUS - PÄIVÄ";
+
+/* Class = "NSTextFieldCell"; title = "Default Paper Size"; ObjectID = "nUl-8Q-mMa"; */
+"nUl-8Q-mMa.title" = "Oletuspaperikoko";
+
+/* Class = "NSTabViewItem"; label = "Tab"; ObjectID = "ok7-BF-Eme"; */
+"ok7-BF-Eme.label" = "Välilehti";
+
+/* Class = "NSTextFieldCell"; title = "as she walks to pick up the noodles."; ObjectID = "pUG-6V-246"; */
+"pUG-6V-246.title" = "kenen käsi roikkuu ikkunassa.";
+
+/* Class = "NSMenuItem"; title = "Courier Prime Sans"; ObjectID = "w8y-6i-bdp"; */
+"w8y-6i-bdp.title" = "Courier Prime Sans";
+
+/* Class = "NSButtonCell"; title = "Show scene colors in scroll bar"; ObjectID = "xYL-rJ-JMw"; */
+"xYL-rJ-JMw.title" = "Näytä kohtausten värit vierityspalkissa";
+
+/* Class = "NSTextFieldCell"; title = "Heading Style"; ObjectID = "yHb-oc-ujO"; */
+"yHb-oc-ujO.title" = "Kohtausotsikon tyyli";
+
+/* Class = "NSButtonCell"; title = "Show page numbers"; ObjectID = "yde-p1-D3O"; */
+"yde-p1-D3O.title" = "Näytä sivunumerot";
+
+"Ump-3W-bbM.title" = "Jatketun dialogin pääte";
+
+"0oB-rC-ac3.title" = "Dialogin sivunvaihdon merkintä";
+
+"gW4-1f-ZbP.title" = "Laajennukset";
+"1mF-I3-loO.title" = "Päivitä laajennukset automaattisesti";
+
+"0Hr-jR-zGH.label" = "Järjestelmä";
+"0Hr-jR-zGH.paletteLabel" = "Järjestelmä";
+
+"ROG-62-Evk.title" = "Varmuuskopiokansio";
+"kU3-zB-g60.title" = "Oletus";
+"moV-CN-wy9.title" = "Mukautettu";
+"OWc-Ih-dLg.title" = "Valitse...";
+
+"dtT-V5-EVi.title" = "Sivupalkin kirjasinkoko";
+
+"VQS-1g-QZ6.title" = "Pieni";
+"WAb-8C-Sjl.title" = "Keskikokoinen";
+"MNC-PG-DYp.title" = "Suuri";
+"YEd-uH-lo0.title" = "Erittäin suuri";
+
+"e3i-cN-mWC.title" = "Näytä sivujaon rajat (kokeellinen ominaisuus)";
+
+"6OX-Qw-Due.title" = "Kuvaotsikon tyyli";
+"mSK-8B-nEj.title" = "Lihavoitu";
+"MKe-sW-nsP.title" = "Alleviivattu";
+
+"KQX-J5-sUQ.title" = "Näkymättömien elementtien muotoilu";
+"wK3-T2-CKe.title" = "Osioiden kirjasin";
+"tpt-4c-5wZ.title" = "Osioiden kirjasinkoko";
+"7KQ-9f-i8A.title" = "Synopsisfontti";
+"UOH-ge-3Tb.title" = "Helvetica (oletus)";
+"PUh-9p-3fX.title" = "Courier";
+"VlM-Fm-k1u.title" = "Suuri";
+"VlM-Fm-k1u.title" = "Keskikokoinen";
+"VlM-Fm-k1u.title" = "Sama kuin leipäteksti";
+"vh8-c4-8fT.title" = "Helvetica (oletus)";
+"SwG-cV-cfD.title" = "Courier";
+
+"vNs-hq-JbK.title" = "⚠️ Toistaiseksi nämä asetukset vaikuttavat vain esikatseluun ja PDF-luontiin";
+"y4x-ys-zeh.title" = "Huomaa: Nämä asetukset vaikuttavat vain käsikirjoitusmuotoiluun";
+"XEa-I5-p3i.title" = "Huomaa: Nämä asetukset vaikuttavat vain käsikirjoitusmuotoiluun";
+"2Og-yp-uDM.label" = "Edistyneemmät";
+
+"EbP-vJ-jSl.title" = "Lisää kansilehti automaattisesti";

@@ -1,0 +1,9 @@
+*.xcuserstate
+xcuserdata
+.DS_Store
+Sparkle.framework/
+Sparkle.framework
+Pro/
+Pods/
+build/XCBuildData
+build/

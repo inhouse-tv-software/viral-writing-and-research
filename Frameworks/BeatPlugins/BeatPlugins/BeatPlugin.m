@@ -1,0 +1,703 @@
+//
+//  BeatPlugin.m
+//  Beat
+//
+//  Created by Lauri-Matti Parppei on 1.7.2020.
+//  Copyright © 2020-2021 Lauri-Matti Parppei. All rights reserved.
+//
+
+/**
+ 
+ This class provides JavaScript API for plugins.
+ 
+ One parser is created for one plugin. It has its own JSContext, and plugins
+ can open windows, set up timers and even show widgets.
+ 
+ Plugin manager provides a BeatPluginData object which contains
+ plugin name and URL. A plugin is then initialized using that data.
+ 
+ */
+
+#import "BeatPlugin.h"
+#import <BeatPagination2/BeatPagination2.h>
+#import <BeatCore/BeatCore-Swift.h>
+#import <BeatPlugins/BeatPlugins-Swift.h>
+#import <BeatPlugins/BeatPluginAgent.h>
+#import <PDFKit/PDFKit.h>
+
+// Console component
+#import "BeatConsole.h"
+#import "BeatPluginTimer.h"
+
+// Extensions and categories
+#import "BeatPlugin+Parser.h"
+#import "BeatPlugin+Modals.h"
+#import "BeatPlugin+Editor.h"
+#import "BeatPlugin+Menus.h"
+#import "BeatPlugin+Listeners.h"
+#import "BeatPlugin+TextHighlighting.h"
+#import "BeatPlugin+ScreenAndWindowUtilities.h"
+#import "BeatPlugin+Tagging.h"
+#import "BeatPlugin+Reviews.h"
+#import <BeatPlugins/BeatPlugin+HTMLViews.h>
+#import <BeatPlugins/BeatPlugin+Windows.h>
+#import <BeatPlugins/BeatPlugin+Threading.h>
+#import <BeatPlugins/BeatPlugin+Timer.h>
+#import <BeatPlugins/BeatPlugin+Logging.h>
+#import <BeatPlugins/BeatPlugin+Listeners.h>
+#import <BeatPlugins/BeatPlugin+UserDefaults.h>
+
+// Some things are only available on macOS
+#if TARGET_OS_OSX
+#import "BeatSpeak.h"
+#import "BeatHTMLPrinter.h"
+#import "BeatModalAccessoryView.h"
+#endif
+
+
+#import <objc/runtime.h>
+
+#if TARGET_OS_IOS
+@interface BeatPlugin () <BeatPluginInstance>
+#else
+@interface BeatPlugin () <BeatPluginInstance>
+#endif
+
+@property (nonatomic) BeatPluginData* pluginData;
+
+@property (nonatomic) NSMutableArray *speakSynths;
+
+@end
+
+/**
+ 
+ Notes on protocol conformance:
+ - WebKit protocols are handled by `+HTMLViews` and the conformance to them is unfortunately inherited from `BeatPluginWindowHost`.
+ - `BeatPluginInstance` conformace is missing because `previewDidFinish:` is implemented in `+Listeners`.
+ 
+ */
+@implementation BeatPlugin
+// Getters for these are defined in categories
+@synthesize reviews;
+@synthesize tagging;
+
+
++ (BeatPlugin*)withName:(NSString*)name delegate:(id<BeatPluginDelegate>)delegate
+{
+    BeatPlugin* plugin = BeatPlugin.new;
+    plugin.delegate = delegate;
+        
+    BeatPluginData *pluginData = [BeatPluginManager.sharedManager pluginWithName:name];
+    [plugin loadPlugin:pluginData];
+    
+    return plugin;
+}
+
+/// For plugin containers, we'll first need to set the container, and only load the plugin afterwards
++ (BeatPlugin*)withContainer:(id<BeatPluginContainer>)container delegate:(id<BeatPluginDelegate>)delegate
+{
+    BeatPlugin* plugin = BeatPlugin.new;
+    plugin.delegate = delegate;
+    plugin.container = container;
+    plugin.restorable = false;
+    
+    return plugin;
+}
+
++ (BeatPlugin*)withName:(NSString*)name script:(NSString*)script delegate:(id<BeatPluginDelegate>)delegate
+{
+    BeatPlugin* plugin = BeatPlugin.new;
+    plugin.delegate = delegate;
+    
+    BeatPluginData *pluginData = BeatPluginData.new;
+    pluginData.name = name;
+    pluginData.script = script;
+    [plugin loadPlugin:pluginData];
+    
+    return plugin;
+}
+
+- (id)init
+{
+	if ((self = [super init]) == nil) { return nil; }
+    
+    [self setupVM];
+    self.restorable = true;
+	
+	return self;
+}
+
+- (void)setupVM
+{
+    // Create virtual machine and JS context
+    _vm = [[JSVirtualMachine alloc] init];
+    _context = [[JSContext alloc] initWithVirtualMachine:_vm];
+    
+    [self setupErrorHandler];
+    [self setupRequire];
+    
+    [_context setObject:self forKeyedSubscript:@"Beat"];
+}
+
+
+#pragma mark - Helpers
+
+- (void)setupErrorHandler {
+	__weak typeof(id<BeatEditorDelegate>) weakDoc = self.delegate;
+	__weak typeof(self) weakSelf = self;
+	
+	[_context setExceptionHandler:^(JSContext *context, JSValue *exception) {
+		[BeatConsole.shared openConsole];
+		[BeatConsole.shared logError:exception context:weakDoc pluginName:weakSelf.pluginName];
+	}];
+}
+
+/// Error handler can be replaced for special use cases
+-(void)replaceErrorHandler:(void (^)(JSValue* exception))block {
+	[_context setExceptionHandler:^(JSContext *context, JSValue *exception) {
+		block(exception);
+	}];
+}
+
+/** Creates `require` function in plugin scope for importing JavaScript.
+ - note: This can be used to import JavaScript either from inside the plugin container or from the app bundle. JS modules inside the app bundle should be required **without** `.js` extension.
+ 
+ */
+- (void)setupRequire
+{
+	// Thank you, ocodo on stackoverflow.
+	// Based on https://github.com/kasper/phoenix
+	BeatPlugin * __weak weakSelf = self;
+	
+	self.context[@"require"] = ^(NSString *path) {
+		NSString *modulePath = [[BeatPluginManager.sharedManager pathForPlugin:weakSelf.pluginName] stringByAppendingPathComponent:path];
+		modulePath = [weakSelf resolvePath:modulePath];
+		        
+		if(![NSFileManager.defaultManager fileExistsAtPath:modulePath]) {
+			// File doesn't exist inside the plugin container. Let's see if it can be found inside the app container.
+            NSBundle* bundle = [NSBundle bundleForClass:weakSelf.class];
+			NSURL *url = [bundle URLForResource:path.lastPathComponent withExtension:@"js"];
+            
+			if (url == nil) {
+				NSString *message = [NSString stringWithFormat:@"Require: File “%@” does not exist.", path];
+				weakSelf.context.exception = [JSValue valueWithNewErrorFromMessage:message inContext:weakSelf.context];
+				return;
+			} else {
+				modulePath = url.path;
+			}
+		}
+		
+		[weakSelf importScript:modulePath];
+	};
+}
+
+/// Load JavaScript into plugin scope from any path. This is called by the block defined in `setupRequire`.
+- (void)importScript:(NSString *)path {
+	NSError *error;
+	NSString *script = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&error];
+	
+	if (error) {
+		NSString *errorMsg = [NSString stringWithFormat:@"Error: Could not import JavaScript module '%@'", path.lastPathComponent];
+		[self log:errorMsg];
+		return;
+	}
+	
+    if (script.length > 0) [self.context evaluateScript:script];
+}
+
+
+#pragma mark - Running Scripts
+
+/// Load plugin with given name
+- (void)loadPluginWithName:(NSString*)name
+{
+    BeatPluginData *pluginData = [BeatPluginManager.sharedManager pluginWithName:name];
+    if (pluginData == nil) NSLog(@"No plugin found with name: %@", pluginData);
+    else [self loadPlugin:pluginData];
+}
+
+/// Load plugin data with the given data.
+- (void)loadPlugin:(BeatPluginData*)plugin
+{
+	self.plugin = plugin;
+	self.pluginName = plugin.name;
+    self.pluginData = plugin;
+    self.pluginURL = plugin.url;
+        
+    // For contained plugins we won't use the actual name to avoid conflicts. Also inform the container of this change.
+    if (self.container != nil) {
+        self.pluginName = [NSString stringWithFormat:@"%@ (in container)", self.pluginName];
+        self.container.pluginName = self.pluginName;
+    }
+    
+    if (plugin.script.length > 0) [self runScript:plugin.script];
+}
+
+/// Runs the JavaScript string
+- (void)runScript:(NSString*)pluginString
+{
+    if (pluginString == nil) return;
+    
+	//pluginString = [self preprocess:pluginString];
+	[self.context evaluateScript:pluginString];
+	
+	// Kill it if the plugin is not resident
+	if (!self.sheet && self.htmlPanel == nil && !self.resident && self.pluginWindows.count < 1 && !self.widgetView && !self.container) {
+		[self end];
+	}
+}
+
+/// Runs a JavaScript string in this context
+- (JSValue*)call:(NSString*)script
+{
+	return [self.context evaluateScript:script];
+}
+
+- (NSString *)resolvePath:(NSString *)path {
+	path = path.stringByResolvingSymlinksInPath;
+	return path.stringByStandardizingPath;
+}
+
+
+/// Force-quit a resident plugin. Used mostly by Beat to kill a background plugin by unchecking it under the Tools menu.
+- (void)forceEnd
+{
+	_terminating = YES;
+    
+    [self closeWindows];
+	[self stopBackgroundInstances];
+	
+	// macOS specific nulls
+#if !TARGET_OS_IOS
+	// Remove widget
+	if (self.widgetView != nil) [self.widgetView remove];
+    
+	[self clearMenus];
+#endif
+	
+	self.plugin = nil;
+		
+	[_delegate.pluginAgent deregisterPlugin:self];
+}
+
+/// Closes all windows (on macOS)
+- (void)closeWindows
+{
+#if TARGET_OS_OSX
+    if (self.htmlPanel) {
+        [self.htmlPanel closePanel:nil];
+        self.htmlPanel = nil;
+    }
+    
+    for (BeatPluginHTMLWindow *window in _pluginWindows) {
+        // At this point we'll forcibly clear all windows
+        window.stayInMemory = false;
+        [window closeWindow];
+    }
+#endif
+    [_pluginWindows removeAllObjects];
+}
+
+/// Restarts the plugin, clearing it from memory first.
+- (void)restart
+{
+    [self end];
+    
+    if (!self.container) {
+        [_delegate.pluginAgent runPluginWithName:self.pluginName];
+    } else {
+        // If we're running the plugin a container, we won't deallocate the whole plugin.
+        // Instead, we're nulling the VM and just reloading the data here.
+        [self setupVM];
+        [self loadPlugin:self.pluginData];
+    }
+}
+
+/// Kills all background instances that might have been created by the plugin.
+- (void)stopBackgroundInstances
+{
+    for (BeatPluginTimer *timer in _timers) {
+        [timer invalidate];
+    }
+    [_timers removeAllObjects];
+    _timers = nil;
+    
+    [self killSynths];
+}
+
+
+/// Quits the current plugin. **Required** when using plugins with callbacks.
+- (void)end
+{
+	// If end was called in callback, we'll wait until it's done before killing the plugin altogether
+    if (self.callbacksRemaining > 0) {
+		_terminateAfterCallback = YES;
+		return;
+	}
+	
+	_terminating = YES;
+	
+    // Close all windows and remove them from memory
+    [self closeWindows];
+	
+	// Stop any timers left
+	[self stopBackgroundInstances];
+	
+	// macOS specific nulls
+#if !TARGET_OS_IOS
+	// Clear menus
+	[self clearMenus];
+
+	// Remove widget
+	if (self.widgetView != nil) [self.widgetView remove];
+#endif
+    
+    // Clear observers
+    [self clearObservables];
+	
+	self.plugin = nil;
+    self.pluginData = nil;
+    self.vm = nil;
+    self.context = nil;
+    
+    // Clear all listeners
+    self.updateTextMethod = nil;
+    self.updateSceneMethod = nil;
+    self.updateOutlineMethod = nil;
+    self.updatePreviewMethod = nil;
+    self.updateSelectionMethod = nil;
+
+    // Remove from the list of running plugins
+	if (_resident) [_delegate.pluginAgent deregisterPlugin:self];
+}
+
+/// Runs a callback value when a plugin window is closed. We need to finish all callbacks before the plugin itself can be terminated, so we need to jump some extra hoops.
+- (void)runCallback:(JSValue*)callback withArguments:(NSArray*)arguments
+{
+    if (!callback || callback.isUndefined) return;
+        
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Callback functions are often called when a plugin window is closed, and we can't close the plugin until all callbacks are done.
+        // We'll increment remaining callback number, and if it's zero after this callback is done, we'll give permission to terminate the plugin.
+        self.callbacksRemaining += 1;
+        [callback callWithArguments:arguments];
+        self.callbacksRemaining -= 1;
+        
+        // If we've reached the end of any callbacks, terminate plugin.
+        if (self.terminateAfterCallback && self.callbacksRemaining == 0) {
+            [self end];
+        }
+    });
+}
+
+/// Check compatibility with Beat version number
+- (bool)compatibleWith:(NSString *)version {
+	return [BeatPluginManager isCompatible:version];
+}
+
+
+#pragma mark - Resident plugin
+
+/// Make the plugin stay running in the background.
+- (void)makeResident {
+	_resident = YES;
+	[_delegate.pluginAgent registerPlugin:self];
+}
+
+
+#pragma mark - Speak
+
+#if !TARGET_OS_IOS
+- (BeatSpeak*)speakSynth
+{
+	if (!_speakSynths) _speakSynths = NSMutableArray.new;
+	
+	BeatSpeak *synth = BeatSpeak.new;
+	[_speakSynths addObject:synth];
+	
+	return synth;
+}
+#endif
+
+- (void)killSynths
+{
+    #if !TARGET_OS_IOS
+    for (BeatSpeak *synth in _speakSynths) {
+        [synth stopSpeaking];
+    }
+    [_speakSynths removeAllObjects];
+    _speakSynths = nil;
+    #endif
+}
+
+
+#pragma mark - Access plugin assets
+
+/// Returns the given file in plugin container as string
+- (NSString*)assetAsString:(NSString *)filename
+{
+	if ([_plugin.files containsObject:filename]) {
+		NSString *path = [[BeatPluginManager.sharedManager pathForPlugin:_plugin.name] stringByAppendingPathComponent:filename];
+		return [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+	} else {
+#if TARGET_OS_OSX
+        NSString* msg = [NSString stringWithFormat:@"Can't find bundled file '%@' – Are you sure the plugin is contained in a self-titled folder? For example: Plugin.beatPlugin/Plugin.beatPlugin", filename];
+		[self log:msg];
+		return @"";
+#else
+        NSLog(@"WARNING: asset as string is trying to find files from app bundle. Remove once done.");
+        return [self appAssetAsString:filename];
+#endif
+	}
+}
+
+/// Returns the file in app bundle as a string
+- (NSString*)appAssetAsString:(NSString *)filename
+{
+	NSString *path = [NSBundle.mainBundle pathForResource:filename.stringByDeletingPathExtension ofType:filename.pathExtension];
+	
+	if (path) {
+		return [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+	} else {
+        NSString* msg = [NSString stringWithFormat:@"Can't find '%@' in app bundle", filename];
+		[self log:msg];
+		return @"";
+	}
+}
+
+/// Returns string rendition of a PDF
+- (NSString*)pdfToString:(NSString*)path
+{
+	NSMutableString *result = [NSMutableString string];
+	
+	PDFDocument *doc = [[PDFDocument alloc] initWithURL:[NSURL fileURLWithPath:path]];
+	if (!doc) return @"";
+	
+	for (int i = 0; i < doc.pageCount; i++) {
+		PDFPage *page = [doc pageAtIndex:i];
+		if (!page) continue;
+		
+		[result appendString:page.string];
+	}
+	
+	return result;
+}
+
+
+#pragma mark - Localization
+
+// Localizes the given string
+- (NSString*)localize:(NSString*)string
+{
+    return [BeatLocalization localizeString:string];
+}
+
+
+#pragma mark - Pagination interface
+
+/// Legacy compatibility
+- (id)paginator:(NSArray*)lines { return self.pagination; }
+
+/// Returns a new pagination object
+- (BeatPaginationManager*)pagination
+{
+	return [BeatPaginationManager.alloc initWithEditorDelegate:self.delegate];
+}
+
+/// Returns the current pagination for document
+- (BeatPaginationManager*)currentPagination
+{
+	return self.delegate.pagination;
+}
+
+/// Forces the creation of a new pagination at given index
+- (void)createPreviewAt:(NSInteger)location {
+	[self.delegate createPreviewAt:NSMakeRange(location, 0) sync:true];
+}
+
+/// Full reset for preview, which includes both paginating the whole document and rebuilding the layout. Can have a performance hit.
+- (void)resetPreview
+{
+	[self.delegate resetPreview];
+}
+
+
+
+#pragma mark - Objective C interface
+
+/// Calls Objective C methods.
+/// @note Do **NOT** use this if you don't know what you are doing.
+- (id)objc_call:(NSString*)methodName args:(NSArray*)arguments
+{
+	Class class = [self.delegate class];
+	
+	SEL selector = NSSelectorFromString(methodName);
+	Method method = class_getClassMethod(class, selector);
+	
+	char returnType[10];
+	method_getReturnType(method, returnType, 10);
+	
+	if (![self.delegate respondsToSelector:selector]) {
+		[self log:[NSString stringWithFormat:@"Unknown selector: %@", methodName]];
+		return nil;
+	}
+	
+	NSMethodSignature* signature = [(id)self.delegate methodSignatureForSelector:selector];
+	
+	NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
+	invocation.target = self.delegate;
+	invocation.selector = selector;
+	
+	@try {
+		// Set arguments
+		for (NSInteger i=0; i < arguments.count; i++) {
+			[invocation setArgument:&arguments atIndex:i+2]; // Offset by 2, because 0 = target, 1 = method
+		}
+
+		[invocation invoke];
+		
+		NSArray * __unsafe_unretained tempResultSet;
+		[invocation getReturnValue:&tempResultSet];
+		NSArray *resultSet = tempResultSet;
+		return resultSet;
+		
+	} @catch (NSException *exception) {
+		[self log:[NSString stringWithFormat:@"Objective-C call failed: %@", exception]];
+	}
+	
+	return nil;
+}
+
+/// This crashes the whole app when needed. Can lead to data loss, so use with extreme care.
+- (void)crash
+{
+	@throw([NSException exceptionWithName:NSInternalInconsistencyException reason:@"Crash thrown by plugin" userInfo:nil]);
+}
+
+
+#pragma mark - Character data
+
+- (BeatCharacterData*)characterData
+{
+    return [BeatCharacterData.alloc initWithDelegate:self.delegate];
+}
+
+
+#pragma mark - Formatting
+
+/// Reformats given line in editor.
+- (void)reformat:(Line *)line
+{
+	if (line) [_delegate.formatting formatLine:line];
+}
+/// Reformats all lines in given range.
+- (void)reformatRange:(NSInteger)loc len:(NSInteger)len
+{
+	[_delegate.formatting forceFormatChangesInRange:(NSRange){ loc, len }];
+#if !TARGET_OS_IOS
+    // Remove temporary attributes
+    [_delegate.layoutManager removeTemporaryAttribute:NSForegroundColorAttributeName forCharacterRange:(NSRange){ loc,len }];
+    [_delegate.layoutManager removeTemporaryAttribute:NSBackgroundColorAttributeName forCharacterRange:(NSRange){ loc,len }];
+#endif
+}
+
+- (void)setStylesheet:(NSString*)name
+{
+    [self.delegate setStylesheetAndReformat:name];
+}
+
+- (void)resetStyles
+{
+    [self.delegate resetStyles];
+}
+
+- (BeatStylesheet*)editorStyles { return self.delegate.editorStyles; }
+- (BeatStylesheet*)styles { return self.delegate.styles; }
+
+
+#pragma mark - Return revised ranges
+
+- (void)bakeRevisions
+{
+	[self.delegate bakeRevisions];
+}
+
+- (void)bakeRevisionsInRange:(NSInteger)loc len:(NSInteger)len
+{
+	NSRange range = NSMakeRange(loc, len);
+	NSArray *lines = [self.delegate.parser linesInRange:range];
+	[BeatRevisions bakeRevisionsIntoLines:lines text:self.delegate.getAttributedText];
+}
+
+- (NSDictionary*)revisedRanges
+{
+    return self.delegate.revisionTracking.revisedRanges;
+}
+
+- (BeatRevisions*)revisionTracking
+{
+    return self.delegate.revisionTracking;
+}
+
+
+#pragma mark - TextView access
+
+#if TARGET_OS_OSX
+/// Please, move this elsewhere
+- (void)setZoomLevel:(CGFloat)zoomLevel
+{
+    [self.delegate setZoom:zoomLevel];
+}
+#endif
+
+
+#pragma mark - Notepad
+
+#if TARGET_OS_OSX
+- (id)notepad { return self.delegate.notepad; }
+#endif
+
+
+#pragma mark - Theme manager
+
+@synthesize theme;
+- (id)theme { return self.delegate.themeManager; }
+
+
+#pragma mark - Cross-platform compatibility checks
+
+- (NSString*)os {
+#if TARGET_OS_IOS
+	return @"iOS";
+#else
+	return @"macOS";
+#endif
+}
+
+- (bool)iOS {
+#if TARGET_OS_IOS
+	return true;
+#else
+	return false;
+#endif
+}
+
+- (bool)macOS {
+	return !self.iOS;
+}
+
+- (void)addToChangeCount
+{
+    [self.delegate updateChangeCount:BXChangeDone];
+}
+
+
+@end
+/*
+
+ No one is thinking about the flowers
+ no one is thinking about the fish
+ no one wants
+ to believe that the garden is dying
+ 
+ */

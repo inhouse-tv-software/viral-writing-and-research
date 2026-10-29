@@ -1,0 +1,341 @@
+/* 
+  Localizable.strings
+  Beat
+
+  Created by Lauri-Matti Parppei on 2.1.2022.
+  Copyright © 2022 Lauri-Matti Parppei. All rights reserved.
+*/
+
+"launch.newDocument.subtitle" = "Luo uusi projekti";
+"launch.tutorial.subtitle" = "Aloita tästä, jos olet uusi käyttäjä";
+
+"app.manual" = "Manuaali";
+"app.patchNotes" = "Päivityksen tiedot";
+
+"unlock_document.title" = "Avaa dokumentin lukitus";
+"unlock_document.confirm" = "Haluatko varmasti avata lukituksen ja sallia muutokset käsikirjoitukseen?";
+"general.OK" = "OK";
+"general.ok" = "OK";
+"general.yes" = "Kyllä";
+"general.no" = "Ei";
+"general.cancel" = "Peruuta";
+"general.undo" = "Peru";
+"general.redo" = "Tee sittenkin";
+"general.revert" = "Palauta";
+"general.close" = "Sulje";
+"general.selectAll" = "Valitse kaikki";
+"general.revealInFinder" = "Näytä Finderissä";
+
+"storyline.placeholder" = "Uuden tarinalinjan nimi";
+"storyline.add" = "Lisää tarinalinja...";
+
+"plugins.errorRunningScript" = "Laajennuksen koodia ei voitu suorittaa";
+"plugins.input.select" = "Valitse...";
+
+"language.alert" = "Käynnistä Beat uudelleen";
+"language.informative" = "Kielen vaihtaminen vaatii ohjelman uudelleenkäynnistyksen.";
+
+"plugins.library" = "Laajennuskirjasto";
+"plugins.installed" = "Asennettu";
+"plugins.download" = "Lataa";
+"plugins.update" = "Päivitä";
+"plugins.version" = "Versio";
+"plugins.updateAvailable" = "Päivitys saatavilla";
+"plugins.currentVersion" = "Nykyinen versio";
+"plugins.compatibilityWarning" = "<b>Varoitus</b>: Tämä liitännäinen ei välttämättä ole yhteensopiva nykyisen version kanssa. Päivitä Beat ennen jatkamista.";
+"plugins.libraryWelcome" = "<p>Tämä on valikoima Beatin virallisia laajennuksia. Aktivoidut laajennukset ovat käytettävissä <b>Työkalut</b>-valikon kautta. Voit asentaa uusia laajennuksia ja saada lisätietoja vasemmasta sivupalkista.</p>\
+   <p class='small gray'>Klikkaamalla kansioikonia pääset hallinnoimaan asennettuja laajennuksia. Voit myös rakentaa omia JavaScriptiä käyttämällä &mdash; lisätietoja ja dokumentaatiota on saatavilla Beatin kotisivuilta.</p>";
+
+"gender.unspecified" = "Tuntematon";
+"gender.other" = "Muu";
+"gender.woman" = "Nainen";
+"gender.man" = "Mies";
+
+"gender.other.plural" = "Muut";
+"gender.woman.plural" = "Naiset";
+"gender.man.plural" = "Miehet";
+"gender.unspecified.plural" = "Määrittämätön";
+
+"statistics.lines" = "repliikkiä";
+"statistics.scenes" = "kohtausta";
+
+
+"lock.clickToUnlock" = "Klikkaa avataksesi";
+"lock.documentLocked" = "Dokumentti on lukittu";
+
+"statisticsPanel.title" = "Tilastot";
+"statisticsPanel.averageSceneLength" = "Kohtausten keskipituus";
+"statisticsPanel.shortForPages" = "s.";
+"statisticsPanel.longestScene" = "Pisin kohtaus";
+"statisticsPanel.stats.words" = "sanaa";
+"statisticsPanel.stats.scenes" = "kohtausta";
+"statisticsPanel.stats.characters" = "merkkiä";
+"statisticsPanel.linesByGender" = "Sukupuolittain";
+"statisticsPanel.setGenderInfo" = "Aseta hahmojen sukupuoli vasemmalta";
+"statisticsPanel.linesPerCharacter" = "Dialogi";
+"statisticsPanel.locations" = "Lokaatiot";
+"statisticsPanel.locations.interior" = "Sisätila";
+"statisticsPanel.locations.exterior" = "Ulkotila";
+"statisticsPanel.locations.other" = "Muu";
+"statisticsPanel.noDialogue" = "Ei dialogia";
+"statisticsPanel.numberOfPages" = "Sivuja";
+
+"print.print" = "Tulosta";
+"print.createPDF" = "Luo PDF";
+"print.pdfButton" = "PDF";
+"print.printButton" = "Tulosta";
+
+"cardView.noScenes" = "Ei kohtauksia";
+"cardView.noScenesInformation" = "Kohtauskortit tulevat näkyviin, kun lisäät ensimmäisen kohtauksen käsikirjoitukseesi";
+"cardView.print" = "Tulosta";
+
+"color.none" = "Ei mitään";
+"color.red" = "Punainen";
+"color.green" = "Vihreä";
+"color.blue" = "Sininen";
+"color.pink" = "Pinkki";
+"color.yellow" = "Keltainen";
+"color.brown" = "Ruskea";
+"color.cyan" = "Syaani";
+"color.orange" = "Oranssi";
+"color.magenta" = "Magenta";
+"color.purple" = "Violetti";
+"color.salmon" = "Lohi";
+"color.rose" = "Roosa";
+"color.goldenrod" = "Pajunkukka";
+"color.buff" = "Tuhka";
+"color.cherry" = "Kirsikka";
+
+"contextMenu.omitScene" = "Piilota kohtaus";
+
+"revisions.commitPrompt.title" = "Hyväksy korjaukset";
+"revisions.commitPrompt.text" = "Korjausten hyväksyntä pyyhkii kaikki korjausmerkinnät ja poistettavaksi merkityt alueet. Haluatko varmasti jatkaa?";
+
+"mode.taggingMode" = "Merkintätila";
+"mode.reviewMode" = "Kommenttitila";
+
+"backup.revertToSaved" = "Viimeksi tallennettu";
+"backup.backupVault" = "Avaa varmuuskopiokansio...";
+"revert.revertAction" = "Palauta";
+
+"backup.saved" = "Tallennettu";
+"backup.revertAction" = "Palauta";
+
+"backup.reverting.title" = "Palauta tiedosto";
+"backup.reverting.message" = "Kaikki tallentamattomat muutokset hävitetään, kun palaat varmuuskopioituun versioon. Haluatko varmasti jatkaa?";
+
+"editor.setSceneNumber" = "Aseta kohtausnumero";
+"editor.setSceneNumber.info" = "Muokattu kohtausnumero (voi sisältää myös kirjaimia tai pelkän välilyönnin)";
+
+"force.character" = "Hahmo";
+"force.heading" = "Kohtausotsikko";
+"force.action" = "Toiminta";
+"force.lyrics" = "Laulunsanat";
+
+"editor.goToSceneNumber.message" = "Siirry kohtaukseen numero...";
+"editor.goToSceneNumber.placeholder" = "esim. 123";
+
+"export.prefix" = "Vie";
+"import.prefix" = "Tuo";
+
+"export.includeInvisibleElements" = "Näkymättömät elementit";
+"export.printSections" = "Osiot";
+"export.printSynopsis" = "Synopsikset";
+"export.printNotes" = "Muistiinpanot";
+"export.printSceneNumbers" = "Kohtausnumerot";
+
+
+"timer.reset" = "Nollaa";
+"timer.start" = "Käynnistä";
+"timer.charactersRemoved" = "merkkiä poistettu";
+"timer.charactersTyped" = "merkkiä\nlisätty";
+
+"textView.information.selection" = "Valinta";
+"textView.information.document" = "Dokumentti";
+"textView.information.pages" = "Sivuja";
+"textView.information.page" = "Sivu";
+"textView.information.characters" = "Merkkejä";
+"textView.information.words" = "Sanoja";
+
+"launch.templates.subtitle" = "Aloita tästä, jos olet uusi käyttäjä!";
+
+"templates.tutorials" = "Tutoriaalit";
+"templates.templates" = "Mallipohjat";
+
+"templates.tutorial.title" = "Tutoriaali";
+"templates.tutorial.description" = "Pikaopas Beatin käyttöön";
+
+"templates.outliningTutorial.title" = "Rakennetutoriaali";
+"templates.outliningTutorial.description" = "Opas tarinan rakentamiseen";
+
+"templates.comicBook.title" = "Sarjakuva";
+"templates.comicBook.description" = "Yksinkertainen sarjakuvapohja";
+
+"templates.onePageSynopsis.title" = "Sivun synopsis";
+"templates.onePageSynopsis.description" = "Tiivistä tarinasi yhteen sivuun";
+
+"templates.threeActOutline.title" = "Kolminäytöksinen pohja";
+"templates.threeActOutline.description" = "Klassinen elokuvan rakenteen mallipohja";
+
+"templates.novel-tutorial.title" = "Romaanitutoriaali";
+"templates.novel-tutorial.description" = "Pikaopas romaanien kirjoittamiseen Beatilla";
+
+"templates.novel.title" = "Romaani";
+"templates.novel.description" = "Yksinkertainen romaanin mallipohja";
+
+"templates.showTutorialsAndTemplates" = "Näytä tutoriaalit ja mallit...";
+
+"revisions.downgrade.title" = "Alenna korjausten tasoa";
+"revisions.downgrade.info" = "Tämä muuttaa valituntasoiset korjaukset ensimmäisen kierroksen korjauksiksi, ja samalla siirtää myös myöhemmät korjausmerkinnät saman verran alaspäin. Toiminto on hyödyllinen esimerkiksi silloin, kun korjauskierroksissa on tultu jo korkeimmalle tasolle.";
+
+"revisions.downgrade.from" = "Uusi alin korjaustaso:";
+
+"revisions.convert.title" = "Muunna tai poista korjausmerkintöjä";
+"revisions.convert.info" = "Valitun tasoiset korjausmerkinnät muunnetaan toisen tasoiseksi. Jos jätät kohdetason tyhjäksi, valitut korjausmerkinnät poistetaan";
+
+"revisions.convert.from" = "Nykyinen taso";
+"revisions.convert.to" = "Uusi taso";
+
+"revisions.convert.remove" = "(poista)";
+"revisions.convert.onlySelectedRange" = "Vain valitulla alueella";
+
+"outline.settings" = "Näkymän asetukset";
+"outline.settings.synopses" = "Synopsikset";
+"outline.settings.sceneNumbers" = "Kohtausnumerot";
+"outline.settings.notes" = "Muistiinpanot";
+"outline.settings.markers" = "Merkit";
+"outline.settings.snapshots" = "Vilkaisukuvat";
+"outline.settings.headings" = "Kohtausotsikot";
+
+"outline.settings.fontSize.small" = "Pieni";
+"outline.settings.fontSize.medium" = "Keskikokoinen";
+"outline.settings.fontSize.big" = "Suuri";
+"outline.settings.fontSize.veryBig" = "Suurempi";
+
+"character.editor.age" = "Ikä";
+"character.editor.biography" = "Kuvaus";
+"character.editor.lines" = "Repliikit";
+"character.editor.highlight" = "Korostus";
+"character.editor.addAlias" = "Lisää alias...";
+
+"backup.browseVersions" = "Selaa versioita...";
+
+"quickSettings.novelLineHeightMultiplier" = "Riviväli";
+"quickSettings.novelContentAlignment" = "Asettelu";
+
+"revision.1" = "Ensimmäinen";
+"revision.2" = "Toinen";
+"revision.3" = "Kolmas";
+"revision.4" = "Neljäs";
+"revision.5" = "Viides";
+"revision.6" = "Kuudes";
+"revision.7" = "Seitsemäs";
+"revision.8" = "Kahdeksas";
+
+"spelling.ignoreDialogue.title" = "Ohita oikeinkirjoitus dialogissa";
+"spelling.ignoreDialogue.text" = "Saatat joutua avaamaan käsikirjoituksen uudelleen, jotta muutokset tulevat voimaan.";
+
+"documentSettings.novelLineHeightMultiplier" = "Riviväli";
+"documentSettings.novelContentAlignment" = "Asettelu";
+
+"documentSettings.title" = "Dokumentin asetukset";
+"documentSettings.style" = "Tyyli";
+"documentSettings.pageSize" = "Sivun koko";
+"documentSettings.firstSceneNumber" = "Ensimmäisen kohtauksen numero";
+"documentSettings.firstPageNumber" = "Ensimmäisen sivun numero";
+"documentSettings.pageNumberingMode" = "Sivunumerointi alkaa kohdasta...";
+"documentSettings.novelLineHeightMultiplier" = "Riviväli";
+"documentSettings.novelContentAlignment" = "Tasaus";
+
+"pagination.pageNumberingMode.anyContent" = "Mikä tahansa sisältö";
+"pagination.pageNumberingMode.firstScene" = "Ensimmäinen kohtaus";
+"pagination.pageNumberingMode.forcedPageBreak" = "Ensimmäinen pakotettu sivunvaihto";
+"pagination.forcedNote" = "Huom: Tällä asetuksella sivut pysyvät numeroimattomina ensimmäiseen sivunvaihtoon (===) asti";
+
+"about.version" = "Versio";
+"about.build" = "Build";
+
+"tagManager.list.warning.noTypes" = "Valitse yksi tai useampi tyyppi";
+
+"tag.cast" = "Näyttelijä";
+"tag.prop" = "Rekvisiitta";
+"tag.costume" = "Puvustus";
+"tag.makeup" = "Maskeeraus";
+"tag.vfx" = "VFX";
+"tag.sfx" = "Erikoistehoste";
+"tag.music" = "Musiikki";
+"tag.animal" = "Eläin";
+"tag.extras" = "Avustajat";
+"tag.vehicle" = "Ajoneuvo";
+"tag.none" = "Ei mitään";
+"tag.stunt" = "Stuntti";
+"tag.setDesign" = "Lavastus";
+"tag.camera" = "Kamera";
+
+"tagManager.createReport" = "Luo tagiraportti";
+
+"tagManager.report.sceneByScene" = "Kohtaus kohtaukselta";
+"tagManager.report.sceneByScene.details" = "Listaa tagit tyypeittäin kunkin kohtauksen jälkeen";
+
+"tagManager.report.listScenesByTag" = "Listaa kohtaukset tageittain";
+"tagManager.report.listScenesByTag.details" = "Listaa tagityypin jälkeen niitä sisältävät kohtaukset";
+
+"tagManager.report.screenplay" = "Käsikirjoitus";
+"tagManager.report.screenplay.details" = "Luo uusi dokumentti kaikista kohtauksista, jotka sisältävät jonkin valituista tagityypeistä";
+
+"tagManager.report.create" = "Luo";
+
+"tagManager.rename" = "Nimeä";
+
+"tagManager.tab.edit" = "Muokkaa";
+"tagManager.tab.report" = "Raportit";
+
+"tagManager.windowTitle" = "Tagien hallinta";
+
+"pagination.paragraphPaginationMode.default" = "Sivuta toimintakappaleet (Oletus)";
+"pagination.paragraphPaginationMode.avoid" = "Vältä toiminnan jakamista eri sivuille";
+
+"export.includeRevisions" = "Sisällytä korjausmerkinnät";
+"export.highlightRevisions" = "Korosta korjaukset";
+
+"export.highlightRevisions.none" = "Ei mitään";
+"export.highlightRevisions.text" = "Tekstin väri";
+"export.highlightRevisions.background" = "Taustaväri";
+"export.printHeadingColor" = "Värilliset kohtausotsikot";
+
+"review.keyword.none" = "Ei #avainsanoja";
+
+"versionControl.base" = "Lähtöpiste";
+"versionControl.current" = "Nykyinen";
+"versionControl.addExternalFile" = "Avaa tiedosto...";
+"versionControl.noVersionControl" = "Ei versionhallintaa";
+
+"versionControl.commit" = "Versioi";
+"versionControl.commitMessage" = "Version viesti (valinnainen)";
+"versionControl.addCommit" = "Lisää versio";
+"versionControl.skip" = "Ohita";
+"versionControl.commitChanges" = "Lisää muutokset";
+"versionControl.restoreVersion" = "Palauta versio";
+"versionControl.confirmRevertMessage" = "Haluatko varmasti palauttaa asiakirjan tilaan %TIMESTAMP%? Tätä ei voi kumota, ja kaikki tämän jälkeen tehdyt versioinnit poistetaan.";
+"versionControl.confirmResetTitle" = "Haluatko varmasti nollata versionhallinnan?";
+"versionControl.confirmResetMessage" = "Tämä poistaa kaikki versiosi tähän pisteeseen asti. Tätä toimintoa ei voi kumota.";
+
+"versionControl.reset.confirm" = "Haluatko varmasti nollata versionhallinnan?";
+"versionControl.reset.info" = "Tämä poistaa kaikki muutokset tähän pisteeseen asti. Tätä toimintoa ei voi kumota.";
+
+"versionControl.reset" = "Nollaa";
+
+"versionMenu.newVersion" = "Lisää vaihtoehtoinen versio rivistä";
+"versionMenu.noVersions" = "Ei vaihtoehtoisia versioita";
+
+"cardView.grid" = "Ruudukko";
+"cardView.kanban" = "Sarakkeet";
+"cardView.compact" = "Vain otsikot";
+"cardView.addScene" = "Lisää kohtaus";
+"cardView.addAct" = "Lisää näytös";
+"cardView.addAct.placeholder" = "Näytöksen nimi";
+"cardView.deleteScene" = "Poista kohtaus";
+"cardView.deleteAct" = "Poista näytös (säilytä kohtaukset)";
+
+"export.printDialogueNumber" = "Numeroi dialogi";
+

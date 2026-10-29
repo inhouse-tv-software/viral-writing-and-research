@@ -1,0 +1,194 @@
+/*
+
+ Stage play Stylesheet for Beat.
+ This is not actual CSS, just uses similar markup.
+
+ Changing values without knowing what you are doing can very
+ well cause a crash. Dread lightly.
+ 
+ "Class" names are internal type names, not .typeAsString names.
+ 
+ © Lauri-Matti Parppei 2021-2023
+
+*/
+
+document {
+    visible-elements: [section];
+    pagination-mode: 1;
+}
+
+page {
+    padding-left: 60;
+    
+    margin-left: 30;
+    margin-right: 25;
+    margin-top: 40;
+    margin-bottom: 50;
+    margin-bottom-us: 0;
+    margin-bottom-a4: 10;
+    
+    default-width-a4: 60ch;
+    default-width-us: 63ch;
+    
+    line-height: 12;
+    
+    content-padding: 7ch;
+ 
+    margin-left-a4: 20;
+    margin-left-us: 22;
+}
+
+titlePage {
+    margin-top: 40;
+    margin-bottom: 65;
+    margin-left: 40;
+    margin-right: 40;
+    
+    line-height: 12;
+}
+
+heading {
+    margin-top: 2l;
+    underline: true;
+    text-align: center;
+    bold: false;
+    scene-number: false;
+}
+
+section {
+    margin-top: 2l;
+    text-align: center;
+    font: courier;
+    underline: true;
+    
+    font-size: 12;
+}
+
+synopsis {
+    margin-top: 1l;
+    italic: true;
+    color: darkGray;
+    
+    font: system;
+    font: userSetting(synopsisFontType);
+    
+    trim: true;
+}
+
+action {
+    margin-top: 1l;
+}
+
+centered {
+    width-a4: 60ch;
+    width-us: 62ch;
+
+    margin-top: 1l;
+    text-align: center;
+}
+
+character {
+    width-a4: 38ch;
+    width-us: 40ch;
+    
+    margin-left: 20ch;
+    margin-top: 1l;
+}
+
+parenthetical {
+    width-a4: 32ch;
+    width-us: 32ch;
+    
+    margin-left: 12ch;
+}
+
+more {
+    width-a4: 38ch;
+    width-us: 38ch;
+    
+    margin-left: 136px;
+    margin-top: 0;
+}
+
+dualDialogueCharacter {
+    width-a4: 20ch;
+    width-us: 21ch;
+
+    margin-top: 1l;
+    margin-left: 7ch;
+}
+dualDialogueMore {
+    width-a4: 20ch;
+    width-us: 21ch;
+
+    margin-top: 0;
+    margin-left: 6ch;
+}
+dualDialogueParenthetical {
+    width-a4: 25ch;
+    width-us: 26ch;
+    
+    margin-top: 0;
+    margin-left: 4ch;
+}
+dualDialogue {
+    width-a4: 27ch;
+    width-us: 28ch;
+
+    margin-left: 0ch;
+    margin-right: 1ch;
+}
+
+transition {
+    margin-top: 1l;
+    
+    text-align: right;
+    uppercase: true;
+}
+
+lyrics {
+    margin-top: 1l;
+    text-align: center;
+    italic: true;
+}
+
+shot {
+    uppercase: true;
+    
+    bold: userSetting(shotStyleBold);
+    underline: userSetting(shotStyleUnderline);
+    margin-top: 1l;
+}
+
+titlePageTitle {
+    margin-top: 23l;
+    margin-bottom: 2l;
+    text-align: center;
+    uppercase: true;
+}
+titlePageAuthor {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageCredit {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageSource {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageContact {
+    text-align: left;
+}
+titlePageDraftDate {
+    margin-top: 1l;
+    text-align: right;
+}
+titlePageUnknown {
+    margin-top: 1l;
+}
+
+note {
+    color: gray;
+}

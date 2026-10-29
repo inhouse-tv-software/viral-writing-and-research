@@ -1,0 +1,52 @@
+<!--
+
+HTML for standalone index card window
+© Lauri-Matti Parppei 2021
+Released under GPL license
+
+-->
+<script type="text/javascript">
+	let style = document.querySelector("style:not(.customStyle)")
+	style.remove()
+</script>
+<style class='customStyle'>
+#STYLE#
+
+/* Custom style for plugin version */
+body { margin: 1rem; }
+
+</style>
+<script></script>
+<div id='debug'></div>
+<div id='wait'><div class='lds-spinner'><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
+
+<div id='menu'>
+	<div id='filters'>
+		<input type='checkbox' name='scenes' onclick='filter(this)' checked> 🎬 
+		<input type='checkbox' name='sections' onclick='filter(this)' checked> # 
+		<input type='checkbox' name='lowerSections' onclick='filter(this)' checked> ## 
+		<input type='checkbox' name='lowestSections' onclick='filter(this)' checked> ### 
+	</div>
+
+	<div id='zoom'>
+	   <button onclick='zoomOut()'>-</button>
+	   <button onclick='zoomIn()'>+</button>
+	</div>
+</div>
+
+<div id='container'>
+	
+</div>
+<script>
+	let standalone = true
+	
+	window.onblur = function () {
+		//Beat.call("Beat.custom.savePosition()")
+	}
+	
+	// Javascript is loaded from an app asset.
+	// See CardView.js inside the Beat executable bundle.
+	#JAVASCRIPT#
+	
+	Beat.call("Beat.custom.createCards()")
+</script>

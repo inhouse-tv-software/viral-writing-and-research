@@ -1,0 +1,149 @@
+/*
+
+ Novel Stylesheet for Beat.
+ This is not actual CSS, just uses a similar markup.
+
+ Changing values without knowing what you are doing can very
+ well cause a crash. Dread lightly.
+ 
+ "Class" names are internal type names as strings, not .typeAsString names.
+ 
+ © Lauri-Matti Parppei 2021-2022
+
+*/
+
+pagination {
+    skip heading after section;
+}
+
+document {
+    visible-elements: [section];
+    disabled-types: [character, dualDialogueCharacter, dialogue, dualDialogue, parenthetical, dualDialogueParenthetical, shot, transition];
+    overrideParagraphPaginationMode: true;
+}
+
+titlePage {
+    margin-top: 40;
+    margin-bottom: 65;
+    margin-left: 40;
+    margin-right: 40;
+    
+    line-height: 12;
+}
+
+page {
+    margin-left: 30;
+    margin-right: 30;
+    padding-left: 0;
+    margin-top: 40;
+    margin-bottom: 30;
+    
+    default-width-a4: 60ch;
+    default-width-us: 62ch;
+    
+    line-height: 13;
+    line-height-multiplier: documentSetting(novelLineHeightMultiplier);
+    
+    content-padding: 7ch;
+ 
+    margin-left-a4: 0;
+    margin-left-us: 0;
+    
+    font-type: variable;
+    
+    first-page-with-number: 1;
+}
+
+heading {
+    margin-top: 1l;
+    content: #;
+    text-align: center;
+    scene-number: false;
+    bold: true;
+}
+
+section {
+    margin-top: 18l;
+    forced-margin: true;
+
+    text-align: center;
+    bold: true;
+    italic: true;
+    fontSize: 24;
+    min-font-size: 12;
+    
+    begins-page: true;
+    trim: true;
+    
+    if sectionDepth > 1 then margin-top: 12l;
+    if sectionDepth > 1 then fontSize: 20;
+    if sectionDepth > 2 then begins-page: false;
+    if sectionDepth > 2 then margin-top: 2l;
+    if sectionDepth > 2 then fontSize: 14;
+}
+
+synopsis {
+    font: system;
+    italic: true;
+}
+
+action, dialogue, character, parenthetical {
+    margin-left-a4: 0;
+    margin-left-us: 0;
+    
+    margin-top: 1l;
+    
+    indent-split-elements: false;
+    unindent-fresh-paragraphs: true;
+    
+    text-align: documentSetting(novelContentAlignment);
+}
+
+action {
+    first-line-indent: 35;
+}
+
+centered {
+    margin-top: 1l;
+    text-align: center;
+}
+
+lyrics {
+    margin-top: 1l;
+    text-align: center;
+    italic: true;
+}
+
+pageBreak {
+    text-align: center;
+}
+
+
+titlePageTitle {
+    margin-top: 26l;
+    margin-bottom: 2l;
+    text-align: center;
+    font-size: 30;
+}
+titlePageAuthor {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageCredit {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageSource {
+    margin-top: 1l;
+    text-align: center;
+}
+titlePageContact {
+    text-align: left;
+}
+titlePageDraftDate {
+    margin-top: 1l;
+    text-align: right;
+}
+titlePageUnknown {
+    margin-top: 1l;
+}

@@ -1,0 +1,223 @@
+//
+//  BeatUITextView+Layout.swift
+//  Beat iOS
+//
+//  Created by Lauri-Matti Parppei on 19.6.2024.
+//  Copyright © 2024 Lauri-Matti Parppei. All rights reserved.
+//
+
+import UIKit
+
+extension BeatUITextView {
+		
+	// MARK: - Resize scroll view and text view
+	/**
+	 
+	 To achieve the "page-like" view, we need to do some trickery.
+	 
+	 Instead of using the built-in scroll view of `UITextView`, we're wrapping `UITextView` inside an `NSView` placed inside a `UIScrollView`.
+	 Whenever the text view content changes, we'll need to resize the wrapping view and content size of the enclosing scroll view.
+	 
+	 */
+		
+	/// Called when setting up the view and adjusting paper size
+	@objc func resizePaper() {
+		guard let pageView else { return }
+				
+		var frame = pageView.frame
+		frame.origin.x = 0.0
+		frame.origin.y = 0.0
+		frame.size.height = textContainer.size.height
+		frame.size.width = self.documentWidth + textContainerInset.left + textContainerInset.right + BeatUITextView.linePadding()
+		
+		pageView.frame = frame
+		
+		let containerHeight = textContainer.size.height + textContainerInset.top + textContainerInset.bottom
+		self.textContainer.size = CGSize(width: self.documentWidth, height: containerHeight)
+		self.textContainerInset = insets
+	}
+	
+	@objc func resizeToFit() {
+		guard self.mobileMode == false else { return }
+		
+		guard let enclosingScrollView, let pageView, pageView.frame.width > 0 else { return }
+		
+		let actualPageWidth = (pageView.frame.width / enclosingScrollView.zoomScale) + 10.0
+		var newZoomScale = enclosingScrollView.frame.width / actualPageWidth
+		
+		newZoomScale = min(max(newZoomScale, enclosingScrollView.minimumZoomScale), enclosingScrollView.maximumZoomScale)
+		
+		enclosingScrollView.setZoomScale(newZoomScale, animated: false)
+		enclosingScrollView.layoutIfNeeded()
+		
+		updateZoomScale(scrollView: enclosingScrollView, animated: false)
+	}
+	
+	/// Used to reliably resize the text view to fit content
+	@objc func resize() {
+		// We'll ignore this method on phones
+		guard !mobileMode else {
+			mobileViewResize()
+			return
+		}
+		
+		guard let pageView, let enclosingScrollView = self.enclosingScrollView else {
+			print("WARNING: Missing views when resizing. ", pageView == nil ? "Page view not set." : "", enclosingScrollView == nil ? "Scroll view not set." : "")
+			return
+		}
+				
+		// Resize content view size in scroll view. This value has to be set before any of the following calculations.
+		resizeScrollViewContent()
+		
+		var frame = pageView.frame
+		var zoom = enclosingScrollView.zoomScale
+		
+		// Make sure the page view height is at least the height of the screen
+		if (frame.height * zoom < enclosingScrollView.frame.height) {
+			var targetHeight = frame.height
+			if (self.frame.height < enclosingScrollView.frame.height) {
+				targetHeight = enclosingScrollView.frame.height
+			}
+			let factor = targetHeight / enclosingScrollView.frame.height
+			zoom = enclosingScrollView.zoomScale / factor
+		}
+		
+		// Center the page view
+		let x = (enclosingScrollView.frame.width - pageView.frame.width) / 2
+		frame.origin.x = max(x, 0.0)
+		
+		// Calculate page view size
+		let width = floor(self.documentWidth + self.insets.left + self.insets.right)
+		let height = floor(pageView.frame.size.height)
+
+		// Page view size is scaled
+		frame.size.width = zoom * width
+		frame.size.height = enclosingScrollView.contentSize.height
+						
+		// And now, welcome to fun with floating points.
+		// iOS frame sizes tend to be off by ~0.000001, so we'll have to round everything to ensure we're not doing anything unnecessary.
+		if preciseRound(frame.origin.x, precision: .tenths) != preciseRound(pageView.frame.origin.x, precision: .tenths) { pageView.frame.origin.x = frame.origin.x }
+		if preciseRound(frame.width, precision: .tenths) != preciseRound(pageView.frame.width, precision: .tenths) { pageView.frame.size.width = frame.width }
+		
+		// Check if we should resize text view frame or not.
+		// Note that the self here is important (don't get confused with page view frame)
+		if floor(self.frame.origin.x) != 0.0 { self.frame.origin.x = 0.0 }
+		if width != floor(self.frame.width) { self.frame.size.width = width }
+		if height != floor(self.frame.height) { self.frame.size.height = height }
+	}
+	
+	@objc func firstResize() {
+		if (self.mobileMode) {
+			updateMobileScale()
+			return
+		}
+		guard let pageView, let enclosingScrollView else { return }
+		
+		let newSize = sizeThatFits(CGSize(width: self.documentWidth, height: CGFloat.greatestFiniteMagnitude))
+		let inset = self.textContainerInset
+		
+		self.frame.size = newSize
+		enclosingScrollView.contentSize = CGSize(width: contentSize.width + inset.left + inset.right, height: contentSize.height + inset.top + inset.bottom)
+		
+		// Calculate initial page view size
+		let width = floor(self.documentWidth + self.insets.left + self.insets.right)
+		let zoom = enclosingScrollView.zoomScale
+		pageView.frame.origin.x = 0.0
+		pageView.frame.size.width = width * zoom
+	}
+	
+	@objc func resizeScrollViewContent() {
+		guard let enclosingScrollView else { return }
+		let layoutManager = self.layoutManager
+		let inset = self.textContainerInset
+		
+		// Calculate the index of the last glyph that fits within the available height
+		var lastGlyphIndex = layoutManager.numberOfGlyphs - 1
+		if (lastGlyphIndex < 0) { lastGlyphIndex = 0 }
+
+		// Get the rectangle of the line fragment that contains the last glyph
+		var lastLineRect = layoutManager.lineFragmentRect(forGlyphAt: lastGlyphIndex, effectiveRange: nil)
+		
+		var lastLineY = lastLineRect.maxY
+		if lastLineRect.origin.y <= 0.0 {
+			lastLineRect = layoutManager.extraLineFragmentRect
+			lastLineY = abs(lastLineRect.maxY)
+		}
+		
+		let factor = enclosingScrollView.zoomScale
+		let contentSize = CGSize(width: self.documentWidth, height: lastLineY)
+		
+		var scrollSize = CGSize(width: (contentSize.width + inset.left + inset.right) * factor,
+								height: (contentSize.height + inset.top + inset.bottom) * factor)
+
+		if scrollSize.height < enclosingScrollView.frame.height {
+			scrollSize.height = enclosingScrollView.frame.height * factor - (inset.top + inset.bottom) * factor
+		}
+		
+		let heightNow = enclosingScrollView.contentSize.height
+		
+		// Adjust the size to fit, if the size differs more than 5.0 points
+		scrollSize.height += 12.0
+		if (scrollSize.height < heightNow - 5.0 || scrollSize.height > heightNow + 5.0) {
+			enclosingScrollView.contentSize = scrollSize
+		}
+	}
+
+	
+	// MARK: - Mobile sizing
+	
+	@objc public func updateMobileScale() {
+		guard let editorDelegate else { return }
+		
+		editorDelegate.loadFonts()
+		if !editorDelegate.documentIsLoading {
+			// Format lines with a delay
+			editorDelegate.formatting.formatAllAsynchronously()
+		}
+	}
+	 
+	func mobileViewResize() {
+		let documentWidth = self.documentWidth
+		self.textContainer.size.width = documentWidth
+		
+		self.insetsLayoutMarginsFromSafeArea = true
+		self.automaticallyAdjustsScrollIndicatorInsets = true
+		
+		let scaledFrame = self.frame.width
+		var insets = self.insets
+		
+		if (documentWidth < scaledFrame) {
+			let inset = (self.frame.size.width - documentWidth - BeatUITextView.linePadding() * 2) / 2
+			
+			insets.left = inset
+			insets.right = inset
+		}
+				
+		// Calculate the index of the last glyph that fits within the available height
+		var lastGlyphIndex = layoutManager.numberOfGlyphs - 1
+		if (lastGlyphIndex < 0) { lastGlyphIndex = 0 }
+
+		// Get the rectangle of the line fragment that contains the last glyph
+		var lastLineRect = layoutManager.lineFragmentRect(forGlyphAt: lastGlyphIndex, effectiveRange: nil)
+		
+		var lastLineY = lastLineRect.maxY
+		if lastLineRect.origin.y <= 0.0 {
+			lastLineRect = layoutManager.extraLineFragmentRect
+			lastLineY = abs(lastLineRect.maxY)
+		}
+		
+		// A duct-tape fix for a weird issue in iOS 26
+		if let window, lastLineY < window.frame.height {
+			let diff = window.frame.height - lastLineY
+			let topInset = min(diff, 150)
+			insets.top = topInset
+		} else {
+			insets.top = self.insets.top
+		}
+		
+		self.textContainerInset = insets
+		
+		pageNumberOverlay?.layoutContainer()
+	}
+	
+}

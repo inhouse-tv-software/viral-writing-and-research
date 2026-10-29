@@ -1,0 +1,791 @@
+<!doctype html>
+<!--[if lt IE 9]><html class="ie"><![endif]-->
+<!--[if gte IE 9]><!-->
+<html>
+<!--<![endif]-->
+
+<head>
+	<meta charset="utf-8" />
+
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+	<title>Beat</title>
+
+	<link rel="stylesheet" href="beat_manual_style.css" />
+</head>
+
+<body lang="en">
+	<div id='mainContainer'>
+		<div id='menuContainer'>
+			<div id='menu'>
+				<div id='menuToc'></div>
+				<!-- <div id='darkMode'>
+					<span>Dark Mode</span>
+					<label class='switch'>
+						<input type='checkbox' id='darkModeToggle' onchange='toggleDarkMode()'>
+						<span class="slider"></span>
+					</label>
+				</div> -->
+			</div>
+		</div>
+
+		<div id='page'>
+			<section>
+				<h1>Welcome to Beat</h1>
+				<p>This manual will guide you through Beat's basic functions. The app is designed to be easy to learn, and lets your write in a flow, but some of its best features can be easily missed.</p>
+
+			</section>
+
+			<section id='getting-started'>
+				<a class='chapter' name='gettingStarted'></a>
+
+				<h1>Getting Started</h1>
+				<h2 id='c_newdocument'>New Document</h2>
+				<p>Go and create your first document! If you want some reference on how to use Beat, you can find a tutorial in the first screen, or via <b>Help → Beat Tutorial</b>.</p>
+				<p>The easiest way to learn Beat is to play around with the <b>Tutorial</b> template, and see how it works both in editor and as a printed document.</p>
+
+				<h2>What Is Fountain?</h2>
+				<p>This guide will cover the basics of writing a Fountain script, but you can find more advanced info in the <a href='beat_manual.html#FountainSyntax'>Fountain Syntax</a> section or on the <a href='https://fountain.io'>Fountain website</a>.</p>
+				
+				<p>Fountain is a <b>plain-text</b> screenwriting format. It means that the scripts are stored on your disk in a way that you can open the file in basically any text-editing app there is. Beat just displays it in a screenplay format.</p>
+				
+				<p>If for some reason you lose the app, or it doesn't work in your new operating system in the year 2046, the script can still be opened. Fountain is basically the best screenplay format for archiving.</p>
+				
+				<p>There are many other apps for editing Fountain files, such as <b>Slugline</b>, <b>Logline</b> and <b>Highland</b>, so if you get fed up with Beat, you can open the same file in any of the other applications.</p>
+
+			</section>
+
+
+			<section id='basic-formatting'>
+				<h1>Basic Formatting</h1>
+				
+
+				<h2>Scenes</h2>
+				
+				<p>Writing screenplays with Beat is made to be as simple and distraction-free as possible.</p>
+				
+				<p>The basic idea is that if it looks like a screenplay, it is screenplay. If you type in <code>int. school room</code> on a new line, it magically becomes a scene heading.</p>
+
+				<div class='blockExample' id='scene'></div>
+
+
+				<h2>Dialogue</h2>
+				
+				<p>Dialogue works in the same way. You can either press <kbd>tab</kbd> to begin a character cue and start typing dialogue, or just type in a <code>CHARACTER NAME</code> (in all caps), followed by a line of dialogue. No need for special shortcut keys or anything, just keep on writing!</p>
+
+				<div class='blockExample' id='dialogue'></div>
+
+				<p>Beat automatically recognizes parentheses inside a dialogue block, and you can have any number of them inside the block just as easily.</p>
+
+				<div class='blockExample' id='parentheses'></div>
+
+				<p>If you are wondering why your <code>FADE IN</code> is a character, don't worry. Keep on smashing <kbd>↩enter</kbd>, and after two line breaks Beat figures out that it's not a character. See this example from <em>Big Fish</em> by John August:</p>
+
+				<div class='blockExample' id='bigFish'></div>
+
+
+				<h2>Stylization</h2>
+
+				<p>Because Fountain is a plain-text markup standard, you need to use markup characters to format text. Wrapping something in single apostrophes makes it <i>*italic*</i>, double apostrophes <b>**bold**</b>, and underscores <span style='text-decoration: underline;'>underline</span> the text.</p>
+
+				<p>And of course, the common universal keyboard shortcuts work as well: <kbd>⌘cmd</kbd>+<kbd>B</kbd> for bold, <kbd>⌘cmd</kbd>+<kbd>I</kbd> for italic, and <kbd>⌘cmd</kbd>+<kbd>U</kbd> for underline.</p>
+
+				<div class='blockExample' id='stylization'></div>
+
+				<p>And don't worry &mdash; the stylization characters are terminated at line break, so there's no risk of having the whole document in cursive if you forget to close it. Also, a single asterisk/star won't stylize anything, so this is totally OK:</p>
+
+				<pre class='blockExample'>They have claimed their family tree could be traced back to the Romans. (*
+
+*) It couldn't</pre>
+
+				<h2>Title Page</h2>
+
+				<p>Due to the plain-text nature of Beat, title page information is written directly at the top of your script. The format is pretty easy, and can be quickly updated between versions.</p>
+
+				<p>The easiest way to add a title page is to use the <b>Format → Title Page Editor</b>, but you can always type it yourself. Just use any of the common fields (Title, Credit, Author, Draft date, Contact), and Beat will take care of the rest.</p>
+
+				<p>Note that the title page info needs to be at the very top of the script, followed by two line breaks to mark the start of the script.</p>
+
+				<pre class='blockExample'>	<span class='fSymbol'>Title:</span> Beat Tutorial
+	<span class='fSymbol'>Credit:</span> Written by
+	<span class='fSymbol'>Author:</span> KAPITAN!
+	<span class='fSymbol'>Draft date:</span> Version 2, 01.09.2019
+	<span class='fSymbol'>Contact:</span>
+	    beat@kapitan.fi
+	    www.kapitan.fi/beat</pre>
+
+				<p>Toggle print preview (<kbd>⌘cmd</kbd>+<kbd>E</kbd>) to see how your title page looks.</p>
+
+				<p><em>Tip: See <a href='#Macros'>Macros</a> to update your date automatically</em></p>
+
+			</section>
+
+			<section>
+
+				<h1>Advanced Formatting</h1>
+
+				<p><b>Note:</b> You don't need to memorize these &mdash; open the <b>Force Elements</b> menu by pressing <kbd>⌥opt</kbd>+<kbd>↩enter</kbd> at any time.</p>
+
+				<h2>Dual Dialogue</h2>
+
+				<p>Due to the linear and plain-text nature of Fountain screenplay format, writing dual dialogue requires a small trick. Type in <code>^</code> after the second character cue you want to appear alongside the preceding dialogue block.</p>
+
+				<pre class='blockExample dialogue' id='dualDialogue'>        HUMAN
+How are you doing?
+ 
+                     PERSON <span class='fSymbol'>^</span>
+              How are you -- you beat me to it.</pre>
+
+				<p>This might seem a bit weird and could require you to constantly check your print preview at first. Just remember that special character (<code>^</code>). You can also select <b>Format → Dual Dialogue</b> or press <kbd>⌘cmd</kbd>+<kbd>⇧shift</kbd>+<kbd>2</kbd> anywhere in the second block to make it dual dialogue.</p>
+
+				<p>Check out the <b>Tutorial</b> for an example.</p>
+
+				<h2>Omitting Scenes</h2>
+
+				<p>All text between <code>/*</code> and <code>*/</code> is omitted, so it won't print out, but will still remain editable in its place. You can omit large chunks of text by pressing <kbd>⌘cmd</kbd>+<kbd>⇧shift</kbd>+<kbd>E</kbd></b> or selecting <b>Format → Omit</b>.</p>
+
+				<pre class='blockExample omit'>/* 
+
+<b>INT. SCHOOL ROOM - NIGHT</b>
+
+This scene is totally omitted. You can still have it in your screenplay, but it won't print or show up anywhere. 
+
+*/</pre>
+
+				<h2>Manual Scene Numbers</h2>
+
+				<p>Beat normally uses automatic scene numbering, but if you want to have a custom scene number, just type <code>#NUMBER#</code> after your scene heading.</p>
+
+				<div class='blockExample'><b>INT. BEACH HOUSE - NIGHT <span class='omit'>#6B#</span></b></div>
+
+				<p>Note, however, that this won't affect the automatic scene numbering. If you enter a custom scene number (like eight) after the third scene, the scene after that will still be given the number four.</p>
+
+				<p>Custom scene numbers are especially helpful when you are already in production and want to write in additional scenes while still keeping track of the original scene numbers.</p>
+
+				<p>You can also turn the automatic scene numbers into manual ones from <b>Format → Lock Scene Numbers</b>.</p>
+
+				<h2>Aligning Text</h2>
+
+				<p>A paragraph surrounded by <code>&gt;</code> and <code>&lt;</code> is centered.</p>
+
+				<pre class='blockExample centered'><span class='fSymbol'>></span> I am centered <span class='fSymbol'>&lt;</span></pre>
+
+
+				<h2>Transitions</h2>
+
+				<p>Anything in all caps, followed by <code>TO:</code> (ie. <code>CUT TO:</code>) is a transition.</p>
+
+				<pre class='blockExample transition'>CUT TO:
+					FADE TO:
+					PAN TO:</pre>
+
+				<p>To make a custom transition, use <code>> TRANSITION:</code></p>
+
+				<pre class='blockExample transition'><span class='fSymbol'>></span> Custom transition:</pre>
+
+
+				<h2>Shots</h2>
+
+				<p><em><b>Note:</b> Shots are specifically a feature of Beat and <b>NOT</b> part of the standard Fountain syntax. They might print out with an exclamation mark in front of them in other Fountain editors.</em></p>
+
+				<p>If you need a line that is visually similar to a scene heading but doesn't create a new scene, you can use the Beat-exclusive shot line type. Shots will stay together with any following block (action, dialogue, etc.) when paginating, so they'll never be left alone at the end of a page.</p>
+
+				<pre><b>INT. HOUSE PARTY - NIGHT</b>
+
+Everyone is having fun they hear the front door open.
+
+<b><span class='fSymbol'>!!</span>IN THE HALLWAY</b>
+
+a doppelganger of our main character enters the house.</pre>
+
+				<h2>Forced Elements</h2>
+
+				<p>You can force anything to be any other element. If you have something that is incompatible with the Fountain syntax (such as a character called <code>Int</code> or <code>Ext</code>), you can force it to be the element that you want. Just type in a special character before the element.</p>
+
+				<p>See <a href='#KeyboardShortcuts'>Keyboard Shortcuts</a> on how to quickly force the common elements or refer to <a href='beat_manual.html#FountainSyntax'>Fountain Syntax</a>.</p>
+
+				<p>Here's a list of the most common forced elements:</p>
+
+				<dl class='forcedElements'>
+					<dd>.</dd>
+					<dt>Force Scene Heading </dt>
+					<dd>!</dd>
+					<dt>Force Action </dt>
+					<dd>@</dd>
+					<dt>Force Character Cue </dt>
+					<dd>~</dd>
+					<dt>Force Lyrics </dt>
+					<dd>===</dd>
+					<dt>Force Page Break</dt>
+					<dd>!!</dd>
+					<dt>Shot </dt>
+				</dl>
+
+				<pre class='blockExample'><b><span class='fSymbol'>.</span>THIS IS A SCENE HEADING</b>
+
+<span class='fSymbol'>!</span>INTENSE ACTION...
+
+                      <span class='fSymbol'>@</span>Character
+		Let's sing something.
+
+              <em><span class='fSymbol'>~</span>I'm in love with your brother...</em>
+
+<div class='fSymbol' style="text-align: center;">===</div>
+This text is on the text page.
+</pre>
+
+
+				<p>Every element can also be forced through the <b>Formatting</b> menu.</p>
+
+			</section>
+
+
+			<section id='plugins'>
+				<h1>Plugins</h1>
+				<p><b>Tools → Plugin Library</b> lets you download official plugins which extend the functionality of Beat. Any installed plugins will be automatically updated unless you turn auto-update off in Preferences.</p>
+				<p>You should absolutely check out <b>FTOutliner</b> (a full-featured outlining plugin), <b>Dialogue Editor</b> (lets you edit the lines of a single character) and <b>Cherry-Pick Scenes</b> (useful for creating daily scripts for actors, for example).</p>
+
+				<p>You can also write your own plugins if you know some JavaScript &mdash; visit the Beat Website to learn more!</p>
+
+			</section>
+
+
+			<section id='views'>
+
+				<h1>Views</h1>
+
+				<h2>Outline View <span class='shortcut'>(⌘D)</span></h2>
+
+				<div class='image right'><img src='images/outline.png'></div>
+
+				<p>Outline View can be activated by clicking on the outline icon on the left side of the screen or by pressing <kbd>⌘cmd</kbd>+<kbd>D</kbd>.</p>
+				<p>The view allows you to reorganize your script by dragging and dropping the scenes right in the list. Scenes can be colored by secondary-clicking and selecting a color.</p>
+
+				<h3>Filtering</h3>
+
+				<p>Type anything in the search box at the bottom of the Outline View to filter the scenes by their heading. You can also type in colors, if you have color-coded your scenes.</p>
+
+				<p>Aside the search box there is a button which collapses the other filtering options. You can filter the scenes by their color, and also by character. Select a character name from the drop-down list to filter out scenes in which the character doesn't have dialogue.</p>
+
+
+				<h2>Index Card View <span class='shortcut'>(⌘⇧D)</span></h2>
+
+				<div class='image'><img src='images/cards.jpg'></div>
+
+				<p>Index Card View gives you a nice overview of the story. You can access it from the cards icon on the right side of the edit view or by pressing <kbd>⌘cmd</kbd>+<kbd>⇧</kbd>+<kbd>D</kbd>.</p>
+
+				<p>Scenes can be rearranged by dragging and dropping. Secondary-clicking a scene allows you to set a color for the selected scene. Double-clicking a card brings the scene into view in your script.</p>
+
+				<p><b>Sections</b> and <b>synopses</b> (see <a href='#StoryOutlining'>Story Outlining</a>) can be used for clarity and to quickly outline your story structure.</p>
+
+
+				<h2>Timeline View <span class='shortcut'>(⌘T)</span></h2>
+
+				<div class='image'><img src='images/timeline.png'></div>
+
+				<p>The Timeline View gives an insight into how your story plays out in a linear manner. You can access the view by clicking the timeline icon on the right side of the edit view or by pressing <kbd>⌘</kbd>+<kbd>T</kbd></p>
+
+				<p>Double-clicking a scene brings it into view in the editor, and you can also select a color for the scene by right-clicking its timeline block.</p>
+
+				<p>Sections and synopses show up in your timeline, as in the example above.</p>
+				
+				<p><b>Note:</b> Beat measures scene length in "beats", a custom unit of time. Thus, this view does not represent a real-world time, but rather the relative lengths of the scenes in your story.</p>
+
+
+				<h2>Print Preview <span class='shortcut'>(⌘⌥P)</span></h2>
+
+				<div class='image'><img src='images/printview.png'></div>
+
+				<p>A quick way to see how your screenplay is laid out.</p>
+				<p><b>Note:</b> This is a quick screen preview generated by Beat, and might have some glitches in it. If you are doing something critical, go to the Print Menu (<kbd>⌘cmd</kbd>+<kbd>P</kbd>), click on PDF and select "Open in Preview" to see a real preview of the printed version.</p>
+
+				<h2>Screenplay Analysis</h2>
+
+				<div class='image'><img src='images/analysis.png'></div>
+
+				<p>A handy tool for checking the statistics and metrics of your screenplay. It counts characters' lines and counts interior and exterior scenes.</p>
+				<p>You can set a gender <em>(for now, this isn't the most inclusive system and only includes other, woman, man and unspecified)</em> for each of the characters to see how many of your lines are divided between genders.</p>
+				<p><b>Note:</b> For now, the character genders are stored locally, so if you send the script to another person, they have to set them again to see the same statistics.</p>
+
+			</section>
+
+			<section id='outlining'>
+				<h1>Outlining The Story</h1>
+
+				<h2>Sections and Synopses</h2>
+
+				<p>You can split your script into sections and synopses, which make the scene lists and other outlining views much easier to read.</p>
+				<p>A section is created by typing in <code>#</code> followed by its section name; a synopsis is created in the same way but with <code>=</code> instead.</p>
+
+				<pre class='blockExample' id='storyOutlining'><b># This is a section</b>
+<em>= This is a synopse</em></pre>
+
+				<p>Note that these are invisible elements designed to help you build your story. They <b>do not</b> show up in the printed screenplay itself.</p>
+				<p>A section is a larger part of the script that can be used to mark acts. A synopsis could be used to describe smaller events, or even missing scenes or story arcs that should be added later on or need work.</p>
+
+				<h2>Colorizing your scenes</h2>
+
+				<p>You can set colors for your scenes to easily distinct certain scenes from others. This can be done by right-clicking scene elements in any of the story outline views (sidebar outline, index cards or timeline) and selecting a color, or by hand, adding <code>[[color]]</code> at the end of a scene heading.</p>
+				<pre>
+<b>INT. SCHOOL ROOM - DAY</b>
+
+<b><span style='color: #ff00FF'>EXT. STREET - NIGHT</span> <span class="fSymbol">[[pink]]</span></b>
+
+<b><span style='color: #0055ff'>EXT. STREET - MORNING</span> <span class="fSymbol">[[blue]]</span></b>
+</pre>
+
+				<p>The same applies to section and synopses as well.</p>
+
+				<h2>Markers</h2>
+
+				<p>To drop a marker, simply add a note which begins with the keyword <code>marker</code>:
+<pre>
+<span style="color: #ff0033;">[[marker red: This part needs work!]]</span>
+<span style="color: #ffaa00;">[[marker: This is the default marker color]]</span>
+</pre>
+				<p>Markers show up in the outline view, scroll view as well as some plugins (namely FTOutliner)</p>
+
+			</section>
+
+			<section id='finalizing-your-screenplay'>
+				<h1>Finalizing Your Screenplay</h1>
+				<p>This is a quick checklist for when it's time to submit your screenplay to a producer, a contest or just to print it out so you can set it on fire.</p>
+
+				<h2>Locking Scene Numbers</h2>
+
+				<p>If this a script you are about to submit for production, you might want to lock your scene numbers: <b>Format → Lock Scene Numbers</b>. After you have locked the scenes, they won't be assigned an automatic scene number, but you can manually adjust them right in the script.</p>
+
+				<p>This is something you might not want to do while in writing process. You can also remove the locked numbers by clicking <b>Format → Clear Scene Numbers</b>.</p>
+
+				<h2>Printing Scene Numbers</h2>
+
+				<p>If you don't want to include the automatically generated scene numbers in your printed screenplay, you can toggle them off: <b>Format → Print Automatic Scene Numbers</b>.</p>
+
+				<p>Note that this feature only turns off the <em>automatic</em> scene numbering, so if you have any manual scene numbers, those will show up.</p>
+
+				<h2>Updating the Title Page</h2>
+
+				<p>Remember to update the title page! You can do it manually by editing the information on top of your document, or by selecting <b>Format → Title Page Editor</b>.</p>
+
+			</section>
+
+			<section>
+				<h1>Keyboard Shortcuts</h1>
+
+				<h3>Views</h3>
+				<dl>
+					<dd>⌘D</dd>
+					<dt>Outline View</dt>
+
+					<dd>⌘⇧D</dd>
+					<dt>Index Card View</dt>
+
+					<dd>⌘T</dd>
+					<dt>Timeline View</dt>
+
+					<dd>⌘E</dd>
+					<dt>Print Preview</dt>
+
+					<dd>⌘⌃F</dd>
+					<dt>Full Screen</dt>
+
+				</dl>
+
+				<h3>Editing</h3>
+				<dl>
+
+					<dd>⌘B</dd>
+					<dt>Bold</dt>
+
+					<dd>⌘I</dd>
+					<dt>Italic</dt>
+
+					<dd>⌘U</dd>
+					<dt>Underline</dt>
+
+					<dd>⌘⇧E</dd>
+					<dt>Omit Text (Longer paragraphs)</dt>
+
+					<dd>⌘⌥E</dd>
+					<dt>Comment Text (Single line)</dt>
+
+				</dl>
+				<h3>Advanced Editing</h3>
+				<dl>
+					<dd>⌥↩</dd>
+					<dt>Force Any Element</dt>
+
+					<dd>⌘↩</dd>
+					<dt>Force Line Break</dt>
+
+					<dd>⌘⇧H</dd>
+					<dt>Force Scene Heading</dt>
+
+					<dd>⌘⇧C</dd>
+					<dt>Force Character</dt>
+
+					<dd>⌘⇧A</dd>
+					<dt>Force Action</dt>
+
+					<dd>⌘⇧L</dd>
+					<dt>Force Lyrics</dt>
+
+				</dl>
+			</section>
+
+			<section id='macros'>
+				<h1>Macros</h1>
+
+				<p>You can define macros to automate some parts of your screenplay. There are three types of macros: <b>text</b>, <b>date</b> and <b>serial</b>.</p>
+
+				<p>Macros are defined using curly brackets: <code>{{macroType macroName = value}}</code>.</p>
+
+				<p><b>NOTE:</b> The macro gets printed out <em>immediately</em> when it's first encountered. If you want to define the values first and use the macros later, you can put the first definitions in a boneyard at the beginning of your screenplay.</p>
+
+				<h2>Text</h2>
+
+				<p>Text macros print out a simple text value.</p>
+
+<pre>
+INT. MY HOME - {{city = Helsinki}}
+
+We see the silhouette of {{city}} in the distance through a window.
+</pre>
+				
+				<h2>Dates</h2>
+				<p>Very useful when you want to include the output date in your document. <code>{{date}}</code> prints out the current date in ISO format unless you provide a format. For example:</p>
+				<pre>Draft date: {{date d.M.Y}}</pre>
+				Prints out:
+				<pre>Draft date: <script>let date = new Date(); let f = "d.M.Y".replace('M', date.getMonth() + 1)
+    .replace('Y', date.getFullYear())
+	.replace('d', date.getDate()); document.write(f);</script></pre>
+
+				<h2>Serials</h2>
+				<p>If you need a number that increments every time it is encountered, you can define a serial macro using <code>{{ serial yourVariable = 1 }}</code></p>
+				<pre>{{serial yourVariable = 1}}, {{yourVariable}}, {{yourVariable}}</pre>
+				<p>The above will print out:</p>
+				<pre>1, 2, 3</pre>
+				<p>Serial macros are very useful when numbering comic book panels, for example. The starting value can be anything, as long as its an integer. You can omit the <code>serial</code> keyword after the first instance.</p>
+				<p>If you'd like to define the number before it occurs for the first time and still start at 1, you can put <code>{{ serial varName = 0}}</code> in an omitted boneyard block.</p>
+				
+				<h2>Panel</h2>
+				<p><code>{{panel}}</code> is a global serial number for comic book panels which automatically gets back to zero after a top-level section. It's very similar to <code>{{serial}}</code> but it's an automatic and global singular value, so you can't have multiple panel variables.</p>
+				<pre>.PANEL {{panel}}
+.PANEL {{panel}}
+
+<b># New section</b>
+
+.PANEL {{panel}}
+</pre>
+				<p>Result:</p>
+				<pre>PANEL 1
+					
+PANEL 2
+
+<b>New Section</b>
+
+PANEL 1</pre>
+				<p>You can also redefine panel number at any time by using <code>{{panel = 100}}</code>, which sets the counter to any given number. Note that it will be zeroed again once a top-level section is encountered.</p>
+				
+			</section>
+
+			<section id='fountain-syntax'> 
+				<h1>Fountain Syntax</h1>
+
+				<p>This section is a comprehensive guide on the syntax of the Fountain markup language.</p>
+				<p><b>Note:</b> This is mostly copied from the Fountain website. It explains how the actual markup in Fountain works, and shows it with no formatting. This is how your screenplay would look like if you opened it in a text editor.</p>
+
+				<h2>Action</h2>
+
+				<p>Action, or scene description, is any text that does not meet the criteria for another element (i.e. scene heading, character, dialogue, etc.). Fountain takes every carriage return, space, and tab in an action element as intentional, except in centered text. Tabs are converted to four spaces.</p>
+
+				<p>Centered text is a line of action text in which the first character is a greater-than sign <code>></code> and the last character is a less-than sign <code><</code>. Leading and trailing spaces and tabs within these brackets are not preserved for centered text.</p>
+
+				<p>An action element can be forced by preceding it with an exclamation mark <code>!</code>. This is helpful when action is in uppercase and directly followed by another line of action, preventing the two from being interpreted as character and dialogue elements.</p>
+
+				<pre>He opens the card.  A simple little number inside of which is hand written:
+
+          Scott --
+
+
+          Jacob Billups
+          Palace Hotel, RM 412
+
+          1:00 pm tomorrow
+
+Scott exasperatedly throws down the card on the table and picks up the phone, hitting speed dial #1...
+
+>To Be Continued<</pre>
+
+
+				<h2>Scene Headings</h2>
+
+				<p>A scene heading is any line that has a blank line following it and begins with one of the following, case insensitive, followed by either a period <code>.</code> or a space:
+				<ul>
+					<li><code>INT</code></li>
+					<li><code>EXT</code></li>
+					<li><code>EST</code></li>
+					<li><code>INT/EXT</code></li>
+					<li><code>INT./EXT</code></li>
+					<li><code>I/E</code></li>
+				</ul>
+				</p>
+
+				<p>A scene heading can be forced by starting the line with a single <code>.</code> followed by an alphanumeric character. This allows the writer to begin action and dialogue elements with ellipses without worry that they will be interpreted as scene headings.</p>
+
+				<p>Scene Headings can optionally be appended with scene numbers, which are any alphanumerics, hyphens <code>-</code>, or periods <code>.</code> wrapped in hashes <code>#</code>. The opening <code>#</code> must be preceded by a space.</p>
+
+				<p>Here are a regular scene heading with a scene number, a forced scene heading, and an action element that starts with an ellipsis:</p>
+
+				<pre><b>EXT. BRICK'S POOL - DAY <span class='fSymbol'>#.16--b#</span></b>
+
+Steel, in the middle of a heated phone call:
+
+STEEL
+They're coming out of the woodwork!
+(pause)
+No, everybody we've put away!
+(pause)
+Point Blank Sniper?
+
+<b>.SNIPER SCOPE POV</b>
+
+...from what seems like only INCHES AWAY. _Steel's face FILLS the *Leupold Mark 4* scope_.</pre>
+
+				<p><code>EXT. BRICK'S POOL - DAY</code> becomes a scene heading because of the <code>EXT.</code>, but <code>SNIPER SCOPE POV</code> requires the preceding <code>.</code> to force a scene heading. The <code>.</code> is removed from the formatted output.</p>
+
+
+				<h2>Character</h2>
+
+				<p>A character element is any line entirely in uppercase, with one empty line before it and without an empty line after it. Character names must include at least one alphabetical character — e.g. <code>R2D2</code> works, but <code>23</code> does not.</p>
+
+				<p>A character element can be forced by preceding it with an at sign <code>@</code>. The ability to force a character element is helpful for names that require lowercase letters, and for non-Roman languages.</p>
+
+				<pre>@McCLANE
+Yippie ki-yay! I got my lowercase C!</pre>
+				<p>Fountain will remove the <code>@</code> and interpret <code>McCLANE</code> as a character, preserving its mixed case.</p>
+				<p>Character extensions may be in uppercase or lowercase:</p>
+
+				<pre>MOM (O. S.)
+Luke! Come down for supper!
+
+HANS (on the radio)
+What was it you said?</pre>
+
+
+				<h2>Dialogue</h2>
+
+				<p>Dialogue is any text following a character or parenthetical element.</p>
+
+				<p>Dialogue can contain carriage returns, but blank lines must comprise two spaces to be recognized as the part of the preceding dialogue element. For example, in the following passage,</p>
+
+				<pre>DEALER
+Ten.
+Four.
+Dealer gets a seven.
+  
+Hit or stand sir?
+
+MONKEY
+Dude, I'm a monkey.</pre>
+
+				<p>the blank line under <code>Dealer gets a seven.</code> must have two spaces in order for <code>Hit or stand sir?</code> not to be recognized as Action.</p>
+
+				<p>Dual, or simultaneous, dialogue is expressed by putting a caret <code>^</code> at the end of the line containing the second character element. Any number of spaces between the character name and the <code>^</code> are acceptable and will be ignored.</p>
+
+				<pre>BRICK
+Screw retirement.
+
+STEEL ^
+Screw retirement.</pre>
+
+
+				<h2>Parentheticals</h2>
+
+				<p>Actor parentheticals, also known as "wrylies", follow character or dialogue elements and are enclosed in parentheses <code>()</code>.</p>
+
+				<pre>STEEL
+(starting the engine)
+So much for retirement!</pre>
+
+				<h2>Lyrics</h2>
+				<p>A lyric is created by starting a line with a tilde <code>~</code>. Fountain will remove the <code>~</code> and leave it up to the app to style the Lyric appropriately. Lyrics are always forced.</p>
+
+				<pre>~Vägen hem var mycket lång
+~och ingen har jag mött
+~nu blir kvällarna kyliga och sena</pre>
+
+				<h2>Transition</h2>
+				<p>Transition is text that is
+				<ul>
+					<li>uppercase,</li>
+					<li>preceded and followed by an empty line, and</li>
+					<li>ending in <code>TO:</code>.</li>
+				</ul>
+				</p>
+				<p>Transition can be forced by beginning a line with a greater-than sign <code>></code>.</p>
+				<p>If a line matches the rules for regular transition but is meant to be interpreted as something else, it may be
+				<ul>
+					<li>preceded with a period <code>.</code> to become a forced Scene Heading, or</li>
+					<li>appended with one or more spaces to be interpreted as Action (since the line no longer ends with
+						a colon).</li>
+				</ul>
+				</p>
+
+				<pre>CUT TO:
+
+EXT. BRICK'S POOL - DAY
+
+Brick and Steel regard one another.  A job well done.
+
+> Burn to White.</pre>
+
+				<h2>Emphasis</h2>
+				<p>Fountain follows Markdown's rules for emphasis with asterisks <code>*</code> but reserves the use of underscores <code>_</code> for underlining, which is not interchangeable with italics in a screenplay. Namely,
+				<ul>
+					<li>text wrapped in <code>*</code> is italic (<code>*italic*</code>),</li>
+					<li>text wrapped in <code>**</code> is bold (<code>**bold**</code>),</li>
+					<li>text wrapped in <code>_</code> is underlined (<code>_underlined_</code>),</li>
+					<li>modes of emphasis can be mixed (<code>*italic **bold italic _underlined bold italic* underlined bold** underlined_</code>),</li>
+					<li>emphasis tags can be escaped using the backslash <code>\</code> to prevent emphasis (<code>**\*bold\***</code>),</li>
+					<li>no spaces can exist between text and emphasis tags (<code>*italic* *not italic *</code>), and</li>
+					<li>emphasis is not carried across line breaks.
+				</ul>
+				</p>
+
+				<h2>Page Breaks</h2>
+				<p>Page breaks are indicated by a line containing three or more consecutive equals signs, <code>===</code>. Page breaks are useful for television scripts, where act breaks are explicitly labeled, and for creating "vanity" first pages, which may feature quotations or prologue text.</p>
+
+				<pre>The General Lee flies through the air. FREEZE FRAME.
+
+NARRATOR
+Shoot, to the Dukes that's about like taking Grandma for a Sunday drive.
+
+>**End of Act One**&lt;
+
+===
+
+>**Act Two**&lt;
+
+The General Lee hangs in the air, right where we left it.  The NARRATOR'S voice kicks in.</pre>
+
+				<h2>Title Page</h2>
+
+				<p>The optional title page is always the first thing in a Fountain document. </p>
+
+				<p>Information is encoded in the format <code>key:value</code>. Keys can have spaces but must end with a colon <code>:</code>. Any whitespace between the <code>:</code> and the value is ignored. All keys are optional.</p>
+
+				<p>Values can be inline with the key or indented on a new line below the key (an indent is three or more spaces, or a tab). This indenting pattern allows multiple values for the same key.</p>
+
+				<p>The recommendation is that <code>Title</code>, <code>Credit</code>, <code>Author</code>, <code>Authors</code>, and <code>Source</code> be centered on the page in the formatted output, and <code>Contact</code> and <code>Draft date</code> be placed at the lower left.</p>
+
+				<p>Supported keys may differ by app, but those listed above comprise a minimal useful set. Unsupported keys, as well as any other text in a title page element that does not meet the criteria for a key-value pair, will be ignored in formatted output.</p>
+
+				<p>A title page element is ended with an empty line and is automatically followed by an implicit page break.</p>
+
+				<pre>Title:
+    _**BRICK & STEEL**_
+    _**FULL RETIRED**_
+Credit: Written by
+Author: Stu Maschwitz
+Source: Story by KTM
+Draft date: 1/20/2012
+Contact:
+    Next Level Productions
+    1588 Mission Dr.
+    Solvang, CA 93463</pre>
+
+
+				<h2>Notes</h2>
+
+				<p>A note is created by enclosing some text with double brackets <code>[[]]</code>.</p>
+
+				<p>Notes can contain carriage returns, but blank lines must comprise two spaces to be recognized as the part of the preceding note element.</p>
+
+				<p>Empty lines immediately surrounding a Note on its own line, or lines, are removed in parsing.</p>
+
+				<pre>INT. TRAILER HOME - DAY
+
+This is the home of THE BOY BAND, AKA DAN and JACK[[Or did we think of actual names for these guys?]].  They too are drinking beer, and counting the take from their last smash-and-grab.  Money, drugs, and ridiculous props are strewn about the table.
+
+[[It was supposed to be Vietnamese, right?
+Either that, or I need coffee.
+
+Definitely coffee.]]
+
+JACK
+(in Vietnamese, subtitled)
+*Did you know Brick and Steel are retired?*</pre>
+
+				<p>Notes are designed to be compatible with the types of inserted annotation common in screenwriting software. To hide, or "comment out", sections of text, use the boneyard syntax.</p>
+
+				<h2>Boneyard</h2>
+
+				<p>To make Fountain ignore some text, enclose the text in the starting tag <code>/*</code> and the ending tag <code>*/</code>. In this example, an entire scene is put in the "boneyard" and will be ignored completely on formatted output:</p>
+
+				<pre>COGNITO
+Everyone's coming after you mate!  Scorpio, The Boy Band, Sparrow, Point Blank Sniper...
+
+As he rattles off the long list, Brick and Steel share a look.  This is going to be BAD.
+
+CUT TO:
+/*
+INT. GARAGE - DAY
+
+BRICK and STEEL get into Mom's PORSCHE, Steel at the wheel.  They pause for a beat, the gravity of the situation catching up with them.
+
+They speed off.  To destiny!
+
+CUT TO:
+*/
+EXT. PALATIAL MANSION - DAY
+
+An EXTREMELY HANDSOME MAN drinks a beer.  Shirtless, unfortunately.</pre>
+
+
+				<h2>Sections</h2>
+
+				<p>Sections are optional markers for managing the structure of a story. Some screenplay applications use these like nested folders in a navigation view. Fountain's Sections resemble Markdown's ATX-style headers, but differ in that they are completely ignored in formatted output.</p>
+
+				<p>Sections are created by preceding a line with one or more hashes <code>#</code>. Sections can be nested within other sections. Spaces between the last <code>#</code> and the text are ignored.</p>
+
+				<pre>#Act
+##Sequence
+
+CUT TO:
+
+### This is a scene marked as a Section.
+
+INT. PALACE HALLWAY - NIGHT
+
+## Another Sequence
+
+# Another Act</pre>
+
+
+				<h2>Synopses</h2>
+
+				<p>Synopses are optional blocks of text to describe a section or scene.</p>
+
+				<p>Synopses are single lines prefixed by an equals sign <code>=</code>. They can be located anywhere within the screenplay and are completely ignored in formatted output. Spaces between the <code>=</code> and the text are ignored.</p>
+
+				<pre># ACT I
+
+=Set up the characters and the story.
+
+EXT. BRICK'S PATIO - DAY
+
+= This scene sets up Brick & Steel's new life as retirees. Warm sun, cold beer, and absolutely nothing to do.
+
+A gorgeous day.  The sun is shining.  But BRICK BRADDOCK, retired police detective, is sitting quietly, contemplating -- something.</pre>
+
+			</section>
+		</div>
+	</div>
+
+	<script src="beat_manual_script.js"></script>
+
+</body>
+
+</html>

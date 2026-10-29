@@ -1,0 +1,582 @@
+//
+//  BeatUITextView.swift
+//  Beat iOS
+//
+//  Created by Lauri-Matti Parppei on 14.5.2022.
+//  Copyright © 2022 Lauri-Matti Parppei. All rights reserved.
+//
+
+/**
+ 
+ A port of sorts of the sprawling and messy `BeatTextView` class for iOS.
+ Conforms to `BeatTextEditor` protocol and provides some cross-platform stuff such as `documentWidth` and scrolling methods.
+ 
+ */
+
+import UIKit
+import BeatCore
+import BeatParsing
+
+@objc protocol BeatTextEditorDelegate:BeatEditorDelegate {
+	@objc var revisionTracking:BeatRevisions { get }
+	@objc var formattingActions:BeatEditorFormattingActions { get }
+	@objc var textActions:BeatTextIO { get }
+	@objc var formatting:BeatEditorFormatting { get }
+	
+	//@property (nonatomic, weak) IBOutlet UIBarButtonItem* screenplayButton;
+	@objc var screenplayButton:UIBarButtonItem? { get }
+	@objc var dismissKeyboardButton:UIBarButtonItem? { get }
+	
+	@objc func textViewDidEndSelection(_ textView:UITextView, selectedRange:NSRange)
+	
+	func loadFonts()
+}
+
+@objc class BeatUITextView: UITextView, BeatTextEditor, UIEditMenuInteractionDelegate {
+	
+	@IBOutlet weak var editorDelegate:BeatTextEditorDelegate?
+	@IBOutlet weak var enclosingScrollView:BeatScrollView?
+	@IBOutlet weak var pageView:UIView?
+		
+	@objc var pageNumberOverlay:BeatPageNumberOverlay?
+	
+	/// Modifier flags are set during key press events and cleared afterwards. This helps with macOS class interop.
+	@objc public var modifierFlags:UIKeyModifierFlags = []
+	/// The input assistant view on top of keyboard
+	@objc public var assistantView:InputAssistantView?
+	
+	@objc public var floatingCursor = false
+	
+	var insets:UIEdgeInsets = UIEdgeInsets(top: 50, left: 0, bottom: 50, right: 0)
+	var pinchRecognizer = UIGestureRecognizer()
+	var customLayoutManager:BeatLayoutManager
+	
+	var mobileMode:Bool { return UIDevice.current.userInterfaceIdiom == .phone }
+	var mobileKeyboardManager:KeyboardManager?
+	
+	var mobileDismissButton:UIBarButtonItem?
+	
+	@IBOutlet weak var viewController:UIViewController?
+	var lastOffsetY:CGFloat = 0.0
+	/*
+	override var selectedTextRange: UITextRange? {
+
+		get {
+			let r = super.selectedTextRange
+			print("\nselection get:", r as Any)
+			print("     NSRange:", self.selectedRange)
+			return r
+		}
+		set {
+			print("\nselection set:", newValue as Any)
+			Thread.callStackSymbols.prefix(8).forEach { print($0) }
+			super.selectedTextRange = newValue
+		}
+	}
+	*/
+	
+	var inputAssistantMode:BeatInputAssistantMode = .writing {
+		didSet {
+			self.setupInputAssistantButtons()
+			self.assistantView?.reloadData()
+		}
+	}
+	
+	override var typingAttributes: [NSAttributedString.Key : Any] {
+		get {
+			return super.typingAttributes
+		}
+		set {
+			if self.textStorage.isEditing { self.textStorage.endEditing() }
+			super.typingAttributes = newValue
+		}
+	}
+	
+	/// Input assistant buttons for different modes. Set in an extension.
+	var inputAssistantButtons:[BeatInputAssistantMode:[InputAssistantAction]] = [:]
+	
+	class func linePadding() -> CGFloat {
+		// We'll use very tight padding for iPhone
+		if UIDevice.current.userInterfaceIdiom == .phone {
+			return 30.0
+		} else {
+			return 70.0
+		}
+	}
+	
+	// MARK: - Initializers
+	
+	/// This class function creates and sets up the main editor text view. We can't create a text view in IB, because layout manager can't be replaced when initializing through `NSCoder`.
+	@objc class func createTextView(editorDelegate:BeatEditorDelegate, frame:CGRect, pageView:BeatPageView, scrollView:BeatScrollView) -> BeatUITextView {
+		
+		// First create core text system
+		let textContainer = NSTextContainer()
+		let layoutManager = BeatLayoutManager(delegate: editorDelegate)
+		let textStorage = NSTextStorage(string: "")
+		
+		// Set up layout manager & text storage
+		layoutManager.addTextContainer(textContainer)
+		textStorage.addLayoutManager(layoutManager)
+		layoutManager.delegate = layoutManager
+		
+		// Create the text view and connect the container + layout manager
+		let textView = BeatUITextView(frame: frame, textContainer: textContainer, layoutManager: layoutManager)
+		textView.autoresizingMask = [.flexibleHeight, .flexibleTopMargin, .flexibleLeftMargin, .flexibleRightMargin, .flexibleBottomMargin]
+		
+		// Set up the container views
+		textView.pageView = pageView
+		textView.enclosingScrollView = scrollView
+						
+		// The same object will be responsible for all of these delegations
+		textView.editorDelegate = editorDelegate as? BeatTextEditorDelegate
+		textView.delegate = editorDelegate as? UITextViewDelegate
+		textView.inputDelegate = editorDelegate as? UITextInputDelegate
+
+		//
+		textView.setupInputAssistant()
+		
+		textView.setup()
+		
+		return textView
+	}
+	
+	init(frame: CGRect, textContainer: NSTextContainer?, layoutManager:BeatLayoutManager) {
+		customLayoutManager = layoutManager
+		super.init(frame: frame, textContainer: textContainer)
+	}
+		
+	/// This initializer is useless. For some reason, you can't replace the layout manager when using `NSCoder`.
+	required init?(coder: NSCoder) {
+		customLayoutManager = BeatLayoutManager()
+		super.init(coder: coder)
+		
+		self.textStorage.removeLayoutManager(self.textStorage.layoutManagers.first!)
+		
+		customLayoutManager.addTextContainer(self.textContainer)
+		customLayoutManager.textStorage = self.textStorage
+		
+		self.textContainer.replaceLayoutManager(customLayoutManager)
+	}
+	
+	deinit {
+		print("Deinit text view")
+	}
+	
+	@objc func unload() {
+		self.resignFirstResponder()
+
+		NotificationCenter.default.removeObserver(self)
+		self.gestureRecognizers?.removeAll()
+
+		self.mobileKeyboardManager = nil
+
+		self.pageView = nil
+				
+		self.assistantView?.dataSource = nil
+		self.assistantView?.dSource = nil
+		self.assistantView?.detach(from: self)
+		self.assistantView = nil
+				
+		self.inputAccessoryView = nil
+		self.inputView = nil
+		self.reloadInputViews()
+	}
+	
+	
+	
+	// MARK: - Input assistant
+	
+	var inputAssistantHidden: Bool = BeatUserDefaults.shared().getBool(BeatSettingInputAssistantHidden) {
+		didSet {
+			BeatUserDefaults.shared().save(inputAssistantHidden, forKey:BeatSettingInputAssistantHidden)
+			self.assistantView?.isHidden = inputAssistantHidden
+		}
+	}
+
+	func setupInputAssistant() {
+		showInputAssistant()
+	}
+	
+	func showInputAssistant() {
+		// Set up assistant view
+		guard let editorDelegate else { print("No editor delegate"); return }
+		self.assistantView = InputAssistantView(editorDelegate: editorDelegate, inputAssistantDelegate: self)
+		self.assistantView?.attach(to: self)
+		self.assistantView?.isHidden = BeatUserDefaults.shared().getBool(BeatSettingInputAssistantHidden)
+	}
+	
+	
+	// MARK: - Layout manager
+	
+	/// Returns TextKit 1 layout manager
+	override var layoutManager: NSLayoutManager {
+		return customLayoutManager
+	}
+	
+	/// Returns `nil` to force TextKit 1 compatibility mode. Why? Because we're using the same `NSLayoutManager` on both iOS and macOS, and the desktop version tries to stay compatible all the way down to 10.14.
+	override var textLayoutManager: NSTextLayoutManager? {
+		return nil
+	}
+
+	
+	// MARK: - Setup
+	
+	override func awakeFromNib() {
+		super.awakeFromNib()
+		setup()
+	}
+	
+	func setup() {
+		// Delegates
+		enclosingScrollView?.delegate = self
+		
+		self.enclosingScrollView?.keyboardDismissMode = .onDrag
+		
+		// Text container setup
+		self.textContainer.widthTracksTextView = false
+		self.textContainer.heightTracksTextView = false
+		
+		// Set text container size. Note that in mobile mode, this varies!
+		self.textContainer.size = CGSize(width: self.documentWidth, height: self.textContainer.size.height)
+		self.textContainer.lineFragmentPadding = BeatUITextView.linePadding()
+		
+		// Text view behavior
+		self.smartDashesType = .no
+		self.smartQuotesType = .no
+		self.smartInsertDeleteType = .no
+		
+		// This *might* reduce blurriness.
+		self.layer.shouldRasterize = false
+		
+		resizePaper()
+		resize()
+				
+		setupInputAssistantButtons()
+		
+		if !mobileMode {
+			// Tablet setup. We'll have an external scroll view on iPad, so let's disable scroll for text view.
+			isScrollEnabled = false
+			self.textContainerInset = insets
+		} else {
+			// Mobile mode setup
+			self.contentInsetAdjustmentBehavior = .automatic
+			
+			self.mobileKeyboardManager = KeyboardManager()
+			self.mobileKeyboardManager?.delegate = self
+			
+			// Disable pinch gesture recognizer
+			let pinchGestureRecognizer = UIPinchGestureRecognizer(target: nil, action: nil)
+			pinchGestureRecognizer.delegate = self
+			self.addGestureRecognizer(pinchGestureRecognizer)
+		}
+		
+		// Set a new frame for this view for mobile mode
+		if mobileMode, let contentView = self.enclosingScrollView?.superview {
+			self.frame = CGRectMake(0.0, 0.0, contentView.frame.width, contentView.frame.height)
+			self.autoresizingMask = [.flexibleWidth, .flexibleHeight, .flexibleTopMargin, .flexibleBottomMargin, .flexibleLeftMargin, .flexibleRightMargin]
+			
+			self.maximumZoomScale = 1.0
+			self.minimumZoomScale = 1.0
+		}
+		
+		//pageNumberOverlay = BeatPageNumberOverlay(textView: self)
+	}
+	
+	
+	// MARK: - Document view width
+	
+	@objc var documentWidth:CGFloat {
+		var width = 0.0
+		let padding = BeatUITextView.linePadding()
+		
+		guard let delegate = self.editorDelegate else { return 0.0 }
+		
+		width = delegate.pageSize == .A4 ? delegate.editorStyles.page().defaultWidthA4 : delegate.editorStyles.page().defaultWidthLetter
+		width += padding * 2
+		
+		// For iPhone, we'll fit the viewport to view
+		if mobileMode, let superview {
+			let availableWidth = superview.frame.size.width * self.zoomScale
+			width = width * delegate.fontScale()
+			width = min(availableWidth, width)
+		}
+		
+		return width
+	}
+	
+	private var isUpdatingLayout = false
+	override func layoutSubviews() {
+		super.layoutSubviews()
+		
+		// Avoid infinite loop
+		guard !isUpdatingLayout else { return }
+		
+		isUpdatingLayout = true
+		if self.mobileMode { mobileViewResize() }
+		isUpdatingLayout = false
+	}
+	
+	
+	// MARK: - Caret drawing
+	
+	/// Because iOS draws the caret to fill line fragment rects, we need to do some additional math. We'll need to get both font and paragraph styles at given position and do some additional calculations.
+	override func caretRect(for position: UITextPosition) -> CGRect {
+		var rect = super.caretRect(for: position)
+		let offset = offset(from: beginningOfDocument, to: position)
+		
+		guard let text = self.attributedText,
+			  offset < text.length,
+			  let line = self.editorDelegate?.parser.line(at: offset)
+		else { return rect }
+	
+		
+		let attrs = text.attributes(at: line.position, effectiveRange: nil)
+		
+		// Adjust the rect using font and paragraph style
+		if let pStyle = attrs[.paragraphStyle] as? NSParagraphStyle {
+			// Caret should be a little higher than the line itself
+			let caretHeight = pStyle.maximumLineHeight * 1.1
+			let yOffset = caretHeight - pStyle.maximumLineHeight
+			
+			rect.origin.y += pStyle.paragraphSpacingBefore + (yOffset / 2)
+			rect.size.height = caretHeight
+		}
+		
+		return rect
+	}
+	
+	
+	// MARK: - Scroll to range
+	
+	@objc func scroll(to line: Line!) {
+		selectAndScroll(to: line.textRange())
+	}
+	
+	func scroll(to range: NSRange) {
+		self.scroll(to:range, animated: true)
+	}
+	
+	func scroll(to range: NSRange, animated:Bool = true) {
+		if mobileMode {
+			super.scrollRangeToVisible(range)
+			return
+		}
+		guard let enclosingScrollView, NSMaxRange(range) <= (self.text as NSString).length else { return }
+		
+		// Current bounds
+		let bounds = enclosingScrollView.bounds
+		
+		// The *actually* visible frame (why won't iOS give this automatically?)
+		let visible = CGRectMake(bounds.origin.x, bounds.origin.y, bounds.width, bounds.height - enclosingScrollView.adjustedContentInset.bottom - enclosingScrollView.contentInset.bottom)
+		
+		// Current selection frame
+		var selectionRect = self.rectForRange(range: self.selectedRange)
+		if selectionRect != .infinite {
+			if selectionRect.size.width < 1.0 { selectionRect.size.width += 1.0 }
+			
+			// Account for top margin
+			selectionRect.origin.y += self.textContainerInset.top
+			
+			let scaledRect = convert(selectionRect, to: enclosingScrollView)
+			
+			// If the rect is not visible, scroll to that range
+			if CGRectIntersection(scaledRect, visible).height < 16.0 {
+				enclosingScrollView.safelyScrollRectToVisible(scaledRect, animated: animated)
+			}
+		}
+	}
+	
+	override func scrollRangeToVisible(_ range: NSRange) {
+		self.scroll(to:range)
+		//super.scrollRangeToVisible(range)
+	}
+	
+	func scroll(to range: NSRange, callback callbackBlock: (() -> Void)!) {
+		scroll(to: range)
+		callbackBlock()
+	}
+	
+	func scroll(to scene: OutlineScene!) {
+		selectAndScroll(to: scene.line.textRange())
+	}
+	
+	@objc func selectAndScroll(to range:NSRange) {
+		self.selectedRange = NSMakeRange(NSMaxRange(range), 0)
+		self.scroll(to: range)
+	}
+
+	
+	// MARK: - Dialogue input
+	
+	func shouldCancelCharacterInput() -> Bool {
+		guard let editorDelegate = self.editorDelegate,
+			  let line = editorDelegate.currentLine
+		else { return true }
+		
+		/// We'll return `true` when current line is empty (what is this)
+		return (editorDelegate.lineForNewCue != nil && line.string.count == 0)
+	}
+	
+	@objc func cancelCharacterInput() {
+		guard let editorDelegate = self.editorDelegate, let currentLine = editorDelegate.currentLine else { return }
+
+		let line = editorDelegate.lineForNewCue
+
+		var shouldCancel = true
+		
+		if editorDelegate.lineForNewCue != nil, currentLine.position == NSMaxRange(editorDelegate.lineForNewCue.range()) {
+			shouldCancel = false
+		}
+		
+		//editorDelegate.characterInput = false
+		editorDelegate.lineForNewCue = nil
+		
+		// Uh... well, yeah.
+		if !shouldCancel { return }
+				
+		let paragraphStyle = NSMutableParagraphStyle()
+		paragraphStyle.firstLineHeadIndent = 0.0
+		paragraphStyle.minimumLineHeight = self.editorDelegate?.editorStyles.page().lineHeight ?? 12.0
+		
+		let attributes:[NSAttributedString.Key:Any] = [
+			NSAttributedString.Key.font: editorDelegate.fonts.regular,
+			NSAttributedString.Key.paragraphStyle: paragraphStyle
+		]
+		
+		self.updateAssistingViews()
+		
+		self.typingAttributes = attributes
+		self.setNeedsDisplay()
+		self.setNeedsLayout()
+		
+		if line?.length == 0 {
+			editorDelegate.setTypeAndFormat(line, type: .empty)
+		}
+	}
+	
+	// MARK: - Rects for ranges
+	
+	@objc func rectForRange (range: NSRange) -> CGRect {
+		guard NSMaxRange(range) <= self.text.count else { return .infinite }
+				
+		let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+		self.layoutManager.ensureLayout(forGlyphRange: glyphRange)
+		
+		guard NSMaxRange(glyphRange) <= self.layoutManager.numberOfGlyphs else { return .infinite }
+		return self.layoutManager.boundingRect(forGlyphRange: glyphRange, in: self.textContainer)
+	}
+	
+	
+	// MARK: - Touch events
+	
+	var selectedRangeBeforeTouch = NSRange(location: -1, length: 0)
+	
+	override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+		// Convert to enclosing scroll view coordinate
+		/*
+		if !mobileMode {
+			for touch in touches {
+				touch.location(in: self.enclosingScrollView)
+			}
+		}
+		 */
+		
+		super.touchesBegan(touches, with: event)
+	}
+	
+	override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+		// Convert to enclosing scroll view coordinate
+		/*
+		if !mobileMode {
+			for touch in touches {
+				touch.location(in: self.enclosingScrollView)
+			}
+		}
+		 */
+		
+		super.touchesMoved(touches, with: event)
+	}
+	
+	override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+		super.touchesEnded(touches, with: event)
+		
+		// Force selection to stay where user tapped
+		/*
+		let currentRange = selectedRange
+		unmarkText()
+		selectedRange = currentRange
+		 */
+	}
+	
+	override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+		super.touchesCancelled(touches, with: event)
+	}
+	
+	override func beginFloatingCursor(at point: CGPoint) {
+		super.beginFloatingCursor(at: point)
+		
+		floatingCursor = true
+		self.selectedRangeBeforeTouch = self.selectedRange
+	}
+	
+	override func endFloatingCursor() {
+		super.endFloatingCursor()
+		
+		floatingCursor = false
+		
+		if self.selectedRangeBeforeTouch != self.selectedRange {
+			self.editorDelegate?.textViewDidEndSelection(self, selectedRange: self.selectedRange)
+		}
+	}
+}
+
+
+
+// MARK: - Gesture recognizer delegate for mobile
+
+extension BeatUITextView:UIGestureRecognizerDelegate {
+	override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+		if gestureRecognizer is UIPinchGestureRecognizer, mobileMode {
+			return false // Disable pinch zoom
+		}
+
+		return true
+	}
+}
+
+
+// MARK: - Mobile keyboard manager
+
+extension BeatUITextView:KeyboardManagerDelegate {
+	func keyboardWillShow(with size: CGSize, animationTime: Double) {
+		let animator = UIViewPropertyAnimator(duration: animationTime, curve: .easeInOut) {
+			self.contentInset.bottom = self.keyboardLayoutGuide.layoutFrame.height + self.insets.bottom
+		}
+		animator.startAnimation()
+		//self.contentInset.bottom = self.keyboardLayoutGuide.layoutFrame.height
+				
+		self.editorDelegate?.dismissKeyboardButton?.isHidden = false
+		self.editorDelegate?.screenplayButton?.isHidden = true
+	}
+	func keyboardDidShow() {
+		//self.scroll(to: self.selectedRange, animated: false)
+	}
+	func keyboardWillHide() {
+		self.contentInset.bottom = self.insets.bottom
+		self.editorDelegate?.dismissKeyboardButton?.isHidden = true
+		self.editorDelegate?.screenplayButton?.isHidden = false
+	}
+		
+	@objc func dismissKeyboard() {
+		self.endEditing(true)
+	}
+}
+
+/*
+ 
+ mutta pian se on ohi
+ enää tää yksi ovi
+ vaikk' sen takana saattaa olla
+ vielä tuhansia ovii
+ 
+ */

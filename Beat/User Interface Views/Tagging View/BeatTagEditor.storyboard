@@ -1,0 +1,616 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB" version="3.0" toolsVersion="24127" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES">
+    <dependencies>
+        <deployment identifier="macosx"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="24127"/>
+        <capability name="Image references" minToolsVersion="12.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--Window Controller-->
+        <scene sceneID="rxh-o6-ASY">
+            <objects>
+                <windowController storyboardIdentifier="TagEditorWindow" id="O0a-rK-2dk" customClass="BeatTagManager" customModule="Beat" customModuleProvider="target" sceneMemberID="viewController">
+                    <window key="window" title="Tag Manager" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" restorable="NO" hidesOnDeactivate="YES" releasedWhenClosed="NO" visibleAtLaunch="NO" frameAutosaveName="" animationBehavior="default" toolbarStyle="unified" id="vJf-rg-99I">
+                        <windowStyleMask key="styleMask" titled="YES" closable="YES" resizable="YES"/>
+                        <windowPositionMask key="initialPositionMask" topStrut="YES" bottomStrut="YES"/>
+                        <rect key="contentRect" x="255" y="238" width="610" height="284"/>
+                        <rect key="screenRect" x="0.0" y="0.0" width="1728" height="1079"/>
+                        <value key="minSize" type="size" width="610" height="284"/>
+                        <view key="contentView" id="GJt-hS-q8F">
+                            <rect key="frame" x="0.0" y="0.0" width="610" height="284"/>
+                            <autoresizingMask key="autoresizingMask"/>
+                        </view>
+                        <toolbar key="toolbar" implicitIdentifier="F2EEC002-9FF7-42BD-94E9-2EE9A7616026" autosavesConfiguration="NO" allowsUserCustomization="NO" showsBaselineSeparator="NO" displayMode="iconAndLabel" sizeMode="regular" id="E5O-OO-d4u">
+                            <allowedToolbarItems>
+                                <toolbarItem implicitItemIdentifier="DBFD872D-18E4-411C-981D-A1597AD11763" label="Edit Tags" paletteLabel="Edit Tags" selectable="YES" id="PMF-BV-tw4">
+                                    <imageReference key="image" image="tag.fill" catalog="system" symbolScale="medium"/>
+                                    <size key="minSize" width="29" height="25"/>
+                                    <size key="maxSize" width="29" height="25"/>
+                                    <userDefinedRuntimeAttributes>
+                                        <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.tab.edit"/>
+                                    </userDefinedRuntimeAttributes>
+                                    <connections>
+                                        <action selector="selectTab:" target="O0a-rK-2dk" id="Q3H-CE-Bib"/>
+                                    </connections>
+                                </toolbarItem>
+                                <toolbarItem implicitItemIdentifier="F73CE78D-B7D2-4203-99BC-B4A4EA07249A" label="Tag Reports" paletteLabel="Tag Reports" tag="1" selectable="YES" id="J7S-pn-EaT">
+                                    <imageReference key="image" image="scroll.fill" catalog="system" symbolScale="medium"/>
+                                    <size key="minSize" width="29" height="25"/>
+                                    <size key="maxSize" width="29" height="25"/>
+                                    <userDefinedRuntimeAttributes>
+                                        <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.tab.report"/>
+                                    </userDefinedRuntimeAttributes>
+                                    <connections>
+                                        <action selector="selectTab:" target="O0a-rK-2dk" id="Pb2-KT-HmA"/>
+                                    </connections>
+                                </toolbarItem>
+                            </allowedToolbarItems>
+                            <defaultToolbarItems>
+                                <toolbarItem reference="PMF-BV-tw4"/>
+                                <toolbarItem reference="J7S-pn-EaT"/>
+                            </defaultToolbarItems>
+                        </toolbar>
+                        <userDefinedRuntimeAttributes>
+                            <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.windowTitle"/>
+                        </userDefinedRuntimeAttributes>
+                        <connections>
+                            <outlet property="delegate" destination="O0a-rK-2dk" id="e5e-aw-U2f"/>
+                        </connections>
+                    </window>
+                    <connections>
+                        <segue destination="BWy-nh-F4c" kind="relationship" relationship="window.shadowedContentViewController" id="FZ0-fw-ttg"/>
+                    </connections>
+                </windowController>
+                <customObject id="0CS-zA-TpJ" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="-64" y="-1093"/>
+        </scene>
+        <!--Beat Tag Editor Tab View-->
+        <scene sceneID="jdE-wI-P5M">
+            <objects>
+                <tabViewController selectedTabViewItemIndex="0" tabStyle="unspecified" canPropagateSelectedChildViewControllerTitle="NO" id="BWy-nh-F4c" customClass="BeatTagEditorTabView" customModule="Beat" customModuleProvider="target" sceneMemberID="viewController">
+                    <tabViewItems>
+                        <tabViewItem id="I9d-aM-Osl"/>
+                        <tabViewItem id="csq-cO-T5q"/>
+                    </tabViewItems>
+                    <tabView key="tabView" type="noTabsNoBorder" id="m0p-SH-MeC">
+                        <rect key="frame" x="0.0" y="0.0" width="594" height="353"/>
+                        <autoresizingMask key="autoresizingMask"/>
+                        <font key="font" metaFont="message"/>
+                        <connections>
+                            <outlet property="delegate" destination="BWy-nh-F4c" id="6Ku-7k-QSl"/>
+                        </connections>
+                    </tabView>
+                    <connections>
+                        <outlet property="tabView" destination="m0p-SH-MeC" id="VjB-TN-by9"/>
+                        <segue destination="CSC-yL-gBA" kind="relationship" relationship="tabItems" id="sCP-GL-ZDL"/>
+                        <segue destination="qE6-5a-im5" kind="relationship" relationship="tabItems" id="V8S-7S-eAQ"/>
+                    </connections>
+                </tabViewController>
+                <customObject id="pjf-x1-CgR" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="655" y="-1113.5"/>
+        </scene>
+        <!--Tag Editor-->
+        <scene sceneID="nx0-b6-pQq">
+            <objects>
+                <viewController title="Tag Editor" id="CSC-yL-gBA" customClass="BeatTagEditor" customModule="Beat" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" id="D5k-nF-Ud9">
+                        <rect key="frame" x="0.0" y="0.0" width="615" height="378"/>
+                        <autoresizingMask key="autoresizingMask"/>
+                        <subviews>
+                            <splitView arrangesAllSubviews="NO" dividerStyle="thin" vertical="YES" id="rdZ-FR-3KP">
+                                <rect key="frame" x="0.0" y="0.0" width="615" height="378"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                <subviews>
+                                    <customView id="iud-Gt-gEr">
+                                        <rect key="frame" x="0.0" y="0.0" width="200" height="378"/>
+                                        <autoresizingMask key="autoresizingMask"/>
+                                        <subviews>
+                                            <scrollView fixedFrame="YES" borderType="none" autohidesScrollers="YES" horizontalLineScroll="24" horizontalPageScroll="10" verticalLineScroll="24" verticalPageScroll="10" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="WTU-Td-8Xu">
+                                                <rect key="frame" x="0.0" y="0.0" width="200" height="378"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                <clipView key="contentView" id="h0K-OG-Ago">
+                                                    <rect key="frame" x="0.0" y="0.0" width="200" height="378"/>
+                                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                    <subviews>
+                                                        <outlineView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" tableStyle="inset" columnReordering="NO" multipleSelection="NO" autosaveColumns="NO" rowHeight="24" rowSizeStyle="automatic" viewBased="YES" indentationPerLevel="13" outlineTableColumn="csW-4c-Mxm" id="3HK-bH-fzs">
+                                                            <rect key="frame" x="0.0" y="0.0" width="200" height="378"/>
+                                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                            <size key="intercellSpacing" width="17" height="0.0"/>
+                                                            <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                            <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
+                                                            <tableColumns>
+                                                                <tableColumn identifier="AutomaticTableColumnIdentifier.0" width="168" minWidth="40" maxWidth="1000" id="csW-4c-Mxm">
+                                                                    <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border">
+                                                                        <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
+                                                                        <color key="backgroundColor" name="headerColor" catalog="System" colorSpace="catalog"/>
+                                                                    </tableHeaderCell>
+                                                                    <textFieldCell key="dataCell" lineBreakMode="truncatingTail" selectable="YES" editable="YES" title="Text Cell" id="KiB-vG-ffC">
+                                                                        <font key="font" metaFont="system"/>
+                                                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                                        <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                                    </textFieldCell>
+                                                                    <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
+                                                                    <prototypeCellViews>
+                                                                        <tableCellView identifier="TagCell" id="E5K-PY-ACo">
+                                                                            <rect key="frame" x="18" y="0.0" width="163" height="24"/>
+                                                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                                            <subviews>
+                                                                                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="lSg-ug-e4Z">
+                                                                                    <rect key="frame" x="0.0" y="4" width="163" height="16"/>
+                                                                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
+                                                                                    <textFieldCell key="cell" lineBreakMode="truncatingTail" sendsActionOnEndEditing="YES" title="Table View Cell" id="Ueb-92-a3h">
+                                                                                        <font key="font" usesAppearanceFont="YES"/>
+                                                                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                                                    </textFieldCell>
+                                                                                </textField>
+                                                                            </subviews>
+                                                                            <connections>
+                                                                                <outlet property="textField" destination="lSg-ug-e4Z" id="wuY-z6-Tvs"/>
+                                                                            </connections>
+                                                                        </tableCellView>
+                                                                        <tableCellView identifier="CategoryCell" id="WIs-j7-j8E">
+                                                                            <rect key="frame" x="18" y="24" width="163" height="24"/>
+                                                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                                            <subviews>
+                                                                                <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" id="qbj-hl-xH5">
+                                                                                    <rect key="frame" x="3" y="3" width="17" height="18"/>
+                                                                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES" heightSizable="YES"/>
+                                                                                    <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" id="hlo-0S-Jw8"/>
+                                                                                </imageView>
+                                                                                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Lbs-bG-IyD">
+                                                                                    <rect key="frame" x="24" y="4" width="143" height="16"/>
+                                                                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
+                                                                                    <textFieldCell key="cell" lineBreakMode="truncatingTail" sendsActionOnEndEditing="YES" title="Table View Cell" id="Zcw-gz-8PZ">
+                                                                                        <font key="font" usesAppearanceFont="YES"/>
+                                                                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                                                    </textFieldCell>
+                                                                                </textField>
+                                                                            </subviews>
+                                                                            <connections>
+                                                                                <outlet property="imageView" destination="qbj-hl-xH5" id="YjK-iU-R6g"/>
+                                                                                <outlet property="textField" destination="Lbs-bG-IyD" id="e41-4S-AKp"/>
+                                                                            </connections>
+                                                                        </tableCellView>
+                                                                    </prototypeCellViews>
+                                                                </tableColumn>
+                                                            </tableColumns>
+                                                            <connections>
+                                                                <outlet property="dataSource" destination="CSC-yL-gBA" id="kT9-EN-gC4"/>
+                                                                <outlet property="delegate" destination="CSC-yL-gBA" id="vjf-eE-hg0"/>
+                                                            </connections>
+                                                        </outlineView>
+                                                    </subviews>
+                                                </clipView>
+                                                <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="6PG-VK-biC">
+                                                    <rect key="frame" x="0.0" y="368" width="200" height="16"/>
+                                                    <autoresizingMask key="autoresizingMask"/>
+                                                </scroller>
+                                                <scroller key="verticalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="GMH-dA-euV">
+                                                    <rect key="frame" x="224" y="17" width="15" height="102"/>
+                                                    <autoresizingMask key="autoresizingMask"/>
+                                                </scroller>
+                                            </scrollView>
+                                        </subviews>
+                                        <constraints>
+                                            <constraint firstAttribute="width" relation="greaterThanOrEqual" constant="150" id="u8X-x0-VRe"/>
+                                        </constraints>
+                                    </customView>
+                                    <customView fixedFrame="YES" id="o1Q-AY-Ot6">
+                                        <rect key="frame" x="201" y="0.0" width="414" height="378"/>
+                                        <autoresizingMask key="autoresizingMask"/>
+                                        <subviews>
+                                            <containerView id="ElB-1l-ygH">
+                                                <rect key="frame" x="0.0" y="0.0" width="414" height="378"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                <connections>
+                                                    <segue destination="iC6-gj-bRa" kind="embed" identifier="TagView" id="9c5-Xf-Pwi"/>
+                                                </connections>
+                                            </containerView>
+                                        </subviews>
+                                    </customView>
+                                </subviews>
+                                <holdingPriorities>
+                                    <real value="358"/>
+                                    <real value="250"/>
+                                </holdingPriorities>
+                            </splitView>
+                        </subviews>
+                    </view>
+                    <connections>
+                        <outlet property="tagList" destination="3HK-bH-fzs" id="6jG-WH-n5b"/>
+                    </connections>
+                </viewController>
+                <customObject id="Mcx-fU-o9L" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="979.5" y="-558"/>
+        </scene>
+        <!--Beat Tag Editor View-->
+        <scene sceneID="fJw-Gc-ISK">
+            <objects>
+                <viewController id="iC6-gj-bRa" customClass="BeatTagEditorView" customModule="Beat" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" id="Fsd-ES-hUQ">
+                        <rect key="frame" x="0.0" y="0.0" width="450" height="300"/>
+                        <autoresizingMask key="autoresizingMask"/>
+                        <subviews>
+                            <customView id="l1Y-t2-4gU">
+                                <rect key="frame" x="0.0" y="0.0" width="450" height="300"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                <subviews>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="uFX-GW-yHd" customClass="BeatTagNameField" customModule="Beat" customModuleProvider="target">
+                                        <rect key="frame" x="18" y="260" width="333" height="20"/>
+                                        <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES"/>
+                                        <textFieldCell key="cell" lineBreakMode="clipping" title="Tag Name" id="skz-wK-HDh">
+                                            <font key="font" metaFont="system" size="17"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                        <connections>
+                                            <action selector="renameCommit:" target="iC6-gj-bRa" id="7lI-bK-Ky0"/>
+                                        </connections>
+                                    </textField>
+                                    <scrollView borderType="none" autohidesScrollers="YES" horizontalLineScroll="24" horizontalPageScroll="10" verticalLineScroll="24" verticalPageScroll="10" usesPredominantAxisScrolling="NO" id="gei-wc-ePO">
+                                        <rect key="frame" x="0.0" y="0.0" width="450" height="226"/>
+                                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                        <clipView key="contentView" id="mvP-HX-MPv">
+                                            <rect key="frame" x="0.0" y="0.0" width="450" height="226"/>
+                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                            <subviews>
+                                                <outlineView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" multipleSelection="NO" autosaveColumns="NO" rowHeight="24" rowSizeStyle="automatic" viewBased="YES" indentationPerLevel="13" outlineTableColumn="2cM-JP-MAr" id="a5R-Cj-gXk">
+                                                    <rect key="frame" x="0.0" y="0.0" width="450" height="226"/>
+                                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                    <size key="intercellSpacing" width="17" height="0.0"/>
+                                                    <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                    <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
+                                                    <tableColumns>
+                                                        <tableColumn identifier="AutomaticTableColumnIdentifier.0" width="418" minWidth="40" maxWidth="1000" id="2cM-JP-MAr">
+                                                            <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border">
+                                                                <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
+                                                                <color key="backgroundColor" name="headerColor" catalog="System" colorSpace="catalog"/>
+                                                            </tableHeaderCell>
+                                                            <textFieldCell key="dataCell" lineBreakMode="truncatingTail" selectable="YES" editable="YES" title="Text Cell" id="u8T-Vm-F2N">
+                                                                <font key="font" metaFont="system"/>
+                                                                <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                                <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                            </textFieldCell>
+                                                            <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
+                                                            <prototypeCellViews>
+                                                                <tableCellView identifier="SceneCell" id="Wt5-fM-Df5">
+                                                                    <rect key="frame" x="18" y="0.0" width="413" height="24"/>
+                                                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                                    <subviews>
+                                                                        <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="KJh-IQ-5ah">
+                                                                            <rect key="frame" x="0.0" y="4" width="413" height="16"/>
+                                                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
+                                                                            <textFieldCell key="cell" lineBreakMode="truncatingTail" sendsActionOnEndEditing="YES" title="Table View Cell" id="hTt-dy-Ru3">
+                                                                                <font key="font" usesAppearanceFont="YES"/>
+                                                                                <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                                                <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                                            </textFieldCell>
+                                                                        </textField>
+                                                                    </subviews>
+                                                                    <connections>
+                                                                        <outlet property="textField" destination="KJh-IQ-5ah" id="t8y-Y4-Wi2"/>
+                                                                    </connections>
+                                                                </tableCellView>
+                                                            </prototypeCellViews>
+                                                        </tableColumn>
+                                                    </tableColumns>
+                                                    <connections>
+                                                        <outlet property="dataSource" destination="iC6-gj-bRa" id="onP-MN-iWp"/>
+                                                        <outlet property="delegate" destination="iC6-gj-bRa" id="G3C-Ac-QGW"/>
+                                                    </connections>
+                                                </outlineView>
+                                            </subviews>
+                                        </clipView>
+                                        <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="h6C-lP-GQz">
+                                            <rect key="frame" x="1" y="225" width="434" height="16"/>
+                                            <autoresizingMask key="autoresizingMask"/>
+                                        </scroller>
+                                        <scroller key="verticalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="mtq-bT-8ni">
+                                            <rect key="frame" x="224" y="17" width="15" height="102"/>
+                                            <autoresizingMask key="autoresizingMask"/>
+                                        </scroller>
+                                    </scrollView>
+                                    <button verticalHuggingPriority="750" id="nHE-8T-aB9">
+                                        <rect key="frame" x="351" y="255" width="85" height="27"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="push" title="Rename" bezelStyle="rounded" alignment="center" controlSize="small" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="DdP-WL-Qaf">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="smallSystem"/>
+                                        </buttonCell>
+                                        <userDefinedRuntimeAttributes>
+                                            <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.rename"/>
+                                        </userDefinedRuntimeAttributes>
+                                        <connections>
+                                            <action selector="rename:" target="iC6-gj-bRa" id="9qa-xt-HLH"/>
+                                        </connections>
+                                    </button>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="gl9-BA-DJt">
+                                        <rect key="frame" x="18" y="241" width="347" height="11"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <textFieldCell key="cell" controlSize="mini" lineBreakMode="clipping" title="Label" id="3xk-0G-NYU">
+                                            <font key="font" metaFont="miniSystem"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                </subviews>
+                            </customView>
+                        </subviews>
+                    </view>
+                    <connections>
+                        <outlet property="containerView" destination="l1Y-t2-4gU" id="j1W-6t-lqb"/>
+                        <outlet property="renameButton" destination="nHE-8T-aB9" id="JW1-Kk-sig"/>
+                        <outlet property="sceneList" destination="a5R-Cj-gXk" id="4Wg-Zw-poL"/>
+                        <outlet property="tagName" destination="uFX-GW-yHd" id="DwY-be-Yvw"/>
+                        <outlet property="tagType" destination="gl9-BA-DJt" id="n9H-fI-92W"/>
+                    </connections>
+                </viewController>
+                <customObject id="0cy-MU-JGm" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="979" y="-45"/>
+        </scene>
+        <!--Tag Reports-->
+        <scene sceneID="Uk6-xj-BMH">
+            <objects>
+                <viewController title="Tag Reports" id="qE6-5a-im5" customClass="BeatTagReportView" customModule="Beat" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" id="q9H-Ya-JOD">
+                        <rect key="frame" x="0.0" y="0.0" width="603" height="319"/>
+                        <autoresizingMask key="autoresizingMask"/>
+                        <subviews>
+                            <splitView arrangesAllSubviews="NO" dividerStyle="thin" vertical="YES" id="KGa-Lp-QFz">
+                                <rect key="frame" x="0.0" y="0.0" width="603" height="319"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                <subviews>
+                                    <customView id="3pW-ad-Znb">
+                                        <rect key="frame" x="0.0" y="0.0" width="200" height="319"/>
+                                        <autoresizingMask key="autoresizingMask"/>
+                                        <subviews>
+                                            <scrollView fixedFrame="YES" borderType="none" autohidesScrollers="YES" horizontalLineScroll="24" horizontalPageScroll="10" verticalLineScroll="24" verticalPageScroll="10" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="xKq-ee-5uZ">
+                                                <rect key="frame" x="0.0" y="1" width="200" height="289"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                <clipView key="contentView" id="RSV-Ch-fjy">
+                                                    <rect key="frame" x="0.0" y="0.0" width="200" height="289"/>
+                                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                    <subviews>
+                                                        <outlineView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" tableStyle="inset" columnReordering="NO" multipleSelection="NO" autosaveColumns="NO" rowHeight="24" rowSizeStyle="automatic" viewBased="YES" indentationPerLevel="13" outlineTableColumn="C5c-kQ-Q3j" id="7Ou-yS-thu">
+                                                            <rect key="frame" x="0.0" y="0.0" width="200" height="289"/>
+                                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                            <size key="intercellSpacing" width="17" height="0.0"/>
+                                                            <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                            <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
+                                                            <tableColumns>
+                                                                <tableColumn identifier="AutomaticTableColumnIdentifier.0" width="168" minWidth="40" maxWidth="1000" id="C5c-kQ-Q3j">
+                                                                    <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border">
+                                                                        <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
+                                                                        <color key="backgroundColor" name="headerColor" catalog="System" colorSpace="catalog"/>
+                                                                    </tableHeaderCell>
+                                                                    <textFieldCell key="dataCell" lineBreakMode="truncatingTail" selectable="YES" editable="YES" title="Text Cell" id="yMy-g9-Qe8">
+                                                                        <font key="font" metaFont="system"/>
+                                                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                                        <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                                    </textFieldCell>
+                                                                    <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
+                                                                    <prototypeCellViews>
+                                                                        <tableCellView identifier="CategoryCell" id="fyE-Pf-cJU" customClass="BeatTagCategoryCheckboxCell" customModule="Beat" customModuleProvider="target">
+                                                                            <rect key="frame" x="18" y="0.0" width="163" height="24"/>
+                                                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                                                            <subviews>
+                                                                                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="XJg-7f-jjq">
+                                                                                    <rect key="frame" x="40" y="4" width="122" height="16"/>
+                                                                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
+                                                                                    <textFieldCell key="cell" lineBreakMode="truncatingTail" sendsActionOnEndEditing="YES" title="Table View Cell" id="74x-7N-Puj">
+                                                                                        <font key="font" usesAppearanceFont="YES"/>
+                                                                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                                                    </textFieldCell>
+                                                                                </textField>
+                                                                                <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" id="ITb-9t-stY">
+                                                                                    <rect key="frame" x="22" y="3" width="17" height="19"/>
+                                                                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES" heightSizable="YES" flexibleMaxY="YES"/>
+                                                                                    <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" id="5wV-OB-42v"/>
+                                                                                </imageView>
+                                                                                <button verticalHuggingPriority="750" id="YAF-lt-s79">
+                                                                                    <rect key="frame" x="1" y="3" width="20" height="18"/>
+                                                                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
+                                                                                    <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" inset="2" id="XJy-jV-O0z">
+                                                                                        <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                                                                        <font key="font" metaFont="system"/>
+                                                                                    </buttonCell>
+                                                                                    <connections>
+                                                                                        <action selector="checkItem:" target="qE6-5a-im5" id="v8H-oG-VgE"/>
+                                                                                    </connections>
+                                                                                </button>
+                                                                            </subviews>
+                                                                            <connections>
+                                                                                <outlet property="checkbox" destination="YAF-lt-s79" id="Fa9-x1-mi5"/>
+                                                                                <outlet property="imageView" destination="ITb-9t-stY" id="DKv-GY-ceY"/>
+                                                                                <outlet property="textField" destination="XJg-7f-jjq" id="DsM-YS-9NW"/>
+                                                                            </connections>
+                                                                        </tableCellView>
+                                                                    </prototypeCellViews>
+                                                                </tableColumn>
+                                                            </tableColumns>
+                                                            <connections>
+                                                                <outlet property="dataSource" destination="qE6-5a-im5" id="c8c-Eg-X5E"/>
+                                                                <outlet property="delegate" destination="qE6-5a-im5" id="tW2-JO-6NV"/>
+                                                            </connections>
+                                                        </outlineView>
+                                                    </subviews>
+                                                </clipView>
+                                                <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="4ue-yp-pda">
+                                                    <rect key="frame" x="1" y="360" width="194" height="16"/>
+                                                    <autoresizingMask key="autoresizingMask"/>
+                                                </scroller>
+                                                <scroller key="verticalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="rgo-Ed-VoJ">
+                                                    <rect key="frame" x="224" y="17" width="15" height="102"/>
+                                                    <autoresizingMask key="autoresizingMask"/>
+                                                </scroller>
+                                            </scrollView>
+                                            <button verticalHuggingPriority="750" id="irH-hG-lrn">
+                                                <rect key="frame" x="19" y="297" width="161" height="16"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <buttonCell key="cell" type="check" title="Select All" bezelStyle="regularSquare" imagePosition="left" controlSize="small" allowsMixedState="YES" inset="2" id="zzZ-Iy-Lx1">
+                                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                                    <font key="font" metaFont="smallSystem"/>
+                                                </buttonCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="general.selectAll"/>
+                                                </userDefinedRuntimeAttributes>
+                                                <connections>
+                                                    <action selector="selectAllTags:" target="qE6-5a-im5" id="8VT-fj-KW9"/>
+                                                </connections>
+                                            </button>
+                                        </subviews>
+                                        <constraints>
+                                            <constraint firstAttribute="width" relation="greaterThanOrEqual" constant="150" id="pNj-X7-8jg"/>
+                                        </constraints>
+                                    </customView>
+                                    <customView fixedFrame="YES" id="bU0-1a-1dw">
+                                        <rect key="frame" x="201" y="0.0" width="402" height="319"/>
+                                        <autoresizingMask key="autoresizingMask"/>
+                                        <subviews>
+                                            <button verticalHuggingPriority="750" id="Yho-Qu-ejT">
+                                                <rect key="frame" x="18" y="249" width="364" height="18"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <buttonCell key="cell" type="radio" title="Scene by scene" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="GIA-Vw-SZe">
+                                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                                    <font key="font" metaFont="system"/>
+                                                </buttonCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.report.sceneByScene"/>
+                                                </userDefinedRuntimeAttributes>
+                                                <connections>
+                                                    <action selector="toggleReportType:" target="qE6-5a-im5" id="rE8-cW-HYX"/>
+                                                </connections>
+                                            </button>
+                                            <button tag="1" verticalHuggingPriority="750" id="jIw-Jy-fKs">
+                                                <rect key="frame" x="18" y="192" width="364" height="18"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <buttonCell key="cell" type="radio" title="List scenes by tag" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="84k-jQ-TcI">
+                                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                                    <font key="font" metaFont="system"/>
+                                                </buttonCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.report.listScenesByTag"/>
+                                                </userDefinedRuntimeAttributes>
+                                                <connections>
+                                                    <action selector="toggleReportType:" target="qE6-5a-im5" id="j1V-Zp-ZIt"/>
+                                                </connections>
+                                            </button>
+                                            <button tag="2" verticalHuggingPriority="750" id="3qi-eE-gr1">
+                                                <rect key="frame" x="19" y="134" width="362" height="18"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <buttonCell key="cell" type="radio" title="Screenplay with scenes" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="PVz-9T-Ngc">
+                                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                                    <font key="font" metaFont="system"/>
+                                                </buttonCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.report.screenplay"/>
+                                                </userDefinedRuntimeAttributes>
+                                                <connections>
+                                                    <action selector="toggleReportType:" target="qE6-5a-im5" id="q0V-dg-Qgf"/>
+                                                </connections>
+                                            </button>
+                                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Wnt-yA-Lrm">
+                                                <rect key="frame" x="38" y="217" width="306" height="28"/>
+                                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <textFieldCell key="cell" controlSize="small" title="List scenes in chronological order, each followed by list of selected tags" id="7fe-5d-H5N">
+                                                    <font key="font" metaFont="smallSystem"/>
+                                                    <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
+                                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                </textFieldCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.report.sceneByScene.details"/>
+                                                </userDefinedRuntimeAttributes>
+                                            </textField>
+                                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Xg1-jK-bdw">
+                                                <rect key="frame" x="38" y="159" width="306" height="28"/>
+                                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <textFieldCell key="cell" controlSize="small" title="List selected tag types, followed by scenes that contain them" id="dRL-ih-tk9">
+                                                    <font key="font" metaFont="smallSystem"/>
+                                                    <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
+                                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                </textFieldCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.report.listScenesByTag.details"/>
+                                                </userDefinedRuntimeAttributes>
+                                            </textField>
+                                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="6ml-MC-qYN">
+                                                <rect key="frame" x="38" y="101" width="306" height="28"/>
+                                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <textFieldCell key="cell" controlSize="small" title="Create a new document with all scenes that contain any of selected tag types" id="Btl-cg-HAD">
+                                                    <font key="font" metaFont="smallSystem"/>
+                                                    <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
+                                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                </textFieldCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.report.screenplay.details"/>
+                                                </userDefinedRuntimeAttributes>
+                                            </textField>
+                                            <button verticalHuggingPriority="750" id="SnV-6k-3Mp">
+                                                <rect key="frame" x="14" y="13" width="100" height="32"/>
+                                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                                <buttonCell key="cell" type="push" title="Create" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="i8a-cP-Dlt">
+                                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                    <font key="font" metaFont="system"/>
+                                                </buttonCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.report.create"/>
+                                                </userDefinedRuntimeAttributes>
+                                                <connections>
+                                                    <action selector="createPDF:" target="qE6-5a-im5" id="p8n-9e-0gg"/>
+                                                </connections>
+                                            </button>
+                                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="8aH-TS-I1H">
+                                                <rect key="frame" x="18" y="48" width="366" height="37"/>
+                                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                                <textFieldCell key="cell" controlSize="small" lineBreakMode="clipping" id="Hhx-lP-gk1">
+                                                    <font key="font" metaFont="smallSystem"/>
+                                                    <color key="textColor" name="systemRedColor" catalog="System" colorSpace="catalog"/>
+                                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                </textFieldCell>
+                                            </textField>
+                                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="sn3-08-C4Z">
+                                                <rect key="frame" x="18" y="283" width="366" height="16"/>
+                                                <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                                <textFieldCell key="cell" lineBreakMode="clipping" title="Create Tag Report" id="TwI-9E-8p3">
+                                                    <font key="font" metaFont="systemBold"/>
+                                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                                    <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                </textFieldCell>
+                                                <userDefinedRuntimeAttributes>
+                                                    <userDefinedRuntimeAttribute type="string" keyPath="xibLocKey" value="tagManager.createReport"/>
+                                                </userDefinedRuntimeAttributes>
+                                            </textField>
+                                        </subviews>
+                                    </customView>
+                                </subviews>
+                                <holdingPriorities>
+                                    <real value="358"/>
+                                    <real value="250"/>
+                                </holdingPriorities>
+                            </splitView>
+                        </subviews>
+                    </view>
+                    <connections>
+                        <outlet property="selectAllCheckbox" destination="irH-hG-lrn" id="enm-Jr-Mb7"/>
+                        <outlet property="typeList" destination="7Ou-yS-thu" id="dUZ-Cu-sft"/>
+                        <outlet property="warningLabel" destination="8aH-TS-I1H" id="s0U-4G-Gzd"/>
+                    </connections>
+                </viewController>
+                <customObject id="mBJ-fb-btX" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="1354.5" y="-1130.5"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="scroll.fill" catalog="system" width="17" height="16"/>
+        <image name="tag.fill" catalog="system" width="17" height="17"/>
+    </resources>
+</document>

@@ -1,0 +1,211 @@
+//
+//  BeatStyles.swift
+//  BeatPagination2
+//
+//  Created by Lauri-Matti Parppei on 28.9.2023.
+//
+/**
+ 
+ This class provides the stylesheets to both renderer (macOS) and editor (macOS/iOS).
+ 
+ */
+
+import Foundation
+
+struct BeatStylesheetInfo {
+    var name:String = ""
+    var URL:URL?
+    var editorURL:URL?
+}
+
+public class BeatStyles:NSObject {
+    @objc static public let shared = BeatStyles()
+    @objc static public var defaultStyleName = "Screenplay"
+    
+    /// Default styles for exporting
+    @objc public var defaultStyles:BeatStylesheet { return self.styles() }
+    /// Default styles for editor
+    @objc public var defaultEditorStyles:BeatStylesheet { return self.styles(name: "Screenplay", delegate: nil, forEditor: true) }
+    
+    /// Default line height
+    @objc class var lineHeight:CGFloat { return 12.0 }
+    
+    /// Lock for avoiding singleton access data races
+    private let _stylesLock = NSLock()
+    
+    /// Available stylesheets
+    var _stylesheets:[String:URL]?
+    /// Currently loaded styles
+    private var _loadedStyles:[String:BeatStylesheet] = [:]
+    private var _documentStyles:[UUID:[String:BeatStylesheet]] = [:]
+        
+    /// Returns stylesheet dictionary with `name: url`
+    var stylesheets:[String:URL] {
+        // Return cached sheet names
+        if _stylesheets != nil { return _stylesheets! }
+        
+        // Let's gather all beatCSS files from inside the bundle
+        var stylesheets:[String:URL] = [:]
+
+        let urls:[URL] = Bundle.init(for: type(of: self)).urls(forResourcesWithExtension: "beatCSS", subdirectory: nil) ?? []
+        
+        for url in urls {
+            let name = url.lastPathComponent.replacingOccurrences(of: ".beatCSS", with: "")
+            stylesheets[name] = url
+        }
+        
+        _stylesheets = stylesheets
+        return stylesheets
+    }
+    
+    /// Returns NON-LOCALIZED stylesheet names
+    var stylesheetNames:[String] {
+        let keys:[String] = stylesheets.keys.map({ $0 })
+        return keys
+    }
+    
+    @objc public func reset() {
+        _stylesheets = [:]
+    }
+        
+    @objc public func styles(name:String? = nil, delegate:BeatDocumentDelegate? = nil, forEditor:Bool = false) -> BeatStylesheet {
+        let styleName = name == nil ? "" : name!
+        let suffix = forEditor ? "-editor" : ""
+        let defaultStyle = BeatStyles.defaultStyleName + suffix
+        
+        // Make sure the name isn't just an empty string
+        var name = (styleName.count > 0) ? (styleName + suffix) : defaultStyle
+                
+#if os(iOS)
+        // Adjust style for iPhone (if needed)
+        if forEditor {
+            if UIDevice.current.userInterfaceIdiom == .phone && styleName == "Screenplay" {
+                name += "-iOS"
+            }
+        }
+#endif
+        
+        // Each document will have its own stylesheet, recognized UUID, because document settings will have effect on stylesheets
+        let uuid:UUID? = delegate?.uuid()
+        
+        if let loadedStyle = loadedStyle(for: name), uuid == nil {
+            return loadedStyle
+        } else if let uuid, let documentStyle = documentStyle(for: uuid, name: name) {
+            return documentStyle
+        }
+        
+        // Get stylesheet. If it's not available, we NEED TO HAVE a file called Screenplay-editor.beatCSS, otherwise the app will crash.
+        var url:URL? = stylesheetURL(for: name)
+        
+        // If no URL is available, first check user folder.
+        // We NEED TO HAVE a file called Screenplay.beatCSS in the bundle, otherwise the app will crash.
+        if url == nil, let userStyle = userStylesheet(name: styleName, forEditor: forEditor) {
+            url = userStyle
+        } else if url == nil {
+            url = stylesheetURL(for: defaultStyle)!
+        }
+        
+        let stylesheet = BeatStylesheet(url: url!, name: name, documentSettings: delegate?.documentSettings)
+        
+        if let uuid {
+            setDocumentStyle(stylesheet, uuid: uuid, name: name)
+        } else {
+            setLoadedStyle(stylesheet, for: name)
+        }
+         
+        return stylesheet
+    }
+    
+    @objc public func closeDocument(delegate:BeatDocumentDelegate) {
+        _stylesLock.lock()
+        defer { _stylesLock.unlock() }
+        _documentStyles.removeValue(forKey: delegate.uuid())
+    }
+    
+    
+    // MARK: User stylesheet support
+    
+    /// Returns the user stylesheet folder
+    var userStylesheetURL:URL {
+        get { return BeatPaths.appDataPath("Styles") }
+    }
+    
+    /// Returns the **URL** for a stylesheet with given name (excluding `-editor` and extension)
+    func userStylesheet(name:String, forEditor:Bool) -> URL? {
+        // This is a little problematic, because we have two ways of adding custom stylesheets, either to root or by downloading, so we need to check for both alternatives
+        
+        let styleUrl = BeatPaths.appDataPath("Styles")
+        let styleBundleUrl = styleUrl.appendingPathComponent(name + ".beatCSS")
+        let sheetName = name + (forEditor ? "-editor" : "") + ".beatCSS"
+        
+        var folder:ObjCBool = false
+        var url:URL
+        let exists = FileManager.default.fileExists(atPath: styleBundleUrl.path, isDirectory: &folder)
+        
+        guard exists else {
+            print("ERROR: Stylesheet not found")
+            return nil
+        }
+        
+        if folder.boolValue {
+            // This is a style bundle.
+            url = styleBundleUrl.appendingPathComponent(sheetName)
+        } else {
+            // This is a style located directly in the styles folder
+            url = styleUrl.appendingPathComponent(sheetName)
+        }
+        
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+    
+    /// A list of all available user stylesheet NAMES
+    @objc public func availableUserStylesheets() -> [String] {
+        var styles:[String] = []
+        
+        if let files = try? FileManager.default.contentsOfDirectory(at: self.userStylesheetURL, includingPropertiesForKeys: nil) {
+            for url in files as [URL] {
+                let file = url.lastPathComponent as NSString
+                if file.hasSuffix("beatCSS"), !file.contains("-editor") {
+                    styles.append(file.deletingPathExtension as String)
+                }
+            }
+        }
+        
+        return styles
+    }
+    
+    
+    // MARK: - Data race avoidance
+    
+    private func stylesheetURL(for name:String) -> URL? {
+        _stylesLock.lock()
+        defer { _stylesLock.unlock() }
+        return stylesheets[name]
+    }
+    
+    private func loadedStyle(for name: String) -> BeatStylesheet? {
+        _stylesLock.lock()
+        defer { _stylesLock.unlock() }
+        return _loadedStyles[name]
+    }
+
+    private func setLoadedStyle(_ style: BeatStylesheet, for name: String) {
+        _stylesLock.lock()
+        defer { _stylesLock.unlock() }
+        _loadedStyles[name] = style
+    }
+
+    private func documentStyle(for uuid: UUID, name: String) -> BeatStylesheet? {
+        _stylesLock.lock()
+        defer { _stylesLock.unlock() }
+        if _documentStyles[uuid] == nil { _documentStyles[uuid] = [:] }
+        return _documentStyles[uuid]?[name]
+    }
+
+    private func setDocumentStyle(_ style: BeatStylesheet, uuid: UUID, name: String) {
+        _stylesLock.lock()
+        defer { _stylesLock.unlock() }
+        _documentStyles[uuid, default: [:]][name] = style
+    }
+    
+}

@@ -1,0 +1,721 @@
+/*
+
+New Outline
+© Lauri-Matti Parppei
+Type: Internal
+ 
+*/
+
+// Require the Beat template engine + backwards-compatibility polyfills
+require("MojaveSupport")
+require("Template")
+
+let modes = { ios: 1, window: 2, container: 3 }
+
+let json, window, timer
+let updated = false
+let processing = false
+let process = "" // Process UUID to avoid race conditions
+
+// Currently selected range, because we can't ask for that in background. Remember to update this when creating HTML.
+let selectedRange = { location: 0, length: 0 }
+
+// Updated when refreshing. Refers to which units we are using: page or word lengths
+let significantUnits = Beat.editorStyles().document.significantUnits
+
+// Kanban mode displays cards in columns, split by top-level sections
+let kanbanMode = Beat.getUserDefault("cardsKanbanMode") == true
+
+// Collapsed kanban columns are stored in the document settings, keyed by section line UUID
+let collapsedColumns = new Set(Beat.getDocumentSetting("collapsedColumns") ?? [])
+
+// Compact mode collapses every card to its title for a quick overview
+let compactMode = Beat.getUserDefault("cardsCompactMode") == true
+
+if (Beat.container != undefined) mode = modes.container;
+else if (Beat.iOS()) mode = modes.ios;
+else mode = modes.window;
+
+
+// ###################################
+// Templates for cards & elements
+// ###################################
+
+let templates = {
+	scene: new Template("<div class='item card {{color}} {{selected}} {{isOmitted}}' color='{{color}}' uuid='{{uuid}}' position='{{range.location}}' length='{{range.length}}'><div class='card-content'>\
+			<div class='heading'><div class='sceneNumber'>{{ sceneNumber }}</div>\
+				<div class='title'>{{ stringForDisplay }}</div></div>\
+					<div class='card-container'>\
+						{{ synopsisList }}\
+						{{ noteList }}\
+						<div class='content'>{{ text }}</div>\
+					</div>\
+					<div class='editButton'>✎</div>\
+					<div class='footer'>{{storylineList}} &nbsp;<div class='pages'>{{ significantUnits }}&nbsp;</div></div>\
+				</div>\
+				<div class='addScene'></div>\
+			</div>"),
+
+	synopsisList: new Template("<div class='synopsis'><ul>{{ synopsisList }}</ul></div>"),
+	synopsisItem: new Template("<li class='synopsis-item {{ color }}' uuid='{{uuid}}' sceneUuid='{{sceneUuid}}'>{{ stringForDisplay }}</li>"),
+
+	section: new Template("<div class='item section' depth='{{sectionDepth}}' uuid='{{uuid}}'><h2>{{ stringForDisplay }} <span class='wordCount'>{{ significantUnits }}</span></h2>{{ synopsisList }}</div>"),
+
+	storyline: new Template("<span class='storyline'>{{ storyline }}</span>"),
+	storylineList: new Template("<div class='storylineList'>{{ storylines }}</div>"),
+
+	note: new Template("<li class='note {{ color }}'>✎ {{ content }}</li>"),
+	noteList: new Template("<div class='noteList'><ul>{{ notes }}</ul></div>"),
+	printedCard: new Template("<div class='cardContainer'><div class='card'>\
+									<div class='header'>\
+										<div class='sceneNumber'>{{ sceneNumber }}</div> <h3>{{ stringForDisplay }}</h3>\
+									</div>\
+									{{ synopsisList }}\
+									<p>{{text}}</p>\
+									<div class='pageCount'>{{ pages }} {{ eights }}</div>\
+								</div></div>")
+}
+
+
+// ###################################
+// Calls from window
+// ###################################
+
+// Custom methods to be called from the plugin window
+Beat.custom = {
+	restart: () => {
+		Beat.restart()
+	},
+	refresh: () => {
+		refreshHTML()
+	},
+	scrollToLine: (uuid) => {
+		let line = Beat.currentParser.lineWithUUID(uuid)
+		
+		Beat.scrollToLine(line)
+		Beat.focusEditor()
+	},
+	setColor: (uuid, color) => {
+		let line = Beat.currentParser.lineWithUUID(uuid)
+		Beat.setColorForScene(color, line)
+	},
+	moveScene: (sceneUUID, sceneBeforeUUID) => {
+		const outline = [...Beat.outline()]
+		
+		let sceneIndex = -1
+		let targetIndex = -1
+
+		for (let i=0; i<outline.length; i++) {
+			let s = outline[i]
+			let uuid = s.line.uuidString()
+			
+			if (uuid == sceneUUID) sceneIndex = i;
+			else if (uuid == sceneBeforeUUID) targetIndex = i;
+		}
+
+		// Do nothing if we couldn't find the scene
+		if (sceneIndex == -1) return;
+		
+		let scene = outline[sceneIndex]
+		let sibling = outline[targetIndex]
+		
+		let prevSceneIsOmitted = outline[targetIndex - 1] && outline[targetIndex - 1].omitted
+		let nextSceneIsOmitted = outline[targetIndex + 1] && outline[targetIndex + 1].omitted
+		
+		let stringToMove = Beat.getText().substring(scene.position, scene.position + scene.length)
+		let targetPosition = (sibling) ? sibling.position : Beat.getText().length
+		
+		let position = scene.position
+		let length = scene.length
+		
+		// Then onto some very convoluted code for taking care of omissions
+		if (prevSceneIsOmitted &&
+			outline[targetIndex] &&
+			outline[targetIndex].omitted &&
+			!scene.omitted) {
+			stringToMove = "\n*/\n\n" + stringToMove + "\n/*\n\n"
+		}
+		else if (sibling && sibling.omitted &&
+				 !prevSceneIsOmitted &&
+				 !scene.omitted) {
+			// Find the omission
+			targetPosition = sibling.omissionStartsAt
+		} else if (scene.omitted) {
+			// Move an omitted scene
+			if (prevSceneIsOmitted && nextSceneIsOmitted) {
+				stringToMove = "/*\n\n" + stringToMove + "*/\n\n"
+			}
+			else if (prevSceneIsOmitted && !nextSceneIsOmitted) {
+				// We need to close the current omission
+				Beat.replaceRange(scene.position, 0, "*/\n")
+				position += 3
+				if (targetPosition > position) targetPosition += 3;
+
+				stringToMove = "\n/*\n\n" + stringToMove
+			}
+			else if (!prevSceneIsOmitted && !nextSceneIsOmitted) {
+				position = scene.omissionStartsAt
+				length = scene.length + scene.position - position
+				stringToMove = Beat.getText().substring(position, position + length)
+			}
+		}
+		
+		// Make sure there's a line break BEFORE THE TARGET position — otherwise the moved
+		// scene heading can get merged into the preceding line (e.g. a section heading)
+		if (targetPosition > 1) {
+			let lineBeforeTarget = Beat.lineAtPosition(targetPosition-1)
+			if (lineBeforeTarget.length > 0) stringToMove = "\n\n" + stringToMove
+		}
+		// Make sure the string has a line break at end
+		if (stringToMove.charAt(stringToMove.length - 1) != "\n") {
+			stringToMove += "\n\n"
+		}
+		
+		// Disable listeners for a second
+		Beat.onSelectionChangeDisabled = true
+		Beat.onTextChangeDisabled = true
+
+		if (targetPosition < scene.position) {
+			Beat.replaceRange(position, length, "")
+			Beat.replaceRange(targetPosition, 0, stringToMove)
+		} else {
+			Beat.replaceRange(targetPosition, 0, stringToMove)
+			Beat.replaceRange(position, length, "")
+		}
+
+		Beat.onSelectionChangeDisabled = false
+		Beat.onTextChangeDisabled = false
+		
+		refreshHTML()
+	},
+	
+	returnToEditor: () => {
+		window.closePanel()
+	},
+
+	setKanbanMode: (value) => {
+		kanbanMode = (value == true)
+		Beat.setUserDefault("cardsKanbanMode", kanbanMode)
+		refreshHTML()
+	},
+
+	setColumnCollapsed: (uuid, collapsed) => {
+		if (collapsed == true) collapsedColumns.add(uuid)
+		else collapsedColumns.delete(uuid)
+
+		Beat.setDocumentSetting("collapsedColumns", Array.from(collapsedColumns))
+	},
+
+	setCompactMode: (value) => {
+		compactMode = (value == true)
+		Beat.setUserDefault("cardsCompactMode", compactMode)
+	},
+
+	/// Removes a full scene from the document
+	deleteScene: (uuid) => {
+		const outline = [...Beat.outline()]
+
+		for (const scene of outline) {
+			if (scene.line.uuidString() == uuid && scene.type == Beat.type.heading) {
+				Beat.replaceRange(scene.position, scene.length, "")
+				return
+			}
+		}
+	},
+
+	/// Removes a section heading line. The scenes are kept and will flow into the previous section.
+	deleteAct: (uuid) => {
+		let line = Beat.currentParser.lineWithUUID(uuid)
+		if (line == null || line.type != Beat.type.section) return;
+
+		let length = line.length
+		// Also remove the trailing line break
+		if (line.position + length < Beat.getText().length) length += 1
+
+		Beat.replaceRange(line.position, length, "")
+	},
+
+	/// Asks for a name and adds a new top-level section at the end of the document
+	promptNewAct: () => {
+		const title = Beat.localize("#cardView.addAct#")
+		const placeholder = Beat.localize("#cardView.addAct.placeholder#")
+
+		// On macOS the prompt runs synchronously and returns the value — the callback is iOS-only
+		if (Beat.iOS()) {
+			Beat.prompt(title, "", placeholder, "", (name) => { addActToDocument(name) })
+		} else {
+			addActToDocument(Beat.prompt(title, "", placeholder, "", null))
+		}
+	},
+	
+	printCards: () => {
+		printCards()
+	},
+
+	modifySynopsis: (uuid, newString, color) => {
+		let line = Beat.currentParser.lineWithUUID(uuid)
+		if (line == null) return;
+
+		if (newString == "" || newString == null || newString == '\n') {
+			// Remove synopsis
+			Beat.replaceRange(line.position, line.length+1, "")
+			return
+		}
+		
+		color = (line.color.length > 0) ? line.color : ""
+		
+		let string = "= " + newString
+		if (color.length > 0) string += " [[" + color + "]]"
+		
+		Beat.replaceRange(line.position, line.length, string)
+	},
+	
+	addSynopsis: (uuid, newString) => {
+		let sceneHeading = Beat.currentParser.lineWithUUID(uuid)
+		
+		const lines = Beat.lines()
+		let index = lines.indexOf(sceneHeading)
+		if (index == -1) return;
+		
+		let suitableIndex = index
+		
+		// Find a good place to add our synopsis to
+		for (let i=index+1; i < lines.length; i++) {
+			let line = lines[i]
+			if (line.type == Beat.type.empty) continue;
+			
+			if (line.type == Beat.type.synopsis) {
+				suitableIndex = i
+			} else {
+				break
+			}
+		}
+		
+		// Add it
+		let l = lines[suitableIndex]
+		let position = l.position + l.length
+		
+		let string = "= " + newString
+		
+		if (l.type == Beat.type.synopsis) string = "\n" + string;
+		else if (l.type == Beat.type.heading) string = "\n\n" + string;
+		
+		Beat.addString(string, position)
+	},
+	
+	addScene: (uuid, text) => {
+		let scene = null
+		for (const s of Beat.outline()) {
+			if (s.line.uuidString() == uuid) {
+				scene = s
+				break
+			}
+		}
+		
+		// Get full range
+		let endPosition = (scene != null) ? (scene.position + scene.length) : Beat.getText().length
+		
+		// Check that the scene has a valid prefix, if not, add . to force a heading
+		let prefix = text.substr(0, 3).toLowerCase()
+		let allowed = ["int", "ext", "i/e", "e/i", "i./", "e./"]
+		if (allowed.indexOf(prefix) != 0) text = "." + text;
+		
+		// Make sure the line is empty, if not, add preceding line breaks
+		let precedingLine = endPosition > 0 ? Beat.lineAtPosition(endPosition - 1) : null
+		let line = Beat.lineAtPosition(endPosition)
+		
+		if (line.length > 0) text = "\n" + text;
+		if (precedingLine && precedingLine.length > 0) text = "\n" + text;
+		
+		text += "\n\n\n"
+		
+		Beat.addString(text, endPosition)
+	},
+	
+	getNewCard: (uuid) => {
+		let card = templates.scene.withData({
+			stringForDisplay: "",
+			sceneNumber: "",
+			text: "",
+			color: "",
+			isOmitted: "placeholder",
+			selected: "",
+			range: { location: -1, length: 0 },
+			synopsisList: [],
+			storylineList: [],
+			noteList: [],
+			pages: "",
+			eights: ""
+		})
+		let cardJSON = JSON.stringify(card)
+		
+		window.runJS(`addCard("${uuid}", ${cardJSON})`)
+	},
+	
+	addSceneOnMobile: (uuid) => {
+		Beat.prompt("Add scene", "", "INT./EXT.", "", (string) => {
+			if (string == "" || !string) return;
+			Beat.custom.addScene(uuid, string)
+		})
+	}
+}
+
+
+/// Adds a new top-level section at the end of the document
+function addActToDocument(name) {
+	// null means the prompt was cancelled. An empty string is a deliberate unnamed act, which is valid.
+	if (name == null) return;
+
+	// The board always shows an implicit first column for the content that comes before any
+	// section. When no real section exists yet, adding an act means the user is adding a *second*
+	// one, so we first materialize that first act with an unnamed break at the very top — otherwise
+	// the new act would silently become the one and only act.
+	const hasSection = Beat.outline().some(scene => scene.type == Beat.type.section)
+	if (!hasSection) Beat.addString("# \n\n", 0)
+
+	const text = Beat.getText()
+	let prefix = ""
+	if (text.length > 0) {
+		if (!text.endsWith("\n")) prefix = "\n\n";
+		else if (!text.endsWith("\n\n")) prefix = "\n";
+	}
+
+	Beat.addString(prefix + "# " + name + "\n\n", text.length)
+}
+
+
+// ###################################
+// Initialization
+// ###################################
+
+if (Beat.container != undefined) {
+	Beat.container.onViewWillDraw = () => {
+		// When opening contained view, refresh the HTML if needed
+		if (!updated) refreshHTML();
+	}
+}
+
+// When running the plugin for the first time, create the outline immediately
+let html = (Beat.outline() && Beat.outline().length > 0) ? createOutline(...Beat.outline()) : ""
+
+// Get files from inside the app bundle
+let css = Beat.appAssetAsString("BeatCardsUI.css")
+let ui = Beat.appAssetAsString("BeatCardsUI.html")
+// We're using a modified version of Sortable 
+let js = "<script>" + Beat.appAssetAsString("Sortable.js") + "</script>"
+
+let additionalCSS = ""
+if (Beat.iOS()) {
+	additionalCSS = "#print, #zoom { display: none; } #contextMenu { font-size: 110%; } "
+}
+
+let current = (Beat.currentScene != null) ? Beat.currentScene.line.uuidString() : null
+
+// Create UI
+ui = Beat.localize(ui).replaceAll("{{html}}", html).replaceAll("{{css}}", css).replaceAll("{{mode}}", mode).replaceAll("{{iOS}}", (Beat.iOS() ? 'true' : 'false')).replaceAll("{{iOS-css}}", additionalCSS,).replaceAll("{{current}}", current).replaceAll("{{kanban}}", (kanbanMode ? 'true' : 'false')).replaceAll("{{compact}}", (compactMode ? 'true' : 'false'))
+
+let fullHTML = [ui, js]
+
+// Create window.
+// We'll choose the appropriate view to use as the HTML view.
+// On iOS, it'll be a HTML panel, on macOS it's either a window (for the detached view) or the container (for the static view)
+if (mode == modes.ios) {
+	window = Beat.htmlPanel(fullHTML, 900, 600, function () { Beat.end(); })
+} else if (mode == modes.window) {
+	window = Beat.htmlWindow(fullHTML, 900, 600, function () { Beat.end(); })
+} else if (mode == modes.container) {
+	// This plugin is running *inside a plugin container*, so we'll get the HTML view from the container
+	window = Beat.container
+	
+	window.additionalHeaders = js
+	window.setHTML(ui)
+}
+
+
+// ###################################
+// Listeners
+// ###################################
+
+// Register the listener
+Beat.onTextChange(function (outlineChanges) {
+	updated = false
+
+	if (timer != undefined && timer != null) timer.invalidate();
+
+	// If the container is currently in view, let's update it in sync.
+	// Otherwise we'll send set the timer.
+	let time = 1.5
+	if (Beat.container != undefined && Beat.container.displayed) time = 0.0;
+	timer = Beat.timer(time, () => {
+		refreshHTML()
+	})
+})
+
+Beat.onSelectionChange((selection) => {
+	let outline = Beat.outline()
+	let currentScene = Beat.currentScene
+	
+	if (currentScene == null) return;
+
+	let scroll = true
+	if (Beat.container != undefined && Beat.container.displayed) {
+		// Do nothing if the container is in view.
+		scroll = false
+	}
+
+	let uuid = currentScene.line && currentScene.line.uuidString()
+	
+	if (uuid) {
+		window.runJS('updateSelection("' + uuid + '", ' + scroll + ')')
+	}
+})
+
+
+// ###################################
+// HTML
+// ###################################
+
+function refreshHTML() {
+	if (processing) return;
+	
+	const outline = [...Beat.outline()]
+
+	// Update significant length based on styles
+	significantUnits = Beat.editorStyles().document.significantUnits
+	
+	// Store selected range
+	selectedRange = Beat.selectedRange()
+	
+	Beat.async(() => {
+		// Avoid race conditions
+		if (processing) return
+		processing = true
+			
+		let html = createOutline(...outline).replaceAll("\"", "\\\"")
+			
+		// Escape the string
+		let htmlString = JSON.stringify(html)
+		
+		Beat.sync(() => {
+			window.runJS(`load(${htmlString})`)
+			updated = true
+		})
+		processing = false
+	})
+}
+
+// This method returns the HTML for index cards
+function createOutline(...outline) {
+	json = []
+
+	let pagination = Beat.currentPagination()
+	let previousScene
+
+	for (let i=0; i < outline.length; i++) {
+		let scene = updateScene(outline[i], pagination)
+		json.push(scene)
+    }
+
+    // The kanban view uses a different HTML structure
+    if (kanbanMode) return createKanbanOutline();
+
+    // Create HTML based on the JSON data
+    let html = "<div class='dragContainer'>"
+
+    for (const scene of json) {
+    	let card = updateCard(scene)
+    	html += card.html
+
+    	if (scene.type == Beat.type.section && scene.sectionDepth < 3) {
+    		html += "</div><div class='dragContainer'>"
+    	}
+
+    	previousScene = scene
+    }
+
+    html += "</div>"
+
+    return html
+}
+
+// Creates the HTML for kanban view: one column per top-level section, deeper sections become in-column separators
+function createKanbanOutline() {
+	// Columns are split at the topmost section depth actually used in the document
+	let columnDepth = Infinity
+	for (const scene of json) {
+		if (scene.typeAsString == "section" && scene.sectionDepth < columnDepth) columnDepth = scene.sectionDepth
+	}
+
+	let columns = [{ header: "", uuid: "", title: "", cards: "", count: 0 }]
+
+	for (const scene of json) {
+		let card = updateCard(scene)
+
+		if (scene.typeAsString == "section" && scene.sectionDepth == columnDepth) {
+			columns.push({ header: card.html, uuid: scene.line.uuid, title: scene.stringForDisplay, cards: "", count: 0 })
+		} else {
+			columns[columns.length - 1].cards += card.html
+			if (scene.typeAsString == "heading") columns[columns.length - 1].count++
+		}
+	}
+
+	// Drop the first column if there's nothing before the first section
+	if (columns[0].cards.length == 0 && columns.length > 1) columns.shift();
+
+	let html = "<div class='kanbanBoard'>"
+
+	for (let i=0; i < columns.length; i++) {
+		const column = columns[i]
+		// Cards dropped at the end of a column are moved before the section which starts the next column
+		const nextUuid = (i + 1 < columns.length) ? columns[i + 1].uuid : ""
+
+		// Columns are identified by their section uuid for collapsing (persisted in document settings)
+		const key = (column.uuid.length > 0) ? column.uuid : "unsorted"
+		const collapsed = (collapsedColumns.has(key)) ? " collapsed" : ""
+
+		html += "<div class='kanbanColumn" + collapsed + "' sectionUuid='" + key + "'>" +
+				"<div class='collapseButton' onclick='toggleColumn(event, \"" + key + "\")'></div>" +
+				"<div class='collapsedTitle' onclick='toggleColumn(event, \"" + key + "\")'>" + (column.title ?? "") +
+				" <span class='collapsedCount'>" + column.count + "</span></div>" +
+				column.header +
+				"<div class='dragContainer' nextUuid='" + nextUuid + "'>" + column.cards + "</div>" +
+				"<div class='addCardButton' onclick='addCardToColumn(event, \"" + key + "\")'>+ " + Beat.localize("#cardView.addScene#") + "</div>" +
+				"</div>"
+	}
+
+	html += "<div class='addActButton' onclick='addAct(event)'>+ " + Beat.localize("#cardView.addAct#") + "</div>"
+	html += "</div>"
+
+	return html
+}
+
+
+// Get JSON for the scene and update it with some custom data
+function updateScene(scene, pagination = Beat.currentPagination()) {
+	let sceneJSON = scene.json()
+
+	// Get the snippet (if needed)
+	sceneJSON.text = ""
+	
+	// Get lines for this scene
+	let sceneLines = Beat.linesForScene(scene)
+	
+	if (sceneLines != null) {
+		for (let i=1; i<sceneLines.length; i++) {
+			let line = sceneLines[i]
+			if (line.type != Beat.type.empty && line.length > 0) {
+				let lineText = (!scene.omitted) ? line.stripFormatting() : line.string
+				sceneJSON.text += lineText + " ";
+				
+				// Break here if we're not measuring words
+				if (significantUnits == 0) break;
+			}
+		}
+	}
+	
+	sceneJSON.text = sceneJSON.text.replaceAll("<", "&lt;")
+
+	// Convert some values to lowercase for consistency
+	sceneJSON.color = (sceneJSON.color) ? sceneJSON.color.toLowerCase() : ""
+	sceneJSON.typeAsString = (sceneJSON.typeAsString) ? sceneJSON.typeAsString.toLowerCase() : ""
+
+	// There's no enum for this value, but 0 means page count is the significant unit.
+	if (significantUnits == 0) {
+		// Get scene height (Oh my fucking god JavaScript is silly with its non-typed variables but I don't care.)
+		let pages = pagination.sceneLengthInEights(scene)
+		
+		if (pages[0] > 0) sceneJSON.pages = pages[0]; else sceneJSON.pages = "";
+		if (pages[1] > 0) sceneJSON.eights = pages[1] + "/8"; else sceneJSON.eights = "";
+		
+		// Only apply significant length if this is a scene
+		if (scene.type != Beat.type.section) {
+			sceneJSON.significantUnits = sceneJSON.pages + "&nbsp;" + sceneJSON.eights
+		} else {
+			sceneJSON.significantUnits = ""
+		}
+	} else {
+		sceneJSON.significantUnits = countWords(sceneJSON.text) + " " + Beat.localize("#statisticsPanel.stats.words#")
+	}
+	
+	// Add the JSON data to array
+	return sceneJSON
+}
+
+function countWords(s){
+	s = s.replace(/(^\s*)|(\s*$)/gi,"");//exclude  start and end white-space
+	s = s.replace(/[ ]{2,}/gi," ");//2 or more space to 1
+	s = s.replace(/\n /,"\n"); // exclude newline with a start spacing
+	return s.split(' ').filter(function(str){return str!="";}).length;
+	//return s.split(' ').filter(String).length; - this can also be used
+}
+
+// Create the actual HTML card
+function updateCard(scene) {
+	let card = {
+		html: "",
+		uuid: ""
+	}
+
+	scene.synopsisList = ""
+	let synopsisList = []
+	if (scene.synopsis.length) {
+		for (const synopsis of scene.synopsis) {
+			synopsisList += templates.synopsisItem.withData(synopsis)
+		}
+		scene.text = ""
+	}
+	scene.synopsisList = templates.synopsisList.withData({ synopsisList: synopsisList });
+
+	scene.storylineList = ""
+	if (scene.storylines.length) {
+		let storylines = ""
+		for (const storyline of scene.storylines) {
+			storylines += templates.storyline.withData({ storyline: storyline })
+		}
+		scene.storylineList = templates.storylineList.withData({ storylines: storylines })
+	}
+
+	scene.noteList = ""
+	if (scene.notes.length) {
+		let notes = ""
+		for (const note of scene.notes) {
+			if (note.type == "note" && note.content.indexOf("COLOR") != 0 && note.content.length > 0) notes += templates.note.withData({ color: note.color, content: note.content })
+		}
+		if (notes.length > 0) scene.noteList = templates.noteList.withData({ notes: notes })
+	}
+
+	// Don't display the snippet if not needed
+	if (scene.noteList.length > 0 || synopsisList.length > 0) scene.text = ""
+
+	scene.isOmitted = (scene.omitted) ? "omitted" : ""
+	
+	if (selectedRange.location >= scene.range.location && selectedRange.location < scene.range.location + scene.range.length) {
+		scene.selected = "selected"
+	} else {
+		scene.selected = ""
+	}
+
+	// Load template
+	let cardHTML
+	if (scene.typeAsString == "heading") cardHTML = templates.scene.withData(scene)
+	else cardHTML = templates.section.withData(scene)
+
+	card.html = cardHTML
+	card.uuid = scene.line.uuid
+	
+	return card
+}
+
+// ###################################
+// Printing
+// ###################################
+
+function printCards() {
+	// This is a hacky custom method
+	Beat.printIndexCards()
+}
+
+function windowed() {
+	return (Beat.container == undefined)
+}
+

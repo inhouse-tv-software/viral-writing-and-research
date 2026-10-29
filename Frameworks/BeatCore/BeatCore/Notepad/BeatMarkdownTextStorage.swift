@@ -1,0 +1,215 @@
+//
+//  BeatMarkdownTextStorage.swift
+//  Beat macOS
+//
+//  Created by Lauri-Matti Parppei on 3.11.2023.
+//  Copyright © 2023 Lauri-Matti Parppei. All rights reserved.
+//
+/*
+ 
+ This class provides VERY simple Markdown-style parsing.
+ 
+ */
+
+import Foundation
+import UXKit
+
+@objc public class BeatMarkdownTextStorageDelegate:NSObject, NSTextStorageDelegate {
+	
+	enum BeatMarkdownLineType {
+		case normal
+		case heading
+	}
+	
+	struct BeatMdLine {
+		var string = ""
+		var position = NSNotFound
+		var length:Int { return (string as NSString).length }
+		var range:NSRange { return NSMakeRange(position, length + 1) }
+	}
+	
+	@objc public weak var textStorage:NSTextStorage?
+    @objc public var baseFontSize:CGFloat = 12.0
+    @objc public var fontSize:CGFloat {
+        return baseFontSize
+    }
+    
+    var stylization:[String:Any]
+    
+    @objc public init(fontSize:CGFloat = 12.0) {
+        self.baseFontSize = fontSize
+        self.stylization = [
+            "*": [NSAttributedString.Key.font: UXFont.systemFont(ofSize: fontSize).italics()],
+            "**": [NSAttributedString.Key.font: UXFont.systemFont(ofSize: fontSize).bold()],
+            "_": [NSAttributedString.Key.underlineStyle: 1]
+        ]
+        
+        super.init()
+    }
+    
+    func setupStyles() {
+        
+    }
+
+	var lines:[BeatMdLine] {
+        guard let textStorage = self.textStorage else { return [] }
+        
+        let lines = textStorage.string.components(separatedBy: "\n")
+        var i = 0
+        
+        let mdLines:[BeatMdLine] = lines.map { str in
+            let l = BeatMdLine(string: str, position: i)
+            i += (str as NSString).length + 1
+            return l
+        }
+        
+        return mdLines
+	}
+    	
+	public func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
+        self.formatMarkup(range: editedRange)
+	}
+	
+	public func formatMarkup(range:NSRange) {
+		for line in self.lines {
+			if NSIntersectionRange(range, line.range).length > 0 || NSLocationInRange(range.location, line.range) {
+				parse(line.range)
+			}
+		}
+	}
+    
+    @objc public func setFontSizeModifier(_ modifier:Int) {
+        guard let textStorage else { return }
+        parse(NSRange(location: 0, length: textStorage.length))
+    }
+	
+	public func parse(_ range:NSRange) {
+		guard let textStorage = self.textStorage else { return }
+        
+        updateStylizations()
+        
+		var r = range
+        
+        let length = textStorage.length
+        if NSMaxRange(r) > length {
+            r.length -= NSMaxRange(r) - length
+        }
+        guard NSMaxRange(r) <= length else { return }
+		
+		let string = textStorage.string.substring(range: r)
+		if string.count == 0 { return }
+		
+		let type = parseLineType(string)
+		
+        var newAttrs:[NSAttributedString.Key:Any] = [:]
+		
+		if type == .heading {
+			// A heading. Calculate its level and set font.
+			var level = 1
+			for i in 1..<string.count {
+				if string[i] == "#" { level += 1 }
+				else { break }
+			}
+			
+			if level > 4 { level = 4 }
+            let size = 1.6 * fontSize - 2 * CGFloat(level)
+			let newFont = BXFont.boldSystemFont(ofSize: size)
+
+			newAttrs[.font] = newFont
+		} else {
+			// Something else
+			newAttrs[.font] = BXFont.systemFont(ofSize: fontSize)
+		}
+		
+		// Reset underline
+		newAttrs[.underlineStyle] = 0
+		// Apply full font style first
+		self.textStorage?.addAttributes(newAttrs, range: r)
+        
+		// Inline stylization
+		if type == .normal {
+			for key in stylization.keys {
+                guard let dict = stylization[key] as? [NSAttributedString.Key: Any] else { continue }
+                
+				let indices = parseInlineStyles(string: string, markdown: key)
+				indices.enumerateRanges { localRange, stop in
+                    let range = NSMakeRange(r.location + localRange.location, localRange.length)
+                    if NSMaxRange(range) <= textStorage.length {
+                        textStorage.addAttributes(dict, range: NSMakeRange(r.location + localRange.location, localRange.length))
+                    }
+				}
+			}
+		}
+        
+        /// Note to self: We need to do this because `parse()` is called after `didProcessEditing:`, so things like fallback fonts might be dropped.
+        textStorage.fixAttributes(in: r)
+	}
+        
+    func updateStylizations() {
+        for key in Array(stylization.keys) {
+            guard var dict = stylization[key] as? [NSAttributedString.Key: Any] else { continue }
+            
+            if let font = dict[.font] as? BXFont {
+                dict[.font] = BXFont(name: font.fontName, size: font.pointSize)
+            }
+            
+            stylization[key] = dict
+        }
+    }
+	
+	func parseLineType(_ string:String) -> BeatMarkdownLineType {
+		if string.count == 0 {
+			return .normal
+		} else if string[0] == "#" {
+			return .heading
+		}
+		
+		return .normal
+	}
+	
+    public func parseInlineStyles(string:String, markdown:String) -> NSIndexSet {
+        let indices = NSMutableIndexSet()
+        
+        // Yeah, well, we need to cast everything to stay UTF-16 safe
+        let str = string as NSString
+        let md = markdown as NSString
+        
+        let length = str.length
+        let markdownLength = md.length
+        
+        guard length >= markdownLength else { return indices }
+        let lim = length - markdownLength + 1
+        
+        var range = NSMakeRange(NSNotFound, 0)
+        var i = 0
+        
+        while i < lim {
+            var match = true
+            for n in 0..<markdownLength {
+                if str.character(at: i + n) != md.character(at: n) {
+                    match = false
+                    break
+                }
+            }
+            
+            if match {
+                if range.location == NSNotFound {
+                    // Begins a range
+                    range.location = i
+                } else {
+                    // Closes the range
+                    range.length = i - range.location
+                    indices.add(in: range)
+                    range = NSMakeRange(NSNotFound, 0) // reset range
+                }
+                // Avoid marker matching itself again
+                i += markdownLength
+            } else {
+                i += 1
+            }
+        }
+        
+        return indices
+	}
+	
+}

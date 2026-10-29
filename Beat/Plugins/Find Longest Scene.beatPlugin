@@ -1,0 +1,21 @@
+/*
+ 
+ Name: Find Longest Scene
+ Copyright: Lauri-Matti Parppei
+ Description: Jumps to the longest scene in length
+ Plugin Type: Tool
+ Version: 1.0
+ 
+*/
+
+let longestScene;
+let length = 0;
+
+for (const scene of Beat.scenes()) {
+	if (scene.sceneLength > length) {
+		longestScene = scene;
+		length = scene.sceneLength;
+	}
+}
+
+if (longestScene) Beat.scrollToScene(longestScene);
