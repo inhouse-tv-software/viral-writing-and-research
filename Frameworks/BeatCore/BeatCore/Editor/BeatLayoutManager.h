@@ -18,6 +18,14 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Text view which draws tables as views (macOS editor)
+@protocol BeatTableHost <NSObject>
+/// Height reserved for the table which begins at given character index
+- (CGFloat)tableHeightAtLocation:(NSUInteger)location;
+/// Called when layout is complete
+- (void)tableLayoutDidChange;
+@end
+
 @interface BeatLayoutManager: NSLayoutManager <NSLayoutManagerDelegate>
 - (instancetype)initWithDelegate:(id<BeatEditorDelegate>)editorDelegate;
 

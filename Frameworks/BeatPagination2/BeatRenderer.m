@@ -360,6 +360,13 @@
     bool separator = line.isTableSeparator;
     NSMutableArray<NSNumber*>* pipes = NSMutableArray.new;
     
+    // Rebuild content rows as wrapped fixed-width text (columns share 60 characters equally)
+    if (!separator && content.length > 0) {
+        NSDictionary* attrs = [content attributesAtIndex:0 effectiveRange:nil];
+        NSString* rowString = [[line tableRowStringForWidth:60] stringByAppendingString:@"\n"];
+        content = [NSMutableAttributedString.alloc initWithString:rowString attributes:attrs];
+    }
+    
     NSInteger length = content.length;
     if (length > 0 && [content.string characterAtIndex:length - 1] == '\n') length -= 1;
     

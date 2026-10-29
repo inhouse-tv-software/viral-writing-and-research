@@ -339,11 +339,6 @@
 
         Line* line = [self.editorDelegate.parser lineAtIndex:charRange.location];
         
-        // Tables
-        if (line.type == action && line.isTableRow) {
-            [self drawTableGridForLine:line usedRect:usedRect glyphRange:glyphRange inset:inset];
-        }
-
         if (line.highlightRanges.count > 0) {
             [line.highlightRanges enumerateRangesUsingBlock:^(NSRange range, BOOL * _Nonnull stop) {
                 NSRange globalRange = NSMakeRange(range.location + line.position, range.length);
@@ -491,94 +486,52 @@
     [super drawBackgroundForGlyphRange:glyphsToShow atPoint:origin];
 }
 
-#pragma mark - Draw tables
+#pragma mark - Tables
 
-/// Draws a Notion-style grid for a table row. Column separators (`|`) are rendered as spaces in glyph generation, and we draw real lines in their place.
-/// Separator rows (`|---|` and `|:---|`) are collapsed into thin strips and drawn as horizontal rules.
-/// If a table has row separators (`|:---|`), its rows span multiple lines (wrapped cells), so there are no rules between those lines.
-- (void)drawTableGridForLine:(Line*)line usedRect:(CGRect)usedRect glyphRange:(NSRange)fragmentGlyphs inset:(CGSize)inset
+/// Tables are drawn by an interactive view in the text view (see `BeatTextView+TabBehavior.swift`).
+/// Here we only hide the table text and reserve space for the view on the first line of each table.
+/// Tables are detected from the text itself (not the parser), because the parser can lag behind right after an edit.
+static bool BeatIsTableRowString(NSString* string)
 {
-    NSArray<Line*>* lines = self.editorDelegate.parser.safeLines;
-    NSUInteger foundIndex = [self.editorDelegate.parser indexOfLine:line];
-    if (foundIndex == NSNotFound || foundIndex >= lines.count) return;
-    NSInteger index = (NSInteger)foundIndex;
-    NSInteger count = (NSInteger)lines.count;
-    
-    // Find the table around this line
-    NSInteger first = index;
-    NSInteger last = index;
-    while (first > 0 && index - first < 500 && lines[first - 1].type == action && lines[first - 1].isTableRow) first--;
-    while (last < count - 1 && last - index < 500 && lines[last + 1].type == action && lines[last + 1].isTableRow) last++;
-    
-    // Header separator is the first separator, if it doesn't contain ':' or is right after the first line
-    NSInteger firstSeparator = NSNotFound;
-    for (NSInteger i = first; i <= last; i++) {
-        if (lines[i].isTableSeparator) { firstSeparator = i; break; }
+    NSInteger first = 0;
+    NSInteger last = (NSInteger)string.length - 1;
+    while (first <= last && [string characterAtIndex:first] == ' ') first++;
+    while (last >= first && [string characterAtIndex:last] == ' ') last--;
+    if (last - first < 1) return false;
+    return [string characterAtIndex:first] == '|' && [string characterAtIndex:last] == '|';
+}
+
+/// Range of the line at given index, without the line break
+- (NSRange)tableParagraphRangeAt:(NSUInteger)index
+{
+    NSString* string = self.textStorage.string;
+    if (index > string.length) return NSMakeRange(NSNotFound, 0);
+    NSRange range = [string lineRangeForRange:NSMakeRange(index, 0)];
+    if (range.length > 0 && [string characterAtIndex:NSMaxRange(range) - 1] == '\n') range.length -= 1;
+    return range;
+}
+
+- (bool)isTableParagraph:(NSRange)range
+{
+    if (range.location == NSNotFound || range.length < 2) return false;
+    return BeatIsTableRowString([self.textStorage.string substringWithRange:range]);
+}
+
+- (CGFloat)heightForTableAt:(NSUInteger)location
+{
+    id host = self.editorDelegate.getTextView;
+    if ([host respondsToSelector:@selector(tableHeightAtLocation:)]) {
+        return [(id<BeatTableHost>)host tableHeightAtLocation:location];
     }
-    
-    NSInteger headerSeparator = NSNotFound;
-    if (firstSeparator != NSNotFound && firstSeparator > first &&
-        (![lines[firstSeparator].string containsString:@":"] || firstSeparator == first + 1)) {
-        headerSeparator = firstSeparator;
-    }
-    
-    bool hasRowSeparators = false;
-    for (NSInteger i = first; i <= last; i++) {
-        if (lines[i].isTableSeparator && i != headerSeparator) { hasRowSeparators = true; break; }
-    }
-    
-    NSTextContainer* tc = self.textContainers.firstObject;
-    NSMutableArray<NSNumber*>* xs = NSMutableArray.new;
-    
-    for (NSNumber* n in line.tableSeparatorIndices) {
-        NSUInteger charIndex = line.position + n.integerValue;
-        if (charIndex >= self.textStorage.length) continue;
-        
-        NSUInteger glyphIndex = [self glyphIndexForCharacterAtIndex:charIndex];
-        if (!NSLocationInRange(glyphIndex, fragmentGlyphs)) continue;
-        
-        CGRect r = [self boundingRectForGlyphRange:NSMakeRange(glyphIndex, 1) inTextContainer:tc];
-        [xs addObject:@(inset.width + r.origin.x + r.size.width / 2.0)];
-    }
-    
-    if (xs.count < 2) return;
-    
-    CGFloat top = inset.height + usedRect.origin.y;
-    CGFloat height = usedRect.size.height;
-    CGFloat left = xs.firstObject.doubleValue;
-    CGFloat right = xs.lastObject.doubleValue;
-    CGFloat width = right - left + 1.0;
-    
-    BXColor* textColor = ThemeManager.sharedManager.textColor.effectiveColor;
-    if (textColor == nil) textColor = BXColor.grayColor;
-    BXColor* lineColor = [textColor colorWithAlphaComponent:0.22];
-    
-    // Header background
-    if (headerSeparator != NSNotFound && index < headerSeparator && !line.isTableSeparator) {
-        [[textColor colorWithAlphaComponent:0.06] setFill];
-        BXRectFill(CGRectMake(left, top, right - left, height));
-    }
-    
-    [lineColor setFill];
-    
-    // Vertical lines
-    for (NSNumber* x in xs) {
-        BXRectFill(CGRectMake(floor(x.doubleValue), top, 1.0, height));
-    }
-    
-    if (line.isTableSeparator) {
-        // Separator rows are drawn as a rule
-        BXRectFill(CGRectMake(left, floor(top + height / 2.0), width, 1.0));
-        return;
-    }
-    
-    // Top line for the first row
-    if (index == first) BXRectFill(CGRectMake(left, floor(top), width, 1.0));
-    
-    // Bottom line for the last row, and between rows when rows are single lines
-    bool nextIsRow = (index < last && !lines[index + 1].isTableSeparator);
-    if (index == last || (nextIsRow && !hasRowSeparators)) {
-        BXRectFill(CGRectMake(left, floor(top + height) - 1.0, width, 1.0));
+    return 0.0;
+}
+
+/// Let the text view know that layout is done, so table views can be moved to the right place
+- (void)layoutManager:(NSLayoutManager *)layoutManager didCompleteLayoutForTextContainer:(NSTextContainer *)textContainer atEnd:(BOOL)layoutFinishedFlag
+{
+    id host = self.editorDelegate.getTextView;
+    if ([host respondsToSelector:@selector(tableLayoutDidChange)]) {
+        [(id<BeatTableHost>)host tableLayoutDidChange];
     }
 }
 
@@ -930,6 +883,40 @@
 /// Generate customized glyphs, includes all-caps lines for scene headings and hiding markup.
 -(NSUInteger)layoutManager:(NSLayoutManager *)layoutManager shouldGenerateGlyphs:(const CGGlyph *)glyphs properties:(const NSGlyphProperty *)props characterIndexes:(const NSUInteger *)charIndexes font:(BXFont *)aFont forGlyphRange:(NSRange)glyphRange
 {
+    // Tables are drawn by a view, so table text is hidden. Line breaks are kept so lines stay separate.
+    {
+        NSString* storageString = self.textStorage.string;
+        NSRange paragraph = NSMakeRange(NSNotFound, 0);
+        bool paragraphIsTable = false;
+        bool foundTable = false;
+        bool singleParagraph = true;
+        NSGlyphProperty* tableProps = CopyGlyphProperties(props, glyphRange);
+        
+        for (NSInteger i = 0; i < glyphRange.length; i++) {
+            NSUInteger ci = charIndexes[i];
+            if (ci >= storageString.length) continue;
+            
+            if (paragraph.location == NSNotFound || ci < paragraph.location || ci > NSMaxRange(paragraph)) {
+                if (paragraph.location != NSNotFound) singleParagraph = false;
+                paragraph = [self tableParagraphRangeAt:ci];
+                paragraphIsTable = [self isTableParagraph:paragraph];
+            }
+            
+            if (paragraphIsTable && [storageString characterAtIndex:ci] != '\n') {
+                tableProps[i] |= NSGlyphPropertyNull;
+                foundTable = true;
+            }
+        }
+        
+        if (foundTable) {
+            [self setGlyphs:glyphs properties:tableProps characterIndexes:charIndexes font:aFont forGlyphRange:glyphRange];
+            free(tableProps);
+            return glyphRange.length;
+        }
+        free(tableProps);
+        (void)singleParagraph;
+    }
+    
     // SOME WEIRD GUARDRAILS
     NSArray<Line*>* lines = [self.editorDelegate.parser linesInRange:glyphRange];
     Line* line = lines.firstObject;
@@ -988,22 +975,11 @@
         CFStringUppercase(modifiedStr, NULL);
     }
     
-    // Tables: column separators become spaces (same width in a monospaced font), the grid is drawn in background.
-    // Separator rows (|---|) are blanked out completely.
-    if (isTable) {
-        bool separatorRow = line.isTableSeparator;
-        CFIndex len = CFStringGetLength(modifiedStr);
-        for (CFIndex i = 0; i < len; i++) {
-            UniChar c = CFStringGetCharacterAtIndex(modifiedStr, i);
-            if (c == '|' || (separatorRow && c != '\n')) {
-                CFStringReplace(modifiedStr, CFRangeMake(i, 1), CFSTR(" "));
-            }
-        }
-    }
     
     // Modified properties
     //NSGlyphProperty *modifiedProps = (NSGlyphProperty *)malloc(sizeof(NSGlyphProperty) * glyphRange.length);
     NSGlyphProperty *modifiedProps = CopyGlyphProperties(props, glyphRange);
+
     
     if (line.string.containsOnlyWhitespace && line.string.length >= 2) {
         // Show bullets instead of spaces on lines which contain whitespace only
@@ -1102,17 +1078,23 @@ CGGlyph* GetGlyphsForCharacters(CTFontRef font, CFStringRef string)
     NSRange range = [self characterRangeForGlyphRange:glyphRange actualGlyphRange:nil];
     NSDictionary* attrs = [self.textStorage attributesAtIndex:range.location effectiveRange:nil];
     
+    // Tables: the first line holds the space for the table view, other lines are collapsed
+    NSRange tableParagraph = [self tableParagraphRangeAt:range.location];
+    if ([self isTableParagraph:tableParagraph]) {
+        bool first = (tableParagraph.location == 0) || ![self isTableParagraph:[self tableParagraphRangeAt:tableParagraph.location - 1]];
+        CGFloat height = first ? [self heightForTableAt:tableParagraph.location] : 0.0;
+        lineFragmentRect->size.height = height;
+        lineFragmentUsedRect->size.height = height;
+        return true;
+    }
+    
     if (attrs[@"BeatFolded"]) {
         lineFragmentRect->size.height = 0.0;
     } else if (attrs[BeatRepresentedLineKey]) {
         Line* line = ((BeatWeakLine*)attrs[BeatRepresentedLineKey]).line;
         if (line != nil) {
             RenderStyle* style = [self.editorDelegate.editorStyles forLine:line];
-            if (line.type == action && line.isTableSeparator) {
-                // Collapse table header separator rows into a thin strip
-                lineFragmentRect->size.height = 2.0;
-                lineFragmentUsedRect->size.height = 2.0;
-            } else if (style.lineFragmentMultiplier != 1.0) {
+            if (style.lineFragmentMultiplier != 1.0) {
                 lineFragmentRect->size.height *= style.lineFragmentMultiplier;
             }
         }

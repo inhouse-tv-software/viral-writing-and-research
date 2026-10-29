@@ -162,7 +162,6 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
                !isRowSeparator(firstSeparator) || firstSeparator == 1 {
                 headerSeparator = firstSeparator
             }
-            let hasRowSeparators = (0...last).contains { isSeparator($0) && $0 != headerSeparator }
             
             var xs: [CGFloat] = []
             for p in pipes {
@@ -208,7 +207,8 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
             }
             
             let nextIsRow = current < last && !isSeparator(current + 1)
-            if current == last || (nextIsRow && !hasRowSeparators) {
+            // Each line is a full row (wrapped text is inside the same line), so rows are always divided
+            if current == last || nextIsRow {
                 self.fillTableRect(CGRect(x: left - 0.25, y: bottom - 0.5, width: width, height: 0.5))
             }
         }

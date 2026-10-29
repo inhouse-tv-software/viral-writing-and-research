@@ -22,6 +22,9 @@
 
 @end
 
+/// Width of printed tables in characters (action lines are 60 characters wide)
+#define BEAT_TABLE_PRINT_WIDTH 60
+
 @implementation BeatPaginationBlock
 
 + (BeatPaginationBlock*)withLines:(NSArray<Line*>*)lines delegate:(id<BeatPageDelegate>)delegate {
@@ -159,6 +162,11 @@
     }
     
     NSString* stringWithoutFormatting = [line stripFormattingWithSettings:self.delegate.settings];
+    
+    // Table rows are rendered as wrapped fixed-width text
+    if (line.type == action && line.isTableRow) {
+        stringWithoutFormatting = [line tableRowStringForWidth:BEAT_TABLE_PRINT_WIDTH];
+    }
     
     NSAttributedString* string = [NSMutableAttributedString.alloc initWithString:stringWithoutFormatting attributes:@{
         NSFontAttributeName: font,
@@ -368,7 +376,15 @@
     // First find a spiller
     Line* spiller = [self findSpillerAt:remainingSpace];
     
-    if (spiller.type == action || spiller.type == synopse || spiller.type == section || spiller.type == centered || spiller.type == lyrics || spiller.type == transitionLine) {
+    if (spiller.type == action && spiller.isTableRow) {
+        // Never split a table row, move it to the next page as a whole
+        NSInteger index = [self.lines indexOfObject:spiller];
+        if (index == NSNotFound) index = 0;
+        BeatPageBreak* pageBreak = [BeatPageBreak.alloc initWithVisibleIndex:0 element:spiller attributedString:nil reason:@"Table row"];
+        NSArray* thisPage = [self.lines subarrayWithRange:NSMakeRange(0, index)];
+        NSArray* nextPage = [self.lines subarrayWithRange:NSMakeRange(index, self.lines.count - index)];
+        pageBreakData = @[thisPage, nextPage, pageBreak];
+    } else if (spiller.type == action || spiller.type == synopse || spiller.type == section || spiller.type == centered || spiller.type == lyrics || spiller.type == transitionLine) {
         // Break action paragraphs into two if possible and feasible
         pageBreakData = [self splitParagraphWithRemainingSpace:remainingSpace];
     } else if (spiller.isDialogue || spiller.isDualDialogue) {

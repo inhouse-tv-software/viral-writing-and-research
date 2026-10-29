@@ -53,509 +53,1040 @@ public extension BeatTextView {
 // MARK: - Tables
 /*
  
- Notion-style tables. Tables are stored as Markdown pipe tables, one row per line:
+ Notion-style tables.
  
- | Item  | Price |
- |-------|-------|
- | Soya  | 120   |
+ In the document, tables are stored as Markdown pipe tables (so other apps can read them):
  
- Tables never get wider than the page. When a cell doesn't fit, its text wraps onto
- more lines, and rows are then separated with `|:---|` lines so we know which lines belong together:
+ | Item | Price | Notes          |
+ |---|---|---|
+ | Soya | 120 | Line one<br>Line two |
  
- | Item  | Notes                |
- |-------|----------------------|
- | Soya  | A very long note     |
- |       | that wraps           |
- |:------|:---------------------|
- | Tofu  | Short                |
- |:------|:---------------------|
+ In the editor the table text is hidden (see BeatLayoutManager) and a `BeatTableView` is placed
+ on top of it. Each cell is a small text view. Editing a cell writes the Markdown back to the document,
+ so undo, saving and printing work as usual.
  
- The layout manager hides the pipes and draws a grid. Here we handle editing:
- columns are re-aligned while typing, Tab / Shift-Tab moves between cells,
- Return adds a row (or exits the table on an empty last row), and `/table` + Return inserts a new table.
+ Keys inside a cell:
+ - Shift+Return: new line inside the cell
+ - Return: move to the cell below (adds a row at the bottom)
+ - Tab / Shift+Tab: next / previous cell (Tab on the last cell adds a row)
+ - Up / Down on the first / last line of a cell: move between rows, or out of the table
+ - Esc: leave the table
+ 
+ Type `/table` (or `/table 4x3`) and press Return to insert a table.
  
  */
 
 fileprivate let BeatTableMenuItemTag = 947_100
-/// Max characters per table line. Printed action lines are 60 characters wide in Courier 12pt.
-fileprivate let BeatTableMaxPrintWidth = 60
-/// Columns won't shrink below this when fitting a table to the page
-fileprivate let BeatTableMinColumnWidth = 6
+fileprivate var BeatTableViewsKey: UInt8 = 0
+fileprivate var BeatTableUpdateScheduledKey: UInt8 = 0
+fileprivate var BeatTableObserversKey: UInt8 = 0
+fileprivate var BeatTableHeightCacheKey: UInt8 = 0
+fileprivate var BeatTablePendingFocusKey: UInt8 = 0
 
-fileprivate struct BeatTable {
-	/// Ranges of each table line (without line break)
-	var ranges: [NSRange]
-	/// Logical row index for each line, `-1` for separators
-	var lineRows: [Int]
-	/// Line indices for each logical row
-	var groups: [[Int]]
-	/// Cell contents for each logical row
+fileprivate enum BTMetrics {
+	static let paddingX: CGFloat = 8
+	static let paddingY: CGFloat = 5
+	static let marginTop: CGFloat = 8
+	/// Room for the "add row" button below the table
+	static let marginBottom: CGFloat = 26
+	static let addButtonSize: CGFloat = 18
+	static let border: CGFloat = 1
+}
+
+// MARK: Debug log
+
+fileprivate func btLog(_ message: @autoclosure () -> String) {
+	#if DEBUG
+	NSLog("[BeatTables] %@", message())
+	#endif
+}
+
+// MARK: Table model
+
+fileprivate struct BeatTableModel {
 	var rows: [[String]]
-	var header: Bool
 	
-	var fullRange: NSRange {
-		guard let first = ranges.first, let last = ranges.last else { return NSRange(location: 0, length: 0) }
-		return NSRange(location: first.location, length: NSMaxRange(last) - first.location)
-	}
 	var columnCount: Int { return rows.first?.count ?? 1 }
 	func emptyRow() -> [String] { return Array(repeating: "", count: columnCount) }
-}
-
-fileprivate struct BeatTableCell {
-	var row: Int
-	var col: Int
-	/// Offset inside the (unwrapped) cell content
-	var offset: Int
-	/// `true` when the caret is at the very start of a wrapped line of this cell
-	var atLineStart: Bool = false
-}
-
-/// Wrapped cell content: fragments and where each one starts in the content
-fileprivate struct BTWrapped {
-	var fragments: [String]
-	var starts: [Int]
-	var length: Int { return (starts.last ?? 0) + btLength(fragments.last ?? "") }
-}
-
-fileprivate struct BTLayout {
-	var lines: [String]
-	var widths: [Int]
-	var rowStartLine: [Int]
-	var wrapped: [[BTWrapped]]
-}
-
-fileprivate func btLength(_ s: String) -> Int { return (s as NSString).length }
-
-fileprivate func btIsTableRow(_ s: String) -> Bool {
-	let t = s.trimmingCharacters(in: .whitespaces)
-	return t.count >= 2 && t.hasPrefix("|") && t.hasSuffix("|")
-}
-
-fileprivate func btIsSeparator(_ s: String) -> Bool {
-	guard btIsTableRow(s), s.contains("-") else { return false }
-	return s.allSatisfy { $0 == "|" || $0 == "-" || $0 == ":" || $0 == " " }
-}
-
-/// Collapses runs of spaces
-fileprivate func btNormalize(_ s: String) -> String {
-	return s.components(separatedBy: " ").filter { !$0.isEmpty }.joined(separator: " ")
-}
-
-fileprivate func btCells(_ s: String) -> [String] {
-	var t = s.trimmingCharacters(in: .whitespaces)
-	if t.hasPrefix("|") { t.removeFirst() }
-	if t.hasSuffix("|") { t.removeLast() }
-	return t.components(separatedBy: "|").map { btNormalize($0.trimmingCharacters(in: .whitespaces)) }
-}
-
-fileprivate func btWrap(_ content: String, _ width: Int) -> BTWrapped {
-	if btLength(content) <= width { return BTWrapped(fragments: [content], starts: [0]) }
 	
-	var fragments: [String] = []
-	var starts: [Int] = []
-	var current = ""
-	var currentStart = 0
-	var position = 0
+	static func isRow(_ s: String) -> Bool {
+		let t = s.trimmingCharacters(in: .whitespaces)
+		return t.count >= 2 && t.hasPrefix("|") && t.hasSuffix("|")
+	}
 	
-	for w in content.components(separatedBy: " ") {
-		var word = w as NSString
-		var wordStart = position
-		position += word.length + 1
-		if word.length == 0 { continue }
+	static func isSeparator(_ s: String) -> Bool {
+		guard isRow(s), s.contains("-") else { return false }
+		return s.allSatisfy { $0 == "|" || $0 == "-" || $0 == ":" || $0 == " " }
+	}
+	
+	static func cells(_ line: String) -> [String] {
+		var t = line.trimmingCharacters(in: .whitespaces)
+		if t.hasPrefix("|") { t.removeFirst() }
+		if t.hasSuffix("|") && !t.hasSuffix("\\|") { t.removeLast() }
 		
-		// Break words that are longer than the column
-		while word.length > width {
-			if current.count > 0 { fragments.append(current); starts.append(currentStart); current = "" }
-			fragments.append(word.substring(to: width))
-			starts.append(wordStart)
-			word = word.substring(from: width) as NSString
-			wordStart += width
+		var cells: [String] = []
+		var current = ""
+		var escaped = false
+		for ch in t {
+			if escaped {
+				if ch != "|" && ch != "-" && ch != "\\" { current.append("\\") }
+				current.append(ch)
+				escaped = false
+			} else if ch == "\\" {
+				escaped = true
+			} else if ch == "|" {
+				cells.append(current)
+				current = ""
+			} else {
+				current.append(ch)
+			}
 		}
+		if escaped { current.append("\\") }
+		cells.append(current)
 		
-		if current.isEmpty {
-			current = word as String
-			currentStart = wordStart
-		} else if btLength(current) + 1 + word.length <= width {
-			current += " " + (word as String)
-		} else {
-			fragments.append(current); starts.append(currentStart)
-			current = word as String
-			currentStart = wordStart
+		return cells.map { cell in
+			var c = cell.trimmingCharacters(in: .whitespaces)
+			for br in ["<br/>", "<br />", "<BR/>", "<BR />", "<br>", "<BR>"] {
+				c = c.replacingOccurrences(of: br, with: "\n")
+			}
+			return c
 		}
 	}
 	
-	if current.count > 0 || fragments.isEmpty { fragments.append(current); starts.append(currentStart) }
-	return BTWrapped(fragments: fragments, starts: starts)
-}
-
-fileprivate func btLayout(_ rows: [[String]], header: Bool, maxWidth: Int) -> BTLayout {
-	let cols = rows.first?.count ?? 1
-	var widths = Array(repeating: 3, count: cols)
-	for r in rows {
-		for (i, c) in r.enumerated() where i < cols { widths[i] = max(widths[i], btLength(c)) }
+	static func parse(_ lines: [String]) -> BeatTableModel {
+		var rows = lines.filter { !isSeparator($0) }.map { cells($0) }
+		if rows.isEmpty { rows = [[""]] }
+		let cols = max(rows.map { $0.count }.max() ?? 1, 1)
+		rows = rows.map { $0 + Array(repeating: "", count: cols - $0.count) }
+		return BeatTableModel(rows: rows)
 	}
 	
-	// Fit to page by shrinking the widest column
-	func total(_ w: [Int]) -> Int { return w.reduce(0, +) + 3 * w.count + 1 }
-	while total(widths) > maxWidth {
-		guard let wi = widths.indices.max(by: { widths[$0] < widths[$1] }), widths[wi] > BeatTableMinColumnWidth else { break }
-		widths[wi] -= 1
+	static func escape(_ cell: String) -> String {
+		var c = cell.replacingOccurrences(of: "\\", with: "\\\\")
+		c = c.replacingOccurrences(of: "|", with: "\\|")
+		c = c.replacingOccurrences(of: "\r", with: "")
+		c = c.replacingOccurrences(of: "\u{2028}", with: "\n")
+		c = c.replacingOccurrences(of: "\n", with: "<br>")
+		return c
 	}
 	
-	let wrapped = rows.map { r in r.enumerated().map { btWrap($0.element, widths[$0.offset]) } }
-	let multiline = wrapped.contains { row in row.contains { $0.fragments.count > 1 } }
-	
-	var lines: [String] = []
-	var rowStartLine: [Int] = []
-	
-	for (ri, r) in wrapped.enumerated() {
-		rowStartLine.append(lines.count)
-		let height = r.map { $0.fragments.count }.max() ?? 1
-		for k in 0..<height {
-			var cells: [String] = []
-			for (i, c) in r.enumerated() {
-				let f = k < c.fragments.count ? c.fragments[k] : ""
-				cells.append(f + String(repeating: " ", count: max(0, widths[i] - btLength(f))))
+	func serialize() -> String {
+		var lines: [String] = []
+		for (i, row) in rows.enumerated() {
+			var cells = row.map { BeatTableModel.escape($0) }
+			// A row of dashes would look like a header separator, so escape the first dash
+			let line = "| " + cells.joined(separator: " | ") + " |"
+			if BeatTableModel.isSeparator(line), let first = cells.firstIndex(where: { $0.contains("-") }) {
+				cells[first] = cells[first].replacingOccurrences(of: "-", with: "\\-", options: [], range: cells[first].range(of: "-"))
 			}
 			lines.append("| " + cells.joined(separator: " | ") + " |")
+			if i == 0 {
+				lines.append("|" + Array(repeating: "---", count: columnCount).joined(separator: "|") + "|")
+			}
 		}
-		if ri == 0 && header {
-			lines.append("|" + widths.map { String(repeating: "-", count: $0 + 2) }.joined(separator: "|") + "|")
-		} else if multiline {
-			// Rows with wrapped cells are separated by rule lines (also after the last row, so the table reads back correctly)
-			lines.append("|" + widths.map { ":" + String(repeating: "-", count: $0 + 1) }.joined(separator: "|") + "|")
+		return lines.joined(separator: "\n")
+	}
+}
+
+// MARK: Measuring
+
+fileprivate final class BTMeasurer {
+	static let shared = BTMeasurer()
+	let storage = NSTextStorage()
+	let layoutManager = NSLayoutManager()
+	let container = NSTextContainer(size: NSSize(width: 100, height: CGFloat.greatestFiniteMagnitude))
+	
+	init() {
+		container.lineFragmentPadding = 0
+		layoutManager.addTextContainer(container)
+		storage.addLayoutManager(layoutManager)
+	}
+	
+	func height(_ text: String, width: CGFloat, font: NSFont) -> CGFloat {
+		var string = text.isEmpty ? " " : text
+		if string.hasSuffix("\n") { string += " " }
+		storage.setAttributedString(NSAttributedString(string: string, attributes: [.font: font]))
+		container.size = NSSize(width: max(width, 10), height: CGFloat.greatestFiniteMagnitude)
+		layoutManager.ensureLayout(for: container)
+		return ceil(layoutManager.usedRect(for: container).height)
+	}
+}
+
+fileprivate func btColumnWidth(_ tableWidth: CGFloat, columns: Int) -> CGFloat {
+	let n = CGFloat(max(columns, 1))
+	return floor((tableWidth - BTMetrics.border * (n + 1)) / n)
+}
+
+fileprivate func btRowHeights(_ model: BeatTableModel, tableWidth: CGFloat, font: NSFont) -> [CGFloat] {
+	let colWidth = btColumnWidth(tableWidth, columns: model.columnCount)
+	let textWidth = colWidth - BTMetrics.paddingX * 2
+	return model.rows.map { row in
+		let h = row.map { BTMeasurer.shared.height($0, width: textWidth, font: font) }.max() ?? 0
+		return h + BTMetrics.paddingY * 2
+	}
+}
+
+fileprivate func btTableHeight(_ model: BeatTableModel, tableWidth: CGFloat, font: NSFont) -> CGFloat {
+	let rows = btRowHeights(model, tableWidth: tableWidth, font: font)
+	return BTMetrics.marginTop + rows.reduce(0, +) + BTMetrics.border * CGFloat(rows.count + 1) + BTMetrics.marginBottom
+}
+
+// MARK: Cell view
+
+fileprivate final class BeatTableCellView: NSTextView {
+	var row = 0
+	var col = 0
+	weak var table: BeatTableView?
+	
+	override func becomeFirstResponder() -> Bool {
+		let result = super.becomeFirstResponder()
+		if result { table?.cellDidBecomeActive(self) }
+		return result
+	}
+	
+	override func resignFirstResponder() -> Bool {
+		let result = super.resignFirstResponder()
+		if result {
+			table?.cellDidResignActive(self)
+		}
+		return result
+	}
+	
+	var caretIsOnFirstLine: Bool {
+		guard let lm = layoutManager, let tc = textContainer else { return true }
+		let loc = selectedRange().location
+		if loc == 0 || (string as NSString).length == 0 { return true }
+		lm.ensureLayout(for: tc)
+		let glyph = lm.glyphIndexForCharacter(at: min(loc, (string as NSString).length - 1))
+		let caretRect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+		let firstRect = lm.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
+		return caretRect.minY <= firstRect.minY
+	}
+	
+	var caretIsOnLastLine: Bool {
+		guard let lm = layoutManager, let tc = textContainer else { return true }
+		let length = (string as NSString).length
+		let loc = selectedRange().location
+		if length == 0 { return true }
+		if loc >= length && (string as NSString).character(at: length - 1) == 10 { return true }
+		lm.ensureLayout(for: tc)
+		let glyph = lm.glyphIndexForCharacter(at: min(loc, length - 1))
+		let caretRect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+		let lastRect = lm.lineFragmentRect(forGlyphAt: max(lm.numberOfGlyphs - 1, 0), effectiveRange: nil)
+		return caretRect.minY >= lastRect.minY
+	}
+}
+
+// MARK: Table view
+
+fileprivate final class BeatTableView: NSView, NSTextViewDelegate {
+	weak var host: BeatTextView?
+	var model = BeatTableModel(rows: [[""]])
+	/// The Markdown currently in the document for this table
+	var sourceText = ""
+	/// Range of the table in the document
+	var tableRange = NSRange(location: 0, length: 0)
+	var tableWidth: CGFloat = 400
+	var font: NSFont = NSFont.userFixedPitchFont(ofSize: 12) ?? NSFont.systemFont(ofSize: 12)
+	var textColor: NSColor = .textColor
+	
+	var cells: [[BeatTableCellView]] = []
+	var rowHeights: [CGFloat] = []
+	var activeCell: (row: Int, col: Int)? = nil
+	var hovering = false
+	
+	let addRowButton = NSButton(title: "+", target: nil, action: nil)
+	let addColumnButton = NSButton(title: "+", target: nil, action: nil)
+	
+	override var isFlipped: Bool { return true }
+	
+	init(host: BeatTextView) {
+		self.host = host
+		super.init(frame: .zero)
+		
+		for button in [addRowButton, addColumnButton] {
+			button.isBordered = false
+			button.wantsLayer = true
+			button.layer?.cornerRadius = 3
+			button.target = self
+			button.isHidden = true
+			button.toolTip = (button === addRowButton) ? "Add row" : "Add column"
+			addSubview(button)
+		}
+		addRowButton.action = #selector(addRowAtEnd(_:))
+		addColumnButton.action = #selector(addColumnAtEnd(_:))
+	}
+	
+	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+	
+	var totalHeight: CGFloat {
+		return BTMetrics.marginTop + rowHeights.reduce(0, +) + BTMetrics.border * CGFloat(rowHeights.count + 1) + BTMetrics.marginBottom
+	}
+	
+	// MARK: Loading
+	
+	func load(text: String, lines: [String]) {
+		sourceText = text
+		let newModel = BeatTableModel.parse(lines)
+		let sameShape = newModel.rows.count == model.rows.count && newModel.columnCount == model.columnCount && cells.count == model.rows.count
+		model = newModel
+		
+		if sameShape {
+			// Keep the cell views (and focus), just update the contents
+			for (r, row) in cells.enumerated() {
+				for (c, cell) in row.enumerated() where cell.string != model.rows[r][c] {
+					cell.string = model.rows[r][c]
+				}
+			}
+		} else {
+			rebuildCells()
+		}
+		relayout()
+	}
+	
+	func rebuildCells() {
+		let focused = activeCell
+		for row in cells { for cell in row { cell.removeFromSuperview() } }
+		cells = []
+		
+		for (r, row) in model.rows.enumerated() {
+			var rowCells: [BeatTableCellView] = []
+			for (c, text) in row.enumerated() {
+				let cell = BeatTableCellView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+				cell.row = r
+				cell.col = c
+				cell.table = self
+				cell.delegate = self
+				cell.isRichText = false
+				cell.importsGraphics = false
+				cell.allowsUndo = false
+				cell.drawsBackground = false
+				cell.isAutomaticQuoteSubstitutionEnabled = false
+				cell.isAutomaticDashSubstitutionEnabled = false
+				cell.isAutomaticTextReplacementEnabled = false
+				cell.isVerticallyResizable = false
+				cell.isHorizontallyResizable = false
+				cell.textContainerInset = .zero
+				cell.textContainer?.lineFragmentPadding = 0
+				cell.textContainer?.widthTracksTextView = true
+				cell.focusRingType = .none
+				cell.font = font
+				cell.textColor = textColor
+				cell.insertionPointColor = host?.insertionPointColor ?? textColor
+				cell.string = text
+				addSubview(cell)
+				rowCells.append(cell)
+			}
+			cells.append(rowCells)
+		}
+		
+		if let focused, focused.row < cells.count, focused.col < cells[focused.row].count {
+			focus(row: focused.row, col: focused.col, atEnd: true)
 		}
 	}
 	
-	return BTLayout(lines: lines, widths: widths, rowStartLine: rowStartLine, wrapped: wrapped)
+	func relayout() {
+		for row in cells { for cell in row { cell.font = font; cell.textColor = textColor } }
+		rowHeights = btRowHeights(model, tableWidth: tableWidth, font: font)
+		let colWidth = btColumnWidth(tableWidth, columns: model.columnCount)
+		
+		var y = BTMetrics.marginTop + BTMetrics.border
+		for (r, row) in cells.enumerated() {
+			let h = r < rowHeights.count ? rowHeights[r] : 20
+			for (c, cell) in row.enumerated() {
+				let x = BTMetrics.border + CGFloat(c) * (colWidth + BTMetrics.border)
+				cell.frame = NSRect(x: x + BTMetrics.paddingX, y: y + BTMetrics.paddingY,
+									width: colWidth - BTMetrics.paddingX * 2, height: h - BTMetrics.paddingY * 2)
+			}
+			y += h + BTMetrics.border
+		}
+		
+		let tableBottom = y
+		let buttonColor = textColor.withAlphaComponent(0.08)
+		let titleAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: textColor.withAlphaComponent(0.55), .font: NSFont.systemFont(ofSize: 13)]
+		for button in [addRowButton, addColumnButton] {
+			button.layer?.backgroundColor = buttonColor.cgColor
+			button.attributedTitle = NSAttributedString(string: "+", attributes: titleAttrs)
+		}
+		addRowButton.frame = NSRect(x: 0, y: tableBottom + 3, width: tableWidth, height: BTMetrics.addButtonSize)
+		addColumnButton.frame = NSRect(x: tableWidth + 4, y: BTMetrics.marginTop, width: BTMetrics.addButtonSize, height: tableBottom - BTMetrics.marginTop)
+		
+		needsDisplay = true
+	}
+	
+	// MARK: Drawing
+	
+	override func draw(_ dirtyRect: NSRect) {
+		guard rowHeights.count > 0 else { return }
+		let colWidth = btColumnWidth(tableWidth, columns: model.columnCount)
+		let n = model.columnCount
+		let gridWidth = BTMetrics.border * CGFloat(n + 1) + colWidth * CGFloat(n)
+		let top = BTMetrics.marginTop
+		let height = rowHeights.reduce(0, +) + BTMetrics.border * CGFloat(rowHeights.count + 1)
+		
+		// Header row
+		textColor.withAlphaComponent(0.06).setFill()
+		NSRect(x: 0, y: top, width: gridWidth, height: rowHeights[0] + BTMetrics.border * 2).fill()
+		
+		textColor.withAlphaComponent(0.2).setFill()
+		
+		// Horizontal lines
+		var y = top
+		NSRect(x: 0, y: y, width: gridWidth, height: BTMetrics.border).fill()
+		for h in rowHeights {
+			y += h + BTMetrics.border
+			NSRect(x: 0, y: y, width: gridWidth, height: BTMetrics.border).fill()
+		}
+		
+		// Vertical lines
+		for c in 0...n {
+			let x = CGFloat(c) * (colWidth + BTMetrics.border)
+			NSRect(x: x, y: top, width: BTMetrics.border, height: height).fill()
+		}
+		
+		// Active cell outline
+		if let active = activeCell, active.row < rowHeights.count {
+			var cellY = top
+			for r in 0..<active.row { cellY += rowHeights[r] + BTMetrics.border }
+			let cellX = CGFloat(active.col) * (colWidth + BTMetrics.border)
+			let rect = NSRect(x: cellX, y: cellY, width: colWidth + BTMetrics.border * 2, height: rowHeights[active.row] + BTMetrics.border * 2)
+			NSColor.controlAccentColor.withAlphaComponent(0.8).setStroke()
+			let path = NSBezierPath(rect: rect.insetBy(dx: 0.75, dy: 0.75))
+			path.lineWidth = 1.5
+			path.stroke()
+		}
+	}
+	
+	// MARK: Hover
+	
+	override func updateTrackingAreas() {
+		super.updateTrackingAreas()
+		for area in trackingAreas { removeTrackingArea(area) }
+		addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+	}
+	
+	override func mouseEntered(with event: NSEvent) { setHover(true) }
+	override func mouseExited(with event: NSEvent) { setHover(false) }
+	
+	func setHover(_ value: Bool) {
+		hovering = value
+		let show = hovering || activeCell != nil
+		addRowButton.isHidden = !show
+		addColumnButton.isHidden = !show
+	}
+	
+	// Clicking the grid lines or padding focuses the nearest cell
+	override func mouseDown(with event: NSEvent) {
+		let p = convert(event.locationInWindow, from: nil)
+		let colWidth = btColumnWidth(tableWidth, columns: model.columnCount)
+		let col = min(max(Int(p.x / (colWidth + BTMetrics.border)), 0), model.columnCount - 1)
+		var y = BTMetrics.marginTop
+		var row = rowHeights.count - 1
+		for (r, h) in rowHeights.enumerated() {
+			if p.y < y + h + BTMetrics.border { row = r; break }
+			y += h + BTMetrics.border
+		}
+		focus(row: max(row, 0), col: col, atEnd: true)
+	}
+	
+	// MARK: Focus
+	
+	func focus(row: Int, col: Int, atEnd: Bool) {
+		guard row >= 0, row < cells.count, col >= 0, col < cells[row].count else { return }
+		let cell = cells[row][col]
+		window?.makeFirstResponder(cell)
+		let length = (cell.string as NSString).length
+		cell.setSelectedRange(NSRange(location: atEnd ? length : 0, length: 0))
+		cell.scrollToVisible(cell.bounds)
+	}
+	
+	func cellDidBecomeActive(_ cell: BeatTableCellView) {
+		activeCell = (cell.row, cell.col)
+		setHover(hovering)
+		needsDisplay = true
+	}
+	
+	func cellDidResignActive(_ cell: BeatTableCellView) {
+		DispatchQueue.main.async { [weak self] in
+			guard let self else { return }
+			if let responder = self.window?.firstResponder as? BeatTableCellView, responder.table === self { return }
+			self.activeCell = nil
+			self.setHover(self.hovering)
+			self.needsDisplay = true
+		}
+	}
+	
+	// MARK: Editing
+	
+	func textDidChange(_ notification: Notification) {
+		guard let cell = notification.object as? BeatTableCellView,
+			  cell.row < model.rows.count, cell.col < model.columnCount else { return }
+		model.rows[cell.row][cell.col] = cell.string
+		commit()
+	}
+	
+	/// Writes the model back into the document
+	func commit() {
+		guard let host else { return }
+		let newText = model.serialize()
+		if newText != sourceText {
+			host.replaceTableText(self, with: newText)
+		}
+		relayout()
+		host.scheduleTableUpdate()
+	}
+	
+	func setModel(_ newModel: BeatTableModel, focusRow: Int, focusCol: Int, atEnd: Bool = false) {
+		model = newModel
+		activeCell = (focusRow, focusCol)
+		rebuildCells()
+		commit()
+		focus(row: focusRow, col: focusCol, atEnd: atEnd)
+	}
+	
+	func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+		guard let cell = textView as? BeatTableCellView else { return false }
+		let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+		
+		switch commandSelector {
+		case #selector(NSResponder.insertNewline(_:)):
+			if shift {
+				cell.insertText("\n", replacementRange: cell.selectedRange())
+			} else {
+				moveDown(from: cell, column: cell.col)
+			}
+			return true
+			
+		case #selector(NSResponder.insertLineBreak(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+			cell.insertText("\n", replacementRange: cell.selectedRange())
+			return true
+			
+		case #selector(NSResponder.insertTab(_:)):
+			if cell.col + 1 < model.columnCount {
+				focus(row: cell.row, col: cell.col + 1, atEnd: true)
+			} else if cell.row + 1 < model.rows.count {
+				focus(row: cell.row + 1, col: 0, atEnd: true)
+			} else {
+				var m = model
+				m.rows.append(m.emptyRow())
+				setModel(m, focusRow: m.rows.count - 1, focusCol: 0)
+			}
+			return true
+			
+		case #selector(NSResponder.insertBacktab(_:)):
+			if cell.col > 0 {
+				focus(row: cell.row, col: cell.col - 1, atEnd: true)
+			} else if cell.row > 0 {
+				focus(row: cell.row - 1, col: model.columnCount - 1, atEnd: true)
+			}
+			return true
+			
+		case #selector(NSResponder.moveUp(_:)):
+			guard cell.caretIsOnFirstLine else { return false }
+			if cell.row > 0 { focus(row: cell.row - 1, col: cell.col, atEnd: true) }
+			else { host?.exitTable(self, below: false) }
+			return true
+			
+		case #selector(NSResponder.moveDown(_:)):
+			guard cell.caretIsOnLastLine else { return false }
+			if cell.row + 1 < model.rows.count { focus(row: cell.row + 1, col: cell.col, atEnd: true) }
+			else { host?.exitTable(self, below: true) }
+			return true
+			
+		case #selector(NSResponder.cancelOperation(_:)):
+			host?.exitTable(self, below: true)
+			return true
+			
+		default:
+			return false
+		}
+	}
+	
+	func moveDown(from cell: BeatTableCellView, column: Int) {
+		if cell.row + 1 < model.rows.count {
+			focus(row: cell.row + 1, col: column, atEnd: true)
+		} else {
+			var m = model
+			m.rows.append(m.emptyRow())
+			setModel(m, focusRow: m.rows.count - 1, focusCol: 0)
+		}
+	}
+	
+	// MARK: Menu
+	
+	func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+		guard let cell = view as? BeatTableCellView else { return menu }
+		let items: [(String, Selector)] = [
+			("Add Row Above", #selector(addRowAbove(_:))),
+			("Add Row Below", #selector(addRowBelow(_:))),
+			("Add Column Left", #selector(addColumnLeft(_:))),
+			("Add Column Right", #selector(addColumnRight(_:))),
+			("Delete Row", #selector(deleteRow(_:))),
+			("Delete Column", #selector(deleteColumn(_:))),
+			("Delete Table", #selector(deleteTable(_:)))
+		]
+		for item in menu.items where item.tag == BeatTableMenuItemTag { menu.removeItem(item) }
+		var index = 0
+		for (title, action) in items {
+			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+			item.target = self
+			item.tag = BeatTableMenuItemTag
+			item.representedObject = [cell.row, cell.col]
+			menu.insertItem(item, at: index)
+			index += 1
+		}
+		let separator = NSMenuItem.separator()
+		separator.tag = BeatTableMenuItemTag
+		menu.insertItem(separator, at: index)
+		return menu
+	}
+	
+	func position(_ sender: Any?) -> (Int, Int) {
+		if let item = sender as? NSMenuItem, let pos = item.representedObject as? [Int], pos.count == 2 { return (pos[0], pos[1]) }
+		if let active = activeCell { return (active.row, active.col) }
+		return (model.rows.count - 1, 0)
+	}
+	
+	@objc func addRowAtEnd(_ sender: Any?) {
+		var m = model
+		m.rows.append(m.emptyRow())
+		setModel(m, focusRow: m.rows.count - 1, focusCol: 0)
+	}
+	
+	@objc func addColumnAtEnd(_ sender: Any?) {
+		var m = model
+		m.rows = m.rows.map { $0 + [""] }
+		setModel(m, focusRow: activeCell?.row ?? 0, focusCol: m.columnCount - 1)
+	}
+	
+	@objc func addRowAbove(_ sender: Any?) {
+		let (r, c) = position(sender)
+		var m = model
+		m.rows.insert(m.emptyRow(), at: r)
+		setModel(m, focusRow: r, focusCol: c)
+	}
+	
+	@objc func addRowBelow(_ sender: Any?) {
+		let (r, c) = position(sender)
+		var m = model
+		m.rows.insert(m.emptyRow(), at: r + 1)
+		setModel(m, focusRow: r + 1, focusCol: c)
+	}
+	
+	@objc func addColumnLeft(_ sender: Any?) {
+		let (r, c) = position(sender)
+		var m = model
+		m.rows = m.rows.map { row in var x = row; x.insert("", at: c); return x }
+		setModel(m, focusRow: r, focusCol: c)
+	}
+	
+	@objc func addColumnRight(_ sender: Any?) {
+		let (r, c) = position(sender)
+		var m = model
+		m.rows = m.rows.map { row in var x = row; x.insert("", at: min(c + 1, x.count)); return x }
+		setModel(m, focusRow: r, focusCol: c + 1)
+	}
+	
+	@objc func deleteRow(_ sender: Any?) {
+		let (r, c) = position(sender)
+		if model.rows.count <= 1 { deleteTable(sender); return }
+		var m = model
+		m.rows.remove(at: r)
+		setModel(m, focusRow: min(r, m.rows.count - 1), focusCol: c)
+	}
+	
+	@objc func deleteColumn(_ sender: Any?) {
+		let (r, c) = position(sender)
+		if model.columnCount <= 1 { deleteTable(sender); return }
+		var m = model
+		m.rows = m.rows.map { row in var x = row; if c < x.count { x.remove(at: c) }; return x }
+		setModel(m, focusRow: r, focusCol: max(c - 1, 0))
+	}
+	
+	@objc func deleteTable(_ sender: Any?) {
+		host?.deleteTable(self)
+	}
 }
 
-/// Local offset for a cell position in laid out table
-fileprivate func btOffset(_ layout: BTLayout, cell: BeatTableCell) -> Int {
-	let row = min(max(cell.row, 0), layout.wrapped.count - 1)
-	let col = min(max(cell.col, 0), layout.widths.count - 1)
-	let w = layout.wrapped[row][col]
-	let offset = min(max(cell.offset, 0), w.length)
-	
-	var k = 0
-	for (i, start) in w.starts.enumerated() where start <= offset { k = i }
-	
-	let lineIndex = layout.rowStartLine[row] + k
-	var position = 0
-	for i in 0..<lineIndex { position += btLength(layout.lines[i]) + 1 }
-	position += 2
-	for c in 0..<col { position += layout.widths[c] + 3 }
-	position += min(offset - w.starts[k], btLength(w.fragments[k]))
-	return position
-}
-
-fileprivate func btLineRange(_ ns: NSString, _ location: Int) -> NSRange {
-	let loc = min(max(location, 0), ns.length)
-	var r = ns.lineRange(for: NSRange(location: loc, length: 0))
-	if r.length > 0 && ns.character(at: NSMaxRange(r) - 1) == 10 { r.length -= 1 }
-	return r
-}
-
-fileprivate func btPipes(_ line: NSString) -> [Int] {
-	var pipes: [Int] = []
-	for i in 0..<line.length where line.character(at: i) == 124 { pipes.append(i) }
-	return pipes
-}
-
-/// Content start (local) and trimmed length of a cell on a line
-fileprivate func btContentRange(_ line: NSString, pipes: [Int], col: Int) -> (Int, Int) {
-	guard col < pipes.count else { return (line.length, 0) }
-	let pipe = pipes[col]
-	let next = (col + 1 < pipes.count) ? pipes[col + 1] : line.length
-	
-	var start = pipe + 1
-	while start < next && line.character(at: start) == 32 { start += 1 }
-	var end = next
-	while end > start && line.character(at: end - 1) == 32 { end -= 1 }
-	
-	return (start, end - start)
-}
+// MARK: - Text view integration
 
 public extension BeatTextView {
 	
-	// MARK: Finding and reading tables
+	fileprivate var tableViews: [BeatTableView] {
+		get { return objc_getAssociatedObject(self, &BeatTableViewsKey) as? [BeatTableView] ?? [] }
+		set { objc_setAssociatedObject(self, &BeatTableViewsKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+	}
 	
-	fileprivate func tableAt(_ location: Int) -> BeatTable? {
+	fileprivate var tableHeightCache: [String: CGFloat] {
+		get { return objc_getAssociatedObject(self, &BeatTableHeightCacheKey) as? [String: CGFloat] ?? [:] }
+		set { objc_setAssociatedObject(self, &BeatTableHeightCacheKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+	}
+	
+	/// Table start position and cell to focus once the table view exists
+	fileprivate var pendingTableFocus: [Int]? {
+		get { return objc_getAssociatedObject(self, &BeatTablePendingFocusKey) as? [Int] }
+		set { objc_setAssociatedObject(self, &BeatTablePendingFocusKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+	}
+	
+	fileprivate var tableFont: NSFont {
+		let font = self.font ?? NSFont.userFixedPitchFont(ofSize: 12) ?? NSFont.systemFont(ofSize: 12)
+		// The text view font can be the bold heading font, use the regular style
+		return NSFontManager.shared.convert(font, toNotHaveTrait: [.boldFontMask, .italicFontMask])
+	}
+	
+	/// Tables fill the full text width
+	fileprivate var tableWidth: CGFloat {
+		guard let tc = textContainer else { return 400 }
+		return floor(tc.size.width - tc.lineFragmentPadding * 2)
+	}
+	
+	// MARK: Finding tables
+	
+	fileprivate struct BTBlock {
+		var range: NSRange
+		var lines: [String]
+	}
+	
+	/// Finds tables from the text itself (the parser can lag behind right after an edit)
+	fileprivate func tableBlocks() -> [BTBlock] {
 		let ns = self.string as NSString
-		let current = btLineRange(ns, location)
-		guard btIsTableRow(ns.substring(with: current)) else { return nil }
+		var blocks: [BTBlock] = []
+		var start = -1
+		var end = 0
+		var lines: [String] = []
+		var location = 0
 		
-		var ranges = [current]
-		
-		var start = current.location
-		while start > 0 {
-			let prev = btLineRange(ns, start - 1)
-			if prev.location >= start || !btIsTableRow(ns.substring(with: prev)) { break }
-			ranges.insert(prev, at: 0)
-			start = prev.location
+		while location < ns.length {
+			let lineRange = ns.lineRange(for: NSRange(location: location, length: 0))
+			if lineRange.length == 0 { break }
+			var content = lineRange
+			if content.length > 0 && ns.character(at: NSMaxRange(content) - 1) == 10 { content.length -= 1 }
+			let line = ns.substring(with: content)
+			
+			if BeatTableModel.isRow(line) {
+				if start < 0 { start = content.location; lines = [] }
+				lines.append(line)
+				end = NSMaxRange(content)
+			} else if start >= 0 {
+				blocks.append(BTBlock(range: NSRange(location: start, length: end - start), lines: lines))
+				start = -1
+			}
+			location = NSMaxRange(lineRange)
 		}
+		if start >= 0 { blocks.append(BTBlock(range: NSRange(location: start, length: end - start), lines: lines)) }
 		
-		var end = NSMaxRange(current)
-		while end < ns.length {
-			let next = btLineRange(ns, end + 1)
-			if next.location <= end || next.length == 0 || !btIsTableRow(ns.substring(with: next)) { break }
-			ranges.append(next)
-			end = NSMaxRange(next)
+		return blocks
+	}
+	
+	/// Table lines starting at given location
+	fileprivate func tableLines(at location: Int) -> [String] {
+		let ns = self.string as NSString
+		var lines: [String] = []
+		var loc = location
+		while loc < ns.length {
+			let lineRange = ns.lineRange(for: NSRange(location: loc, length: 0))
+			if lineRange.length == 0 { break }
+			var content = lineRange
+			if content.length > 0 && ns.character(at: NSMaxRange(content) - 1) == 10 { content.length -= 1 }
+			let line = ns.substring(with: content)
+			if !BeatTableModel.isRow(line) { break }
+			lines.append(line)
+			loc = NSMaxRange(lineRange)
 		}
+		return lines
+	}
+	
+	// MARK: BeatTableHost
+	
+	@objc func tableHeightAtLocation(_ location: Int) -> CGFloat {
+		let strings = tableLines(at: location)
+		if strings.isEmpty { return 0 }
 		
-		let strings = ranges.map { ns.substring(with: $0) }
+		let width = tableWidth
+		let key = strings.joined(separator: "\n") + "#\(width)#\(tableFont.pointSize)"
+		if let cached = tableHeightCache[key] { return cached }
 		
-		// Find the header separator. It's the first separator, if it doesn't contain ':' or is right after the first line.
-		var headerIndex: Int? = nil
-		if let first = strings.firstIndex(where: { btIsSeparator($0) }), first > 0 {
-			if !strings[first].contains(":") || first == 1 { headerIndex = first }
+		let height = btTableHeight(BeatTableModel.parse(strings), tableWidth: width, font: tableFont)
+		btLog("HEIGHT at \(location) lines=\(strings.count) h=\(Int(height))")
+		var cache = tableHeightCache
+		if cache.count > 200 { cache.removeAll() }
+		cache[key] = height
+		tableHeightCache = cache
+		return height
+	}
+	
+	@objc func tableLayoutDidChange() {
+		scheduleTableUpdate()
+	}
+	
+	fileprivate func scheduleTableUpdate() {
+		installTableObserversIfNeeded()
+		if (objc_getAssociatedObject(self, &BeatTableUpdateScheduledKey) as? Bool) == true { return }
+		objc_setAssociatedObject(self, &BeatTableUpdateScheduledKey, true, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+		DispatchQueue.main.async { [weak self] in
+			guard let self else { return }
+			objc_setAssociatedObject(self, &BeatTableUpdateScheduledKey, false, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+			self.updateTableViews()
 		}
-		let multiline = strings.enumerated().contains { btIsSeparator($0.element) && $0.offset != headerIndex }
+	}
+	
+	fileprivate func installTableObserversIfNeeded() {
+		if (objc_getAssociatedObject(self, &BeatTableObserversKey) as? Bool) == true { return }
+		objc_setAssociatedObject(self, &BeatTableObserversKey, true, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 		
-		var groups: [[Int]] = []
-		var lineRows: [Int] = []
-		var currentGroup: [Int] = []
+		NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: self, queue: .main) { [weak self] _ in
+			self?.scheduleTableUpdate()
+		}
+		NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: self, queue: .main) { [weak self] _ in
+			self?.caretMovedIntoTableIfNeeded()
+		}
+	}
+	
+	// MARK: Placing table views
+	
+	fileprivate func updateTableViews() {
+		guard let lm = layoutManager, let tc = textContainer else { return }
+		let blocks = tableBlocks()
+		var views = tableViews
 		
-		for (i, s) in strings.enumerated() {
-			if btIsSeparator(s) {
-				if currentGroup.count > 0 { groups.append(currentGroup); currentGroup = [] }
-				lineRows.append(-1)
-			} else if multiline {
-				lineRows.append(groups.count)
-				currentGroup.append(i)
+		btLog("UPDATE blocks=\(blocks.map { "\($0.range.location)+\($0.range.length):\($0.lines.count)" }) views=\(views.map { $0.tableRange.location }) fr=\(String(describing: type(of: window?.firstResponder ?? self)))")
+		
+		// Reuse views for tables that still exist (matched by position), so editing and focus survive updates
+		var unused = views
+		var ordered: [BeatTableView] = []
+		for block in blocks {
+			if let index = unused.indices.min(by: { abs(unused[$0].tableRange.location - block.range.location) < abs(unused[$1].tableRange.location - block.range.location) }) {
+				ordered.append(unused.remove(at: index))
 			} else {
-				lineRows.append(groups.count)
-				groups.append([i])
+				let view = BeatTableView(host: self)
+				addSubview(view)
+				ordered.append(view)
 			}
 		}
-		if currentGroup.count > 0 { groups.append(currentGroup) }
-		
-		var cols = 1
-		for s in strings where !btIsSeparator(s) { cols = max(cols, btCells(s).count) }
-		
-		var rows: [[String]] = []
-		for group in groups {
-			var row: [String] = []
-			for c in 0..<cols {
-				let parts = group.map { li -> String in
-					let cells = btCells(strings[li])
-					return c < cells.count ? cells[c] : ""
-				}.filter { !$0.isEmpty }
-				row.append(parts.joined(separator: " "))
+		for view in unused {
+			// Don't throw away a table that's being edited
+			if let responder = window?.firstResponder as? BeatTableCellView, responder.table === view {
+				btLog("KEEP edited view")
+				ordered.append(view)
+				continue
 			}
-			rows.append(row)
+			view.removeFromSuperview()
 		}
-		if rows.isEmpty { rows = [Array(repeating: "", count: cols)]; groups = [[0]] }
+		views = ordered
 		
-		return BeatTable(ranges: ranges, lineRows: lineRows, groups: groups, rows: rows, header: headerIndex != nil)
-	}
-	
-	fileprivate func currentTable() -> BeatTable? {
-		return tableAt(self.selectedRange.location)
-	}
-	
-	fileprivate func lineIndex(_ table: BeatTable, location: Int) -> Int {
-		for (i, r) in table.ranges.enumerated() where location <= NSMaxRange(r) { return i }
-		return table.ranges.count - 1
-	}
-	
-	/// Returns the cell (and offset in its unwrapped content) at given location
-	fileprivate func cellAt(_ table: BeatTable, location: Int) -> BeatTableCell {
+		let width = tableWidth
 		let ns = self.string as NSString
-		let li = lineIndex(table, location: location)
 		
-		var row = table.lineRows[li]
-		if row < 0 {
-			// Separator: use the row above
-			row = table.lineRows[..<li].last(where: { $0 >= 0 }) ?? 0
-			return BeatTableCell(row: row, col: 0, offset: Int.max)
-		}
-		
-		let lineRange = table.ranges[li]
-		let line = ns.substring(with: lineRange) as NSString
-		let local = location - lineRange.location
-		let pipes = btPipes(line)
-		
-		var col = 0
-		var localOffset = 0
-		var contentLength = 0
-		
-		if pipes.count > 0 && local > pipes[0] {
-			col = min(max(pipes.filter { $0 < local }.count - 1, 0), table.columnCount - 1)
-			let (contentStart, length) = btContentRange(line, pipes: pipes, col: col)
-			contentLength = length
-			localOffset = min(max(local - contentStart, 0), length)
-		}
-		
-		// Add the length of wrapped lines above in the same cell
-		var base = 0
-		for other in table.groups[row] where other < li {
-			let cells = btCells(ns.substring(with: table.ranges[other]))
-			if col < cells.count, cells[col].count > 0 { base += btLength(cells[col]) + 1 }
-		}
-		if contentLength == 0 && base > 0 { base -= 1 }
-		
-		return BeatTableCell(row: row, col: col, offset: base + localOffset, atLineStart: localOffset == 0 && base > 0)
-	}
-	
-	/// Global position in the current line for the start or end of a cell
-	fileprivate func positionInLine(_ lineRange: NSRange, col: Int, atEnd: Bool) -> Int? {
-		let ns = self.string as NSString
-		let line = ns.substring(with: lineRange) as NSString
-		let pipes = btPipes(line)
-		guard col >= 0, col < pipes.count - 1 else { return nil }
-		let (start, length) = btContentRange(line, pipes: pipes, col: col)
-		return lineRange.location + start + (atEnd ? length : 0)
-	}
-	
-	/// When typing, the caret should be inside cell content (or one space after it, so you can type words).
-	/// Returns a corrected caret position if the caret is in padding or on a separator.
-	fileprivate func caretPositionForTyping(_ table: BeatTable, location: Int) -> Int? {
-		let ns = self.string as NSString
-		let li = lineIndex(table, location: location)
-		
-		// Don't type on separator rows, jump to the line above instead
-		if table.lineRows[li] < 0 {
-			guard li > 0 else { return nil }
-			return positionInLine(table.ranges[li - 1], col: 0, atEnd: true)
-		}
-		
-		let lineRange = table.ranges[li]
-		let line = ns.substring(with: lineRange) as NSString
-		let local = location - lineRange.location
-		let pipes = btPipes(line)
-		guard pipes.count >= 2 else { return nil }
-		
-		if local <= pipes[0] { return positionInLine(lineRange, col: 0, atEnd: false) }
-		if local > pipes[pipes.count - 1] { return positionInLine(lineRange, col: pipes.count - 2, atEnd: true) }
-		
-		let col = min(max(pipes.filter { $0 < local }.count - 1, 0), pipes.count - 2)
-		let (start, length) = btContentRange(line, pipes: pipes, col: col)
-		let nextPipe = pipes[col + 1]
-		
-		if local < start {
-			return lineRange.location + start
-		} else if local > start + length + 1 || local >= nextPipe {
-			return lineRange.location + start + length
-		}
-		return nil
-	}
-	
-	// MARK: Writing tables
-	
-	/// Max table width in characters. Uses page width in the editor, capped to the printed width.
-	fileprivate func tableMaxWidth() -> Int {
-		var maxWidth = BeatTableMaxPrintWidth
-		#if os(macOS)
-		if let container = self.textContainer, let font = self.font {
-			let charWidth = ("0" as NSString).size(withAttributes: [.font: font]).width
-			if charWidth > 0 {
-				let available = container.size.width - container.lineFragmentPadding * 2
-				let chars = Int(floor(available / charWidth)) - 1
-				if chars > 20 { maxWidth = min(maxWidth, chars) }
+		for (i, block) in blocks.enumerated() {
+			let view = views[i]
+			
+			view.tableRange = block.range
+			view.font = tableFont
+			view.textColor = self.textColor ?? .textColor
+			view.tableWidth = width
+			
+			let text = ns.substring(with: block.range)
+			if text != view.sourceText || view.cells.isEmpty {
+				view.load(text: text, lines: block.lines)
+			} else {
+				view.relayout()
 			}
+			
+			let glyph = lm.glyphIndexForCharacter(at: block.range.location)
+			let lineRect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+			let origin = textContainerOrigin
+			let frame = NSRect(x: origin.x + tc.lineFragmentPadding,
+							   y: origin.y + lineRect.minY,
+							   width: width + BTMetrics.addButtonSize + 8,
+							   height: view.totalHeight)
+			if view.frame != frame { view.frame = frame }
 		}
-		#endif
-		return maxWidth
-	}
-	
-	fileprivate func layout(_ rows: [[String]], header: Bool) -> BTLayout {
-		return btLayout(rows, header: header, maxWidth: tableMaxWidth())
-	}
-	
-	/// Writes the given rows in place of the table and moves the caret to given cell
-	fileprivate func apply(_ table: BeatTable, rows: [[String]], header: Bool, cell: BeatTableCell?, suffix: String = "") {
-		guard let textActions = self.editorDelegate?.textActions else { return }
 		
+		tableViews = views
+		
+		// Focus a newly inserted table
+		if let pending = pendingTableFocus, let view = views.first(where: { $0.tableRange.location == pending[0] }) {
+			pendingTableFocus = nil
+			view.focus(row: pending[1], col: pending[2], atEnd: true)
+		}
+	}
+	
+	// MARK: Editing the document
+	
+	/// Writes table text into the document. Only the lines that changed are replaced (like normal typing), which keeps the parser happy.
+	fileprivate func replaceTableText(_ view: BeatTableView, with text: String) {
+		guard let textActions = editorDelegate?.textActions else { return }
 		let ns = self.string as NSString
-		let fullRange = table.fullRange
-		let tableLayout = layout(rows, header: header)
-		let newLines = tableLayout.lines
-		let newText = newLines.joined(separator: "\n")
+		guard NSMaxRange(view.tableRange) <= ns.length else { return }
 		
-		if ns.substring(with: fullRange) != newText || suffix.count > 0 {
-			self.undoManager?.beginUndoGrouping()
-			if newLines.count == table.ranges.count && suffix.count == 0 {
-				// Replace only the lines that changed, bottom up so earlier ranges stay valid
-				for i in (0..<newLines.count).reversed() {
-					if ns.substring(with: table.ranges[i]) != newLines[i] {
-						textActions.replace(table.ranges[i], with: newLines[i])
-					}
+		let selection = self.selectedRange()
+		let activeCell = window?.firstResponder as? BeatTableCellView
+		let cellSelection = activeCell?.selectedRange()
+		
+		let range = view.tableRange
+		let old = ns.substring(with: range).components(separatedBy: "\n")
+		let new = text.components(separatedBy: "\n")
+		
+		// Start position of each old line
+		var starts: [Int] = []
+		var pos = range.location
+		for line in old { starts.append(pos); pos += (line as NSString).length + 1 }
+		
+		var prefix = 0
+		while prefix < min(old.count, new.count) && old[prefix] == new[prefix] { prefix += 1 }
+		var suffix = 0
+		while suffix < min(old.count, new.count) - prefix && old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+		
+		view.sourceText = text
+		btLog("REPLACE \(range.location)+\(range.length) old=\(old.count) new=\(new.count) prefix=\(prefix) suffix=\(suffix)")
+		
+		if old.count == new.count {
+			for i in stride(from: old.count - 1 - suffix, through: prefix, by: -1) where old[i] != new[i] {
+				textActions.replace(NSRange(location: starts[i], length: (old[i] as NSString).length), with: new[i])
+			}
+		} else {
+			let oldMid = Array(old[prefix..<(old.count - suffix)])
+			let newMid = Array(new[prefix..<(new.count - suffix)])
+			
+			if oldMid.count > 0 {
+				let first = starts[prefix]
+				let lastIndex = old.count - suffix - 1
+				let end = starts[lastIndex] + (old[lastIndex] as NSString).length
+				if newMid.count > 0 {
+					textActions.replace(NSRange(location: first, length: end - first), with: newMid.joined(separator: "\n"))
+				} else if prefix > 0 {
+					// Remove whole lines, including the line break before them
+					textActions.replace(NSRange(location: first - 1, length: end - first + 1), with: "")
+				} else {
+					// Remove whole lines at the start of the table, including the line break after them
+					textActions.replace(NSRange(location: first, length: end - first + 1), with: "")
 				}
+			} else if prefix < old.count {
+				// Insert new lines before line `prefix`
+				textActions.replace(NSRange(location: starts[prefix], length: 0), with: newMid.joined(separator: "\n") + "\n")
 			} else {
-				textActions.replace(fullRange, with: newText + suffix)
+				// Append new lines to the end of the table
+				textActions.replace(NSRange(location: NSMaxRange(range), length: 0), with: "\n" + newMid.joined(separator: "\n"))
 			}
-			self.undoManager?.endUndoGrouping()
 		}
 		
-		if let cell {
-			let position = fullRange.location + btOffset(tableLayout, cell: cell)
-			self.selectedRange = NSRange(location: position, length: 0)
+		let delta = (text as NSString).length - range.length
+		view.tableRange.length = (text as NSString).length
+		
+		// Keep typing in the cell even if something moved focus while the document was updated
+		if let activeCell, let cellSelection, window?.firstResponder !== activeCell {
+			btLog("FOCUS restored")
+			window?.makeFirstResponder(activeCell)
+			activeCell.setSelectedRange(cellSelection)
 		}
 		
-		redrawTable(NSRange(location: fullRange.location, length: btLength(newText)))
+		// Keep the main caret where it was (outside the table)
+		if selection.location > range.location {
+			let loc = min(max(selection.location + delta, 0), (self.string as NSString).length)
+			self.setSelectedRange(NSRange(location: loc, length: 0))
+		}
 	}
 	
-	/// The grid depends on neighboring lines, so the whole table needs to be redrawn after edits
-	fileprivate func redrawTable(_ range: NSRange) {
-		#if os(macOS)
-		let length = (self.string as NSString).length
-		guard range.location <= length else { return }
-		let clamped = NSRange(location: range.location, length: min(range.length + 1, length - range.location))
-		self.layoutManager?.invalidateDisplay(forCharacterRange: clamped)
-		#endif
-	}
-	
-	fileprivate func realign(_ table: BeatTable) {
-		let cell = cellAt(table, location: self.selectedRange.location)
-		let formatted = layout(table.rows, header: table.header).lines.joined(separator: "\n")
+	fileprivate func deleteTable(_ view: BeatTableView) {
+		guard let textActions = editorDelegate?.textActions else { return }
 		let ns = self.string as NSString
-		if ns.substring(with: table.fullRange) == formatted { return }
-		apply(table, rows: table.rows, header: table.header, cell: cell)
-	}
-	
-	fileprivate func deleteTable(_ table: BeatTable) {
-		guard let textActions = self.editorDelegate?.textActions else { return }
-		let ns = self.string as NSString
-		var range = table.fullRange
+		var range = view.tableRange
+		guard NSMaxRange(range) <= ns.length else { return }
 		if NSMaxRange(range) < ns.length { range.length += 1 }
+		window?.makeFirstResponder(self)
 		textActions.replace(range, with: "")
-		self.selectedRange = NSRange(location: min(range.location, (self.string as NSString).length), length: 0)
+		self.setSelectedRange(NSRange(location: min(range.location, (self.string as NSString).length), length: 0))
+		scheduleTableUpdate()
+	}
+	
+	/// Moves the caret out of the table into the script
+	fileprivate func exitTable(_ view: BeatTableView, below: Bool) {
+		guard let textActions = editorDelegate?.textActions else { return }
+		window?.makeFirstResponder(self)
+		
+		let range = view.tableRange
+		if below {
+			var end = NSMaxRange(range)
+			let length = (self.string as NSString).length
+			if end >= length {
+				// Table is at the end of the document, add room below it
+				textActions.replace(NSRange(location: length, length: 0), with: "\n\n")
+				end = NSMaxRange(range)
+			}
+			let ns = self.string as NSString
+			var target = min(end + 1, ns.length)
+			// Skip a blank line right after the table
+			if target < ns.length && ns.character(at: target) == 10 { target += 1 }
+			self.setSelectedRange(NSRange(location: min(target, ns.length), length: 0))
+		} else {
+			if range.location == 0 {
+				textActions.replace(NSRange(location: 0, length: 0), with: "\n")
+				self.setSelectedRange(NSRange(location: 0, length: 0))
+			} else {
+				self.setSelectedRange(NSRange(location: range.location - 1, length: 0))
+			}
+		}
+		scrollRangeToVisible(self.selectedRange())
+	}
+	
+	/// If the caret lands in hidden table text (arrow keys etc.), move into the table view instead
+	fileprivate func caretMovedIntoTableIfNeeded() {
+		guard window?.firstResponder === self else { return }
+		let selection = self.selectedRange()
+		guard selection.length == 0 else { return }
+		
+		for view in tableViews {
+			let range = view.tableRange
+			if selection.location >= range.location && selection.location <= NSMaxRange(range) && range.length > 0 {
+				btLog("CARET INTO TABLE at \(selection.location)")
+				let row = selection.location == range.location ? 0 : view.model.rows.count - 1
+				DispatchQueue.main.async { view.focus(row: row, col: 0, atEnd: true) }
+				return
+			}
+		}
 	}
 	
 	/// Inserts a new table at the caret. Uses the current line if it's empty.
 	fileprivate func insertTable(columns: Int, bodyRows: Int, replacing lineRange: NSRange? = nil) {
-		guard let textActions = self.editorDelegate?.textActions else { return }
+		guard let textActions = editorDelegate?.textActions else { return }
 		let ns = self.string as NSString
 		
 		let cols = min(max(columns, 1), 12)
 		let body = min(max(bodyRows, 1), 50)
-		var rows: [[String]] = []
-		for _ in 0..<(body + 1) { rows.append(Array(repeating: "", count: cols)) }
-		let text = layout(rows, header: true).lines.joined(separator: "\n")
+		let model = BeatTableModel(rows: Array(repeating: Array(repeating: "", count: cols), count: body + 1))
+		var text = model.serialize()
 		
-		var location: Int
+		var range: NSRange
 		if let lineRange {
-			textActions.replace(lineRange, with: text)
-			location = lineRange.location
+			range = lineRange
 		} else {
-			let current = btLineRange(ns, self.selectedRange.location)
-			if current.length == 0 {
-				textActions.replace(current, with: text)
-				location = current.location
+			let current = ns.lineRange(for: NSRange(location: self.selectedRange().location, length: 0))
+			var lineOnly = current
+			if lineOnly.length > 0 && ns.character(at: NSMaxRange(lineOnly) - 1) == 10 { lineOnly.length -= 1 }
+			if lineOnly.length == 0 {
+				range = lineOnly
 			} else {
-				textActions.replace(NSRange(location: NSMaxRange(current), length: 0), with: "\n\n" + text)
-				location = NSMaxRange(current) + 2
+				range = NSRange(location: NSMaxRange(lineOnly), length: 0)
+				text = "\n\n" + text
 			}
 		}
 		
-		self.selectedRange = NSRange(location: location + 2, length: 0)
+		// Make sure there's a line after the table
+		let after = NSMaxRange(range)
+		if after >= ns.length || ns.character(at: after) != 10 { text += "\n" }
+		
+		textActions.replace(range, with: text)
+		
+		let tableStart = range.location + (text.hasPrefix("\n\n") ? 2 : 0)
+		pendingTableFocus = [tableStart, 0, 0]
+		scheduleTableUpdate()
 	}
 	
-	// MARK: Key handling
+	// MARK: Key handling (main text view)
 	
 	/// Called from `keyDown:` before default handling. Returns `true` if the event was handled.
 	@objc func handleTableKeyDown(_ event: NSEvent) -> Bool {
+		installTableObserversIfNeeded()
 		if self.hasMarkedText() { return false }
 		
 		var flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -563,68 +1094,33 @@ public extension BeatTextView {
 		flags.remove(.numericPad)
 		flags.remove(.function)
 		
-		let selection = self.selectedRange
+		let selection = self.selectedRange()
 		
-		switch event.keyCode {
-		case 36, 76:
-			// Return
-			guard flags.isEmpty, selection.length == 0 else { return false }
+		// Return on a `/table` line inserts a table
+		if (event.keyCode == 36 || event.keyCode == 76) && flags.isEmpty && selection.length == 0 {
 			if insertTableFromCommand() { return true }
-			guard let table = currentTable() else { return false }
-			tableReturn(table)
-			return true
-			
-		case 48:
-			// Tab / Shift-Tab
-			guard flags.isEmpty || flags == .shift, let table = currentTable() else { return false }
-			tableTab(table, backwards: flags == .shift)
-			return true
-			
-		case 51:
-			// Backspace
-			guard flags.isEmpty, selection.length == 0, let table = currentTable() else { return false }
-			return tableBackspace(table)
-			
-		default:
-			guard selection.length == 0,
-				  flags.subtracting(.shift).isEmpty,
-				  let chars = event.characters, chars.count > 0,
-				  let table = currentTable()
-			else { return false }
-			
-			// Ignore arrow keys, function keys and control characters
-			if let scalar = chars.unicodeScalars.first, scalar.value >= 0xF700 || scalar.value < 32 || scalar.value == 127 { return false }
-			
-			// Typing a pipe would break the columns
-			if chars.contains("|") { return true }
-			
-			// Move the caret out of padding / separators into the cell content
-			if let position = caretPositionForTyping(table, location: selection.location), position != selection.location {
-				self.selectedRange = NSRange(location: position, length: 0)
-			}
-			return false
 		}
+		
+		// Never type into hidden table text
+		if selection.length == 0 {
+			for view in tableViews where selection.location > view.tableRange.location && selection.location < NSMaxRange(view.tableRange) {
+				view.focus(row: 0, col: 0, atEnd: true)
+				return true
+			}
+		}
+		
+		return false
 	}
 	
-	/// Called from `keyDown:` after default handling. Re-aligns the table if needed.
+	/// Called from `keyDown:` after default handling
 	@objc func tableDidProcessKeyDown(_ event: NSEvent) {
-		if self.hasMarkedText() { return }
-		guard self.selectedRange.length == 0, let table = currentTable() else { return }
-		
-		// Don't re-align right after a word + space, so words can be typed (trailing spaces get trimmed)
-		let ns = self.string as NSString
-		let caret = self.selectedRange.location
-		if caret >= 2 && ns.character(at: caret - 1) == 32 {
-			let before = ns.character(at: caret - 2)
-			if before != 32 && before != 124 { redrawTable(table.fullRange); return }
-		}
-		realign(table)
-		if let updated = currentTable() { redrawTable(updated.fullRange) }
+		scheduleTableUpdate()
 	}
 	
 	fileprivate func insertTableFromCommand() -> Bool {
 		let ns = self.string as NSString
-		let lineRange = btLineRange(ns, self.selectedRange.location)
+		var lineRange = ns.lineRange(for: NSRange(location: self.selectedRange().location, length: 0))
+		if lineRange.length > 0 && ns.character(at: NSMaxRange(lineRange) - 1) == 10 { lineRange.length -= 1 }
 		let line = ns.substring(with: lineRange).trimmingCharacters(in: .whitespaces).lowercased()
 		guard line.hasPrefix("/table") else { return false }
 		
@@ -646,150 +1142,22 @@ public extension BeatTextView {
 		return true
 	}
 	
-	fileprivate func tableReturn(_ table: BeatTable) {
-		let cell = cellAt(table, location: self.selectedRange.location)
-		var rows = table.rows
-		
-		// Empty row with only empty rows below it: exit the table
-		let restIsEmpty = rows[cell.row...].allSatisfy { row in row.allSatisfy { $0.isEmpty } }
-		let isHeader = table.header && cell.row == 0
-		
-		if restIsEmpty && cell.row > 0 && !isHeader {
-			rows.removeSubrange(cell.row..<rows.count)
-			let ns = self.string as NSString
-			let rest = ns.substring(from: NSMaxRange(table.fullRange))
-			let suffix = rest.hasPrefix("\n") || rest.isEmpty ? "\n\n" : "\n\n\n"
-			
-			let newText = layout(rows, header: table.header).lines.joined(separator: "\n")
-			apply(table, rows: rows, header: table.header, cell: nil, suffix: suffix)
-			self.selectedRange = NSRange(location: table.fullRange.location + btLength(newText) + 2, length: 0)
-			return
-		}
-		
-		rows.insert(table.emptyRow(), at: cell.row + 1)
-		apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row + 1, col: 0, offset: 0))
-	}
-	
-	fileprivate func tableTab(_ table: BeatTable, backwards: Bool) {
-		let cell = cellAt(table, location: self.selectedRange.location)
-		var rows = table.rows
-		var row = cell.row
-		var col = cell.col + (backwards ? -1 : 1)
-		
-		if col >= table.columnCount { col = 0; row += 1 }
-		if col < 0 { col = table.columnCount - 1; row -= 1 }
-		if row < 0 { row = 0; col = 0 }
-		if row >= rows.count { rows.append(table.emptyRow()) }
-		
-		apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: row, col: col, offset: Int.max))
-	}
-	
-	fileprivate func tableBackspace(_ table: BeatTable) -> Bool {
-		let cell = cellAt(table, location: self.selectedRange.location)
-		var rows = table.rows
-		
-		// Start of a wrapped line: delete the character before it in the cell content
-		if cell.atLineStart && cell.offset > 0 {
-			let content = rows[cell.row][cell.col] as NSString
-			let index = min(cell.offset, content.length) - 1
-			if index >= 0 {
-				rows[cell.row][cell.col] = content.replacingCharacters(in: NSRange(location: index, length: 1), with: "")
-				apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row, col: cell.col, offset: index))
-			}
-			return true
-		}
-		
-		guard cell.offset == 0 else { return false }
-		
-		let emptyRow = rows[cell.row].allSatisfy { $0.isEmpty }
-		
-		if emptyRow && cell.col == 0 && rows.count > 1 {
-			// Remove an empty row and move to the end of the previous one
-			rows.remove(at: cell.row)
-			let target = max(cell.row - 1, 0)
-			apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: target, col: table.columnCount - 1, offset: Int.max))
-		} else if cell.col > 0 {
-			// Don't delete the column separator, just move to the previous cell
-			apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row, col: cell.col - 1, offset: Int.max))
-		}
-		
-		return true
-	}
-	
-	// MARK: Context menu
+	// MARK: Context menu (main text view)
 	
 	@objc func addTableMenuItems(_ menu: NSMenu) {
 		for item in menu.items where item.tag == BeatTableMenuItemTag {
 			menu.removeItem(item)
 		}
-		
-		var items: [NSMenuItem] = []
-		
-		if currentTable() != nil {
-			items.append(NSMenuItem(title: "Add Row Below", action: #selector(tableAddRow(_:)), keyEquivalent: ""))
-			items.append(NSMenuItem(title: "Add Column Right", action: #selector(tableAddColumn(_:)), keyEquivalent: ""))
-			items.append(NSMenuItem(title: "Delete Row", action: #selector(tableDeleteRow(_:)), keyEquivalent: ""))
-			items.append(NSMenuItem(title: "Delete Column", action: #selector(tableDeleteColumn(_:)), keyEquivalent: ""))
-			items.append(NSMenuItem(title: "Delete Table", action: #selector(tableDelete(_:)), keyEquivalent: ""))
-		} else {
-			items.append(NSMenuItem(title: "Insert Table", action: #selector(tableInsert(_:)), keyEquivalent: ""))
-		}
-		
-		items.append(NSMenuItem.separator())
-		
-		for (i, item) in items.enumerated() {
-			item.tag = BeatTableMenuItemTag
-			item.target = self
-			menu.insertItem(item, at: i)
-		}
+		let item = NSMenuItem(title: "Insert Table", action: #selector(tableInsert(_:)), keyEquivalent: "")
+		item.tag = BeatTableMenuItemTag
+		item.target = self
+		menu.insertItem(item, at: 0)
+		let separator = NSMenuItem.separator()
+		separator.tag = BeatTableMenuItemTag
+		menu.insertItem(separator, at: 1)
 	}
 	
 	@objc func tableInsert(_ sender: Any?) {
 		insertTable(columns: 3, bodyRows: 2)
-	}
-	
-	@objc func tableAddRow(_ sender: Any?) {
-		guard let table = currentTable() else { return }
-		let cell = cellAt(table, location: self.selectedRange.location)
-		var rows = table.rows
-		rows.insert(table.emptyRow(), at: cell.row + 1)
-		apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row + 1, col: 0, offset: 0))
-	}
-	
-	@objc func tableAddColumn(_ sender: Any?) {
-		guard let table = currentTable() else { return }
-		let cell = cellAt(table, location: self.selectedRange.location)
-		let rows = table.rows.map { row -> [String] in
-			var r = row
-			r.insert("", at: min(cell.col + 1, r.count))
-			return r
-		}
-		apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row, col: cell.col + 1, offset: 0))
-	}
-	
-	@objc func tableDeleteRow(_ sender: Any?) {
-		guard let table = currentTable() else { return }
-		let cell = cellAt(table, location: self.selectedRange.location)
-		if table.rows.count <= 1 { deleteTable(table); return }
-		var rows = table.rows
-		rows.remove(at: cell.row)
-		apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: min(cell.row, rows.count - 1), col: 0, offset: 0))
-	}
-	
-	@objc func tableDeleteColumn(_ sender: Any?) {
-		guard let table = currentTable() else { return }
-		let cell = cellAt(table, location: self.selectedRange.location)
-		if table.columnCount <= 1 { deleteTable(table); return }
-		let rows = table.rows.map { row -> [String] in
-			var r = row
-			if cell.col < r.count { r.remove(at: cell.col) }
-			return r
-		}
-		apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row, col: max(cell.col - 1, 0), offset: 0))
-	}
-	
-	@objc func tableDelete(_ sender: Any?) {
-		guard let table = currentTable() else { return }
-		deleteTable(table)
 	}
 }
