@@ -361,6 +361,21 @@
 	// Save start time
     _startTime = NSDate.date;
 	
+	// Mark table structure, because table rows are paginated as separate blocks
+	{
+		NSArray<Line*>* all = self.lines;
+		for (NSInteger i = 0; i < all.count; i++) {
+			Line* l = all[i];
+			Line* prev = (i > 0) ? all[i-1] : nil;
+			Line* next = (i + 1 < all.count) ? all[i+1] : nil;
+			bool isTable = (l.type == action && (l.isTableRow || l.isTableSeparator));
+			bool prevTable = (prev != nil && prev.type == action && (prev.isTableRow || prev.isTableSeparator));
+			l.tableFirstRow = isTable && !prevTable;
+			l.tableHeaderRow = isTable && !l.isTableSeparator && next != nil && next.type == action && next.isTableSeparator && ![next.string containsString:@":"];
+			l.followsTable = !isTable && prevTable && l.string.length > 0;
+		}
+	}
+	
 	// Reset queue and use cached pagination if applicable
 	_lineQueue = [NSMutableArray arrayWithArray:[self.lines subarrayWithRange:NSMakeRange(index, self.lines.count - index)]];
 	

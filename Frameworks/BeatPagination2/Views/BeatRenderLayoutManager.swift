@@ -300,6 +300,9 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
               let paragraphStyle = textStorage.attribute(.paragraphStyle, at: chrRange.location, effectiveRange: nil) as? NSParagraphStyle
         else { return false }
         
+        // Table cells include padding and borders in their line fragments, leave them alone
+        if textStorage.attribute(NSAttributedString.Key("BeatTableCell"), at: chrRange.location, effectiveRange: nil) != nil { return false }
+        
         let allowedHeight = paragraphStyle.maximumLineHeight + paragraphStyle.paragraphSpacingBefore + paragraphStyle.paragraphSpacing
         let proposedHeight = lineFragmentRect.pointee.height
         

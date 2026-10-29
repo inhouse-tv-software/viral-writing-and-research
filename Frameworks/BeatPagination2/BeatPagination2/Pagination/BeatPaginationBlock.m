@@ -13,6 +13,7 @@
 #import "BeatPaginationBlock.h"
 #import "BeatPagination.h"
 #import "BeatPageBreak.h"
+#import "BeatRenderer.h"
 
 @interface BeatPaginationBlock ()
 @property (nonatomic) CGFloat calculatedHeight;
@@ -111,8 +112,24 @@
     // Page breaks have 0 height
     if (line.type == pageBreak) return 0.0;
     
-    // Table header separator rows are collapsed into a thin strip
+#if TARGET_OS_OSX
+    // Tables: separators take no space, rows are measured as real text tables
+    if (line.type == action && line.isTableSeparator) return 0.0;
+    if (line.type == action && line.isTableRow) {
+        BeatPaperSize tablePaper = self.delegate.settings.paperSize;
+        RenderStyle* tableStyle = [self.delegate.styles forLine:line];
+        CGFloat tableWidth = [tableStyle widthWithPageSize:tablePaper];
+        if (tableWidth == 0.0) tableWidth = [self.delegate.styles.page defaultWidthWithPageSize:tablePaper];
+        BXFont* tableFont = (_delegate.fonts.regular) ? _delegate.fonts.regular : BeatFontManager.shared.defaultFonts.regular;
+        bool first = [BeatRenderer isFirstTableRow:line inLines:self.lines];
+        NSAttributedString* row = [BeatRenderer tableRowFor:line font:tableFont indent:0.0 width:tableWidth header:[BeatRenderer isTableHeaderRow:line inLines:self.lines] topBorder:first];
+        CGFloat rowHeight = [BeatRenderer layoutHeightFor:row width:tableWidth + 20.0] + 1.0;
+        self.lineHeights[line.uuid] = @(rowHeight);
+        return rowHeight;
+    }
+#else
     if (line.type == action && line.isTableSeparator) return 2.0;
+#endif
         
     // If this is a *dual dialogue column*, we'll need to convert the style.
     /*
@@ -186,6 +203,9 @@
         self.topMargin = topMargin;
     }
 	
+#if TARGET_OS_OSX
+    if ([BeatRenderer lineFollowsTable:line inLines:self.lines]) height += BeatRenderer.tableBottomSpacing;
+#endif
 	self.lineHeights[line.uuid] = [NSNumber numberWithFloat:height];
 	return height;
 }

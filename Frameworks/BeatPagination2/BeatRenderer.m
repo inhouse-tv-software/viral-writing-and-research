@@ -325,10 +325,31 @@
         [attributedString replaceCharactersInRange:NSMakeRange(0, attributedString.length) withAttributedString:[NSAttributedString.alloc initWithString:content attributes:attrs]];
     }
     
-    // Tables: column separators become spaces and the row is marked, so the layout manager can draw a grid
-    if (line.type == action && line.isTableRow) {
+    // Tables are rendered as real text tables (macOS)
+    if (line.type == action && (line.isTableRow || line.isTableSeparator)) {
+#if TARGET_OS_OSX
+        if (line.isTableSeparator) return NSAttributedString.new;
+        NSParagraphStyle* pStyle = (attributedString.length > 0) ? [attributedString attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil] : nil;
+        CGFloat indent = (pStyle != nil) ? pStyle.headIndent : 0.0;
+        BXFont* font = (self.fonts.regular != nil) ? self.fonts.regular : BeatFontManager.shared.defaultFonts.regular;
+        NSArray* lines = block.lines;
+        return [BeatRenderer tableRowFor:line font:font indent:indent width:[self widthFor:line]
+                                  header:[BeatRenderer isTableHeaderRow:line inLines:lines]
+                               topBorder:([BeatRenderer isFirstTableRow:line inLines:lines] || firstElementOnPage)];
+#else
         attributedString = [self renderTableRow:line content:attributedString];
+#endif
     }
+    
+#if TARGET_OS_OSX
+    // Give the text after a table some room
+    if (line.type != heading && [BeatRenderer lineFollowsTable:line inLines:block.lines] && attributedString.length > 0) {
+        NSParagraphStyle* original = [attributedString attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil];
+        NSMutableParagraphStyle* pStyle = (original != nil) ? original.mutableCopy : NSMutableParagraphStyle.new;
+        pStyle.paragraphSpacingBefore = BeatRenderer.tableBottomSpacing;
+        [attributedString addAttribute:NSParagraphStyleAttributeName value:pStyle range:NSMakeRange(0, attributedString.length)];
+    }
+#endif
     
     // For headings, add some extra formatting (wrap them in a table and insert scene numbers)
     if (line.type == heading && style.sceneNumber && !self.settings.simpleSceneHeadings) {
@@ -353,6 +374,139 @@
 }
 
 #pragma mark Tables
+
++ (CGFloat)tableFontSize { return 10.0; }
++ (CGFloat)tableBottomSpacing { return 10.0; }
+
++ (bool)isTableLine:(Line*)l { return l.type == action && (l.isTableRow || l.isTableSeparator); }
+
++ (bool)isFirstTableRow:(Line*)line inLines:(NSArray<Line*>*)lines { return line.tableFirstRow; }
++ (bool)isTableHeaderRow:(Line*)line inLines:(NSArray<Line*>*)lines { return line.tableHeaderRow; }
++ (bool)lineFollowsTable:(Line*)line inLines:(NSArray<Line*>*)lines { return line.followsTable; }
+
+#if TARGET_OS_OSX
++ (NSMutableAttributedString*)tableRowFor:(Line*)line font:(BXFont*)baseFont indent:(CGFloat)indent width:(CGFloat)width header:(bool)header topBorder:(bool)topBorder
+{
+    NSArray<NSString*>* cells = line.tableCells;
+    NSInteger n = MAX(1, cells.count);
+    
+    BXFont* font = [BXFont fontWithDescriptor:baseFont.fontDescriptor size:self.tableFontSize];
+    if (font == nil) font = baseFont;
+    if (header) {
+        BXFont* bold = [NSFontManager.sharedFontManager convertFont:font toHaveTrait:NSBoldFontMask];
+        if (bold != nil) font = bold;
+    }
+    
+    CGFloat padX = 5.0, padY = 4.0, border = 0.5;
+    CGFloat columnWidth = floor(width / n);
+    CGFloat contentWidth = MAX(10.0, columnWidth - padX * 2 - border);
+    BXColor* borderColor = [BXColor colorWithWhite:0.55 alpha:1.0];
+    
+    NSTextTable* table = NSTextTable.new;
+    table.numberOfColumns = n + 1;
+    table.collapsesBorders = true;
+    table.layoutAlgorithm = NSTextTableFixedLayoutAlgorithm;
+    
+    NSMutableAttributedString* result = NSMutableAttributedString.new;
+    
+    CGFloat lineHeight = ceil(self.tableFontSize * 1.25);
+    
+    // Line breaks inside cells are rendered as sub-rows without borders between them,
+    // because multi-paragraph cells get extra height in TextKit.
+    NSMutableArray<NSArray<NSString*>*>* parts = NSMutableArray.new;
+    NSInteger subRows = 1;
+    for (NSInteger c = 0; c < n; c++) {
+        NSString* text = (c < cells.count) ? cells[c] : @"";
+        text = [text stringByReplacingOccurrencesOfString:@"\r" withString:@""];
+        NSArray* p = [text componentsSeparatedByString:@"\n"];
+        [parts addObject:p];
+        subRows = MAX(subRows, p.count);
+    }
+    
+    for (NSInteger r = 0; r < subRows; r++) {
+        bool firstSub = (r == 0);
+        bool lastSub = (r == subRows - 1);
+        
+        // Spacer column which keeps the table aligned with action text
+        NSTextTableBlock* spacer = [NSTextTableBlock.alloc initWithTable:table startingRow:r rowSpan:1 startingColumn:0 columnSpan:1];
+        [spacer setContentWidth:MAX(0.1, indent) type:NSTextBlockAbsoluteValueType];
+        NSMutableParagraphStyle* spacerStyle = NSMutableParagraphStyle.new;
+        spacerStyle.textBlocks = @[spacer];
+        spacerStyle.minimumLineHeight = 1.0;
+        spacerStyle.maximumLineHeight = 1.0;
+        [result appendAttributedString:[NSAttributedString.alloc initWithString:@" \n" attributes:@{
+            NSFontAttributeName: font,
+            NSParagraphStyleAttributeName: spacerStyle
+        }]];
+        
+        for (NSInteger c = 0; c < n; c++) {
+            NSArray<NSString*>* p = parts[c];
+            NSString* text = (r < p.count) ? [p[r] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] : @"";
+            if (text.length == 0) text = @" ";
+            
+            NSTextTableBlock* cell = [NSTextTableBlock.alloc initWithTable:table startingRow:r rowSpan:1 startingColumn:c+1 columnSpan:1];
+            [cell setContentWidth:contentWidth type:NSTextBlockAbsoluteValueType];
+            [cell setWidth:padX type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMinXEdge];
+            [cell setWidth:padX type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMaxXEdge];
+            [cell setWidth:(firstSub ? padY : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMinYEdge];
+            [cell setWidth:(lastSub ? padY : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMaxYEdge];
+            [cell setWidth:border type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMinXEdge];
+            [cell setWidth:border type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMaxXEdge];
+            [cell setWidth:(lastSub ? border : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMaxYEdge];
+            [cell setWidth:((firstSub && topBorder) ? border : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMinYEdge];
+            [cell setBorderColor:borderColor];
+            cell.verticalAlignment = NSTextBlockTopAlignment;
+            if (header) cell.backgroundColor = [BXColor colorWithWhite:0.93 alpha:1.0];
+            
+            NSMutableParagraphStyle* pStyle = NSMutableParagraphStyle.new;
+            pStyle.textBlocks = @[cell];
+            pStyle.minimumLineHeight = lineHeight;
+            pStyle.maximumLineHeight = lineHeight;
+            pStyle.lineBreakMode = NSLineBreakByWordWrapping;
+            
+            [result appendAttributedString:[NSAttributedString.alloc initWithString:[text stringByAppendingString:@"\n"] attributes:@{
+                NSFontAttributeName: font,
+                NSForegroundColorAttributeName: header ? [BXColor colorWithWhite:0.2 alpha:1.0] : BXColor.blackColor,
+                NSParagraphStyleAttributeName: pStyle
+            }]];
+        }
+    }
+    
+    // Mark table text so the render layout manager won't clamp cell line fragments
+    [result addAttribute:@"BeatTableCell" value:@YES range:NSMakeRange(0, result.length)];
+    return result;
+}
+
++ (CGFloat)layoutHeightFor:(NSAttributedString*)string width:(CGFloat)width
+{
+    NSTextStorage* storage = [NSTextStorage.alloc initWithAttributedString:string];
+    NSLayoutManager* lm = NSLayoutManager.new;
+    NSTextContainer* container = [NSTextContainer.alloc initWithSize:CGSizeMake(width, CGFLOAT_MAX)];
+    container.lineFragmentPadding = 0.0;
+    [lm addTextContainer:container];
+    [storage addLayoutManager:lm];
+    [lm ensureLayoutForTextContainer:container];
+    
+    // Don't count the extra line fragment after the final line break
+    __block CGFloat maxY = 0.0;
+    NSRange glyphRange = [lm glyphRangeForTextContainer:container];
+    [lm enumerateLineFragmentsForGlyphRange:glyphRange usingBlock:^(CGRect rect, CGRect usedRect, NSTextContainer * _Nonnull textContainer, NSRange range, BOOL * _Nonnull stop) {
+        maxY = MAX(maxY, CGRectGetMaxY(rect));
+    }];
+    
+    // Cell bounds include padding and borders
+    [storage enumerateAttribute:NSParagraphStyleAttributeName inRange:NSMakeRange(0, storage.length) options:0 usingBlock:^(id  _Nullable value, NSRange range, BOOL * _Nonnull stop) {
+        NSParagraphStyle* style = value;
+        NSTextBlock* block = style.textBlocks.lastObject;
+        if (block == nil || range.length == 0) return;
+        NSUInteger glyph = [lm glyphIndexForCharacterAtIndex:range.location];
+        CGRect bounds = [lm boundsRectForTextBlock:block atIndex:glyph effectiveRange:nil];
+        maxY = MAX(maxY, CGRectGetMaxY(bounds));
+    }];
+    return ceil(maxY);
+}
+#endif
+
 
 /// Replaces `|` characters with spaces (which keeps column positions in a monospaced font) and adds a `BeatTableRow` attribute with local separator positions.
 - (NSMutableAttributedString*)renderTableRow:(Line*)line content:(NSMutableAttributedString*)content

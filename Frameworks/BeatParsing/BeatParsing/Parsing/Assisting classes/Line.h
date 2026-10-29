@@ -460,6 +460,12 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (NSArray<NSString*>*)tableCells;
 /// Table row rendered as fixed-width text for printing: columns share the width equally, cell text wraps, and wrapped lines are joined with U+2028.
 - (NSString*)tableRowStringForWidth:(NSInteger)totalWidth;
+/// Set by pagination: this row is followed by the header separator
+@property (nonatomic) bool tableHeaderRow;
+/// Set by pagination: this is the first row of a table
+@property (nonatomic) bool tableFirstRow;
+/// Set by pagination: this line comes right after a table
+@property (nonatomic) bool followsTable;
 
 #pragma mark - Debugging
 
