@@ -121,12 +121,20 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
     
     // MARK: - Tables
     
-    /// Draws grid lines for table rows (marked with `BeatTableRow` attribute by the renderer)
+    /// Draws grid lines for table rows (marked with `BeatTableRow` attribute by the renderer).
+    /// Uses the same rules as the editor: separators are rules, and if a table has row separators (`|:---|`), rows span multiple lines.
     func drawTables(forGlyphRange glyphRange: NSRange, origin: CGPoint) {
         guard let textStorage, let container = self.textContainers.first else { return }
         
         let key = NSAttributedString.Key("BeatTableRow")
         let range = self.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        
+        func rowInfo(at index: Int) -> (NSRange, [String: Any])? {
+            guard index >= 0, index < textStorage.length else { return nil }
+            var r = NSRange(location: 0, length: 0)
+            guard let info = textStorage.attribute(key, at: index, effectiveRange: &r) as? [String: Any], r.length > 0 else { return nil }
+            return (r, info)
+        }
         
         textStorage.enumerateAttribute(key, in: range) { value, rowRange, stop in
             guard let info = value as? [String: Any],
@@ -134,22 +142,27 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
                   rowRange.length > 0
             else { return }
             
-            // Separator rows are not drawn
-            if (info["separator"] as? Bool) ?? false { return }
-            
-            // Check neighboring rows. Index - 1 is the line break of the previous row.
-            var firstRow = true
-            if rowRange.location >= 2, textStorage.attribute(key, at: rowRange.location - 2, effectiveRange: nil) != nil {
-                firstRow = false
+            // Collect the lines of this table on this page. Index - 1 is the line break between lines.
+            var tableLines: [(NSRange, [String: Any])] = [(rowRange, info)]
+            var current = 0
+            while let prev = rowInfo(at: tableLines[0].0.location - 2), tableLines.count < 500 {
+                tableLines.insert(prev, at: 0)
+                current += 1
+            }
+            while let next = rowInfo(at: NSMaxRange(tableLines[tableLines.count - 1].0) + 1), tableLines.count < 1000 {
+                tableLines.append(next)
             }
             
-            var headerRow = false
-            let nextIndex = NSMaxRange(rowRange) + 1
-            if firstRow, nextIndex < textStorage.length,
-               let next = textStorage.attribute(key, at: nextIndex, effectiveRange: nil) as? [String: Any],
-               (next["separator"] as? Bool) ?? false {
-                headerRow = true
+            func isSeparator(_ i: Int) -> Bool { return (tableLines[i].1["separator"] as? Bool) ?? false }
+            func isRowSeparator(_ i: Int) -> Bool { return (tableLines[i].1["rowSeparator"] as? Bool) ?? false }
+            
+            let last = tableLines.count - 1
+            var headerSeparator: Int? = nil
+            if let firstSeparator = (0...last).first(where: { isSeparator($0) }), firstSeparator > 0,
+               !isRowSeparator(firstSeparator) || firstSeparator == 1 {
+                headerSeparator = firstSeparator
             }
+            let hasRowSeparators = (0...last).contains { isSeparator($0) && $0 != headerSeparator }
             
             var xs: [CGFloat] = []
             for p in pipes {
@@ -170,8 +183,11 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
             let top = origin.y + topRect.origin.y
             let bottom = origin.y + bottomRect.maxY
             let height = bottom - top
+            let width = right - left + 0.5
             
-            if headerRow {
+            let separator = isSeparator(current)
+            
+            if let headerSeparator, current < headerSeparator, !separator {
                 UXColor(white: 0.92, alpha: 1.0).setFill()
                 self.fillTableRect(CGRect(x: left, y: top, width: right - left, height: height))
             }
@@ -182,10 +198,19 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
                 self.fillTableRect(CGRect(x: x - 0.25, y: top, width: 0.5, height: height))
             }
             
-            if firstRow {
-                self.fillTableRect(CGRect(x: left - 0.25, y: top, width: right - left + 0.5, height: 0.5))
+            if separator {
+                self.fillTableRect(CGRect(x: left - 0.25, y: top + height / 2.0 - 0.25, width: width, height: 0.5))
+                return
             }
-            self.fillTableRect(CGRect(x: left - 0.25, y: bottom - 0.5, width: right - left + 0.5, height: 0.5))
+            
+            if current == 0 {
+                self.fillTableRect(CGRect(x: left - 0.25, y: top, width: width, height: 0.5))
+            }
+            
+            let nextIsRow = current < last && !isSeparator(current + 1)
+            if current == last || (nextIsRow && !hasRowSeparators) {
+                self.fillTableRect(CGRect(x: left - 0.25, y: bottom - 0.5, width: width, height: 0.5))
+            }
         }
     }
     

@@ -59,6 +59,17 @@ public extension BeatTextView {
  |-------|-------|
  | Soya  | 120   |
  
+ Tables never get wider than the page. When a cell doesn't fit, its text wraps onto
+ more lines, and rows are then separated with `|:---|` lines so we know which lines belong together:
+ 
+ | Item  | Notes                |
+ |-------|----------------------|
+ | Soya  | A very long note     |
+ |       | that wraps           |
+ |:------|:---------------------|
+ | Tofu  | Short                |
+ |:------|:---------------------|
+ 
  The layout manager hides the pipes and draws a grid. Here we handle editing:
  columns are re-aligned while typing, Tab / Shift-Tab moves between cells,
  Return adds a row (or exits the table on an empty last row), and `/table` + Return inserts a new table.
@@ -66,13 +77,19 @@ public extension BeatTextView {
  */
 
 fileprivate let BeatTableMenuItemTag = 947_100
+/// Max characters per table line. Printed action lines are 60 characters wide in Courier 12pt.
+fileprivate let BeatTableMaxPrintWidth = 60
+/// Columns won't shrink below this when fitting a table to the page
+fileprivate let BeatTableMinColumnWidth = 6
 
 fileprivate struct BeatTable {
 	/// Ranges of each table line (without line break)
 	var ranges: [NSRange]
-	/// Row index for each line, `-1` for the header separator
+	/// Logical row index for each line, `-1` for separators
 	var lineRows: [Int]
-	/// Cell contents (separator not included)
+	/// Line indices for each logical row
+	var groups: [[Int]]
+	/// Cell contents for each logical row
 	var rows: [[String]]
 	var header: Bool
 	
@@ -87,8 +104,27 @@ fileprivate struct BeatTable {
 fileprivate struct BeatTableCell {
 	var row: Int
 	var col: Int
+	/// Offset inside the (unwrapped) cell content
 	var offset: Int
+	/// `true` when the caret is at the very start of a wrapped line of this cell
+	var atLineStart: Bool = false
 }
+
+/// Wrapped cell content: fragments and where each one starts in the content
+fileprivate struct BTWrapped {
+	var fragments: [String]
+	var starts: [Int]
+	var length: Int { return (starts.last ?? 0) + btLength(fragments.last ?? "") }
+}
+
+fileprivate struct BTLayout {
+	var lines: [String]
+	var widths: [Int]
+	var rowStartLine: [Int]
+	var wrapped: [[BTWrapped]]
+}
+
+fileprivate func btLength(_ s: String) -> Int { return (s as NSString).length }
 
 fileprivate func btIsTableRow(_ s: String) -> Bool {
 	let t = s.trimmingCharacters(in: .whitespaces)
@@ -100,61 +136,117 @@ fileprivate func btIsSeparator(_ s: String) -> Bool {
 	return s.allSatisfy { $0 == "|" || $0 == "-" || $0 == ":" || $0 == " " }
 }
 
+/// Collapses runs of spaces
+fileprivate func btNormalize(_ s: String) -> String {
+	return s.components(separatedBy: " ").filter { !$0.isEmpty }.joined(separator: " ")
+}
+
 fileprivate func btCells(_ s: String) -> [String] {
 	var t = s.trimmingCharacters(in: .whitespaces)
 	if t.hasPrefix("|") { t.removeFirst() }
 	if t.hasSuffix("|") { t.removeLast() }
-	return t.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+	return t.components(separatedBy: "|").map { btNormalize($0.trimmingCharacters(in: .whitespaces)) }
 }
 
-fileprivate func btLength(_ s: String) -> Int { return (s as NSString).length }
+fileprivate func btWrap(_ content: String, _ width: Int) -> BTWrapped {
+	if btLength(content) <= width { return BTWrapped(fragments: [content], starts: [0]) }
+	
+	var fragments: [String] = []
+	var starts: [Int] = []
+	var current = ""
+	var currentStart = 0
+	var position = 0
+	
+	for w in content.components(separatedBy: " ") {
+		var word = w as NSString
+		var wordStart = position
+		position += word.length + 1
+		if word.length == 0 { continue }
+		
+		// Break words that are longer than the column
+		while word.length > width {
+			if current.count > 0 { fragments.append(current); starts.append(currentStart); current = "" }
+			fragments.append(word.substring(to: width))
+			starts.append(wordStart)
+			word = word.substring(from: width) as NSString
+			wordStart += width
+		}
+		
+		if current.isEmpty {
+			current = word as String
+			currentStart = wordStart
+		} else if btLength(current) + 1 + word.length <= width {
+			current += " " + (word as String)
+		} else {
+			fragments.append(current); starts.append(currentStart)
+			current = word as String
+			currentStart = wordStart
+		}
+	}
+	
+	if current.count > 0 || fragments.isEmpty { fragments.append(current); starts.append(currentStart) }
+	return BTWrapped(fragments: fragments, starts: starts)
+}
 
-fileprivate func btWidths(_ rows: [[String]]) -> [Int] {
+fileprivate func btLayout(_ rows: [[String]], header: Bool, maxWidth: Int) -> BTLayout {
 	let cols = rows.first?.count ?? 1
 	var widths = Array(repeating: 3, count: cols)
 	for r in rows {
-		for (i, c) in r.enumerated() where i < cols {
-			widths[i] = max(widths[i], btLength(c))
-		}
+		for (i, c) in r.enumerated() where i < cols { widths[i] = max(widths[i], btLength(c)) }
 	}
-	return widths
-}
-
-fileprivate func btFormat(_ rows: [[String]], header: Bool) -> [String] {
-	let widths = btWidths(rows)
-	var out: [String] = []
-	for (ri, r) in rows.enumerated() {
-		var cells: [String] = []
-		for (i, c) in r.enumerated() {
-			cells.append(c + String(repeating: " ", count: max(0, widths[i] - btLength(c))))
-		}
-		out.append("| " + cells.joined(separator: " | ") + " |")
-		if ri == 0 && header {
-			out.append("|" + widths.map { String(repeating: "-", count: $0 + 2) }.joined(separator: "|") + "|")
-		}
-	}
-	return out
-}
-
-/// Line index of given row in formatted output
-fileprivate func btFormattedLineIndex(row: Int, header: Bool) -> Int {
-	return (header && row > 0) ? row + 1 : row
-}
-
-/// Local offset for a cell position in formatted output
-fileprivate func btFormattedOffset(_ rows: [[String]], header: Bool, cell: BeatTableCell) -> Int {
-	let lines = btFormat(rows, header: header)
-	let widths = btWidths(rows)
-	let row = min(max(cell.row, 0), rows.count - 1)
-	let col = min(max(cell.col, 0), widths.count - 1)
-	let lineIndex = btFormattedLineIndex(row: row, header: header)
 	
-	var offset = 0
-	for i in 0..<lineIndex { offset += btLength(lines[i]) + 1 }
-	offset += 2
-	for k in 0..<col { offset += widths[k] + 3 }
-	offset += min(max(cell.offset, 0), btLength(rows[row][col]))
-	return offset
+	// Fit to page by shrinking the widest column
+	func total(_ w: [Int]) -> Int { return w.reduce(0, +) + 3 * w.count + 1 }
+	while total(widths) > maxWidth {
+		guard let wi = widths.indices.max(by: { widths[$0] < widths[$1] }), widths[wi] > BeatTableMinColumnWidth else { break }
+		widths[wi] -= 1
+	}
+	
+	let wrapped = rows.map { r in r.enumerated().map { btWrap($0.element, widths[$0.offset]) } }
+	let multiline = wrapped.contains { row in row.contains { $0.fragments.count > 1 } }
+	
+	var lines: [String] = []
+	var rowStartLine: [Int] = []
+	
+	for (ri, r) in wrapped.enumerated() {
+		rowStartLine.append(lines.count)
+		let height = r.map { $0.fragments.count }.max() ?? 1
+		for k in 0..<height {
+			var cells: [String] = []
+			for (i, c) in r.enumerated() {
+				let f = k < c.fragments.count ? c.fragments[k] : ""
+				cells.append(f + String(repeating: " ", count: max(0, widths[i] - btLength(f))))
+			}
+			lines.append("| " + cells.joined(separator: " | ") + " |")
+		}
+		if ri == 0 && header {
+			lines.append("|" + widths.map { String(repeating: "-", count: $0 + 2) }.joined(separator: "|") + "|")
+		} else if multiline {
+			// Rows with wrapped cells are separated by rule lines (also after the last row, so the table reads back correctly)
+			lines.append("|" + widths.map { ":" + String(repeating: "-", count: $0 + 1) }.joined(separator: "|") + "|")
+		}
+	}
+	
+	return BTLayout(lines: lines, widths: widths, rowStartLine: rowStartLine, wrapped: wrapped)
+}
+
+/// Local offset for a cell position in laid out table
+fileprivate func btOffset(_ layout: BTLayout, cell: BeatTableCell) -> Int {
+	let row = min(max(cell.row, 0), layout.wrapped.count - 1)
+	let col = min(max(cell.col, 0), layout.widths.count - 1)
+	let w = layout.wrapped[row][col]
+	let offset = min(max(cell.offset, 0), w.length)
+	
+	var k = 0
+	for (i, start) in w.starts.enumerated() where start <= offset { k = i }
+	
+	let lineIndex = layout.rowStartLine[row] + k
+	var position = 0
+	for i in 0..<lineIndex { position += btLength(layout.lines[i]) + 1 }
+	position += 2
+	for c in 0..<col { position += layout.widths[c] + 3 }
+	position += min(offset - w.starts[k], btLength(w.fragments[k]))
+	return position
 }
 
 fileprivate func btLineRange(_ ns: NSString, _ location: Int) -> NSRange {
@@ -162,6 +254,26 @@ fileprivate func btLineRange(_ ns: NSString, _ location: Int) -> NSRange {
 	var r = ns.lineRange(for: NSRange(location: loc, length: 0))
 	if r.length > 0 && ns.character(at: NSMaxRange(r) - 1) == 10 { r.length -= 1 }
 	return r
+}
+
+fileprivate func btPipes(_ line: NSString) -> [Int] {
+	var pipes: [Int] = []
+	for i in 0..<line.length where line.character(at: i) == 124 { pipes.append(i) }
+	return pipes
+}
+
+/// Content start (local) and trimmed length of a cell on a line
+fileprivate func btContentRange(_ line: NSString, pipes: [Int], col: Int) -> (Int, Int) {
+	guard col < pipes.count else { return (line.length, 0) }
+	let pipe = pipes[col]
+	let next = (col + 1 < pipes.count) ? pipes[col + 1] : line.length
+	
+	var start = pipe + 1
+	while start < next && line.character(at: start) == 32 { start += 1 }
+	var end = next
+	while end > start && line.character(at: end - 1) == 32 { end -= 1 }
+	
+	return (start, end - start)
 }
 
 public extension BeatTextView {
@@ -191,135 +303,165 @@ public extension BeatTextView {
 			end = NSMaxRange(next)
 		}
 		
-		var rows: [[String]] = []
-		var lineRows: [Int] = []
-		var header = false
+		let strings = ranges.map { ns.substring(with: $0) }
 		
-		for r in ranges {
-			let s = ns.substring(with: r)
+		// Find the header separator. It's the first separator, if it doesn't contain ':' or is right after the first line.
+		var headerIndex: Int? = nil
+		if let first = strings.firstIndex(where: { btIsSeparator($0) }), first > 0 {
+			if !strings[first].contains(":") || first == 1 { headerIndex = first }
+		}
+		let multiline = strings.enumerated().contains { btIsSeparator($0.element) && $0.offset != headerIndex }
+		
+		var groups: [[Int]] = []
+		var lineRows: [Int] = []
+		var currentGroup: [Int] = []
+		
+		for (i, s) in strings.enumerated() {
 			if btIsSeparator(s) {
-				if rows.count == 1 { header = true }
+				if currentGroup.count > 0 { groups.append(currentGroup); currentGroup = [] }
 				lineRows.append(-1)
+			} else if multiline {
+				lineRows.append(groups.count)
+				currentGroup.append(i)
 			} else {
-				lineRows.append(rows.count)
-				rows.append(btCells(s))
+				lineRows.append(groups.count)
+				groups.append([i])
 			}
 		}
+		if currentGroup.count > 0 { groups.append(currentGroup) }
 		
-		if rows.isEmpty { rows = [[""]] }
-		let cols = rows.map { $0.count }.max() ?? 1
-		rows = rows.map { $0 + Array(repeating: "", count: cols - $0.count) }
+		var cols = 1
+		for s in strings where !btIsSeparator(s) { cols = max(cols, btCells(s).count) }
 		
-		return BeatTable(ranges: ranges, lineRows: lineRows, rows: rows, header: header)
+		var rows: [[String]] = []
+		for group in groups {
+			var row: [String] = []
+			for c in 0..<cols {
+				let parts = group.map { li -> String in
+					let cells = btCells(strings[li])
+					return c < cells.count ? cells[c] : ""
+				}.filter { !$0.isEmpty }
+				row.append(parts.joined(separator: " "))
+			}
+			rows.append(row)
+		}
+		if rows.isEmpty { rows = [Array(repeating: "", count: cols)]; groups = [[0]] }
+		
+		return BeatTable(ranges: ranges, lineRows: lineRows, groups: groups, rows: rows, header: headerIndex != nil)
 	}
 	
 	fileprivate func currentTable() -> BeatTable? {
 		return tableAt(self.selectedRange.location)
 	}
 	
-	/// Returns the cell at given location, along with where the cell content begins and its length in the current text
-	fileprivate func cellAt(_ table: BeatTable, location: Int) -> BeatTableCell {
-		let ns = self.string as NSString
-		
-		var lineIndex = table.ranges.count - 1
-		for (i, r) in table.ranges.enumerated() where location <= NSMaxRange(r) {
-			lineIndex = i
-			break
-		}
-		
-		var row = table.lineRows[lineIndex]
-		if row < 0 { row = 0 }
-		
-		let lineRange = table.ranges[lineIndex]
-		let line = ns.substring(with: lineRange) as NSString
-		let local = location - lineRange.location
-		
-		var pipes: [Int] = []
-		for i in 0..<line.length where line.character(at: i) == 124 { pipes.append(i) }
-		
-		guard pipes.count > 0, local > pipes[0] else {
-			return BeatTableCell(row: row, col: 0, offset: 0)
-		}
-		
-		var col = pipes.filter { $0 < local }.count - 1
-		col = min(max(col, 0), table.columnCount - 1)
-		
-		let (contentStart, contentLength) = contentRange(line: line, pipes: pipes, col: col)
-		let offset = min(max(local - contentStart, 0), contentLength)
-		
-		return BeatTableCell(row: row, col: col, offset: offset)
+	fileprivate func lineIndex(_ table: BeatTable, location: Int) -> Int {
+		for (i, r) in table.ranges.enumerated() where location <= NSMaxRange(r) { return i }
+		return table.ranges.count - 1
 	}
 	
-	/// Content start (local) and trimmed length of a cell on a line
-	fileprivate func contentRange(line: NSString, pipes: [Int], col: Int) -> (Int, Int) {
-		guard col < pipes.count else { return (line.length, 0) }
-		let pipe = pipes[col]
-		let next = (col + 1 < pipes.count) ? pipes[col + 1] : line.length
+	/// Returns the cell (and offset in its unwrapped content) at given location
+	fileprivate func cellAt(_ table: BeatTable, location: Int) -> BeatTableCell {
+		let ns = self.string as NSString
+		let li = lineIndex(table, location: location)
 		
-		var start = pipe + 1
-		while start < next && line.character(at: start) == 32 { start += 1 }
-		var end = next
-		while end > start && line.character(at: end - 1) == 32 { end -= 1 }
+		var row = table.lineRows[li]
+		if row < 0 {
+			// Separator: use the row above
+			row = table.lineRows[..<li].last(where: { $0 >= 0 }) ?? 0
+			return BeatTableCell(row: row, col: 0, offset: Int.max)
+		}
 		
-		return (start, end - start)
+		let lineRange = table.ranges[li]
+		let line = ns.substring(with: lineRange) as NSString
+		let local = location - lineRange.location
+		let pipes = btPipes(line)
+		
+		var col = 0
+		var localOffset = 0
+		var contentLength = 0
+		
+		if pipes.count > 0 && local > pipes[0] {
+			col = min(max(pipes.filter { $0 < local }.count - 1, 0), table.columnCount - 1)
+			let (contentStart, length) = btContentRange(line, pipes: pipes, col: col)
+			contentLength = length
+			localOffset = min(max(local - contentStart, 0), length)
+		}
+		
+		// Add the length of wrapped lines above in the same cell
+		var base = 0
+		for other in table.groups[row] where other < li {
+			let cells = btCells(ns.substring(with: table.ranges[other]))
+			if col < cells.count, cells[col].count > 0 { base += btLength(cells[col]) + 1 }
+		}
+		if contentLength == 0 && base > 0 { base -= 1 }
+		
+		return BeatTableCell(row: row, col: col, offset: base + localOffset, atLineStart: localOffset == 0 && base > 0)
+	}
+	
+	/// Global position in the current line for the start or end of a cell
+	fileprivate func positionInLine(_ lineRange: NSRange, col: Int, atEnd: Bool) -> Int? {
+		let ns = self.string as NSString
+		let line = ns.substring(with: lineRange) as NSString
+		let pipes = btPipes(line)
+		guard col >= 0, col < pipes.count - 1 else { return nil }
+		let (start, length) = btContentRange(line, pipes: pipes, col: col)
+		return lineRange.location + start + (atEnd ? length : 0)
 	}
 	
 	/// When typing, the caret should be inside cell content (or one space after it, so you can type words).
 	/// Returns a corrected caret position if the caret is in padding or on a separator.
 	fileprivate func caretPositionForTyping(_ table: BeatTable, location: Int) -> Int? {
 		let ns = self.string as NSString
-		guard let lineIndex = table.ranges.firstIndex(where: { NSLocationInRange(location, NSRange(location: $0.location, length: $0.length + 1)) }) else { return nil }
+		let li = lineIndex(table, location: location)
 		
-		// Don't type on the separator row, jump to the header instead
-		if table.lineRows[lineIndex] < 0 {
-			return currentPosition(table, cell: BeatTableCell(row: 0, col: 0, offset: Int.max))
+		// Don't type on separator rows, jump to the line above instead
+		if table.lineRows[li] < 0 {
+			guard li > 0 else { return nil }
+			return positionInLine(table.ranges[li - 1], col: 0, atEnd: true)
 		}
 		
-		let lineRange = table.ranges[lineIndex]
+		let lineRange = table.ranges[li]
 		let line = ns.substring(with: lineRange) as NSString
 		let local = location - lineRange.location
-		
-		var pipes: [Int] = []
-		for i in 0..<line.length where line.character(at: i) == 124 { pipes.append(i) }
+		let pipes = btPipes(line)
 		guard pipes.count >= 2 else { return nil }
 		
-		if local <= pipes[0] {
-			return currentPosition(table, cell: BeatTableCell(row: table.lineRows[lineIndex], col: 0, offset: 0))
-		}
-		if local > pipes[pipes.count - 1] {
-			return currentPosition(table, cell: BeatTableCell(row: table.lineRows[lineIndex], col: pipes.count - 2, offset: Int.max))
-		}
+		if local <= pipes[0] { return positionInLine(lineRange, col: 0, atEnd: false) }
+		if local > pipes[pipes.count - 1] { return positionInLine(lineRange, col: pipes.count - 2, atEnd: true) }
 		
 		let col = min(max(pipes.filter { $0 < local }.count - 1, 0), pipes.count - 2)
-		let (start, length) = contentRange(line: line, pipes: pipes, col: col)
+		let (start, length) = btContentRange(line, pipes: pipes, col: col)
 		let nextPipe = pipes[col + 1]
 		
 		if local < start {
-			// Leading space: an empty cell or caret right after the separator
 			return lineRange.location + start
 		} else if local > start + length + 1 || local >= nextPipe {
-			// Somewhere in the padding
 			return lineRange.location + start + length
 		}
 		return nil
 	}
 	
-	/// Global position for a cell in the *current* (possibly unaligned) text
-	fileprivate func currentPosition(_ table: BeatTable, cell: BeatTableCell) -> Int? {
-		guard let lineIndex = table.lineRows.firstIndex(of: cell.row) else { return nil }
-		let ns = self.string as NSString
-		let lineRange = table.ranges[lineIndex]
-		let line = ns.substring(with: lineRange) as NSString
-		
-		var pipes: [Int] = []
-		for i in 0..<line.length where line.character(at: i) == 124 { pipes.append(i) }
-		guard cell.col < pipes.count - 1 else { return nil }
-		
-		let (start, length) = contentRange(line: line, pipes: pipes, col: cell.col)
-		return lineRange.location + start + min(cell.offset, length)
+	// MARK: Writing tables
+	
+	/// Max table width in characters. Uses page width in the editor, capped to the printed width.
+	fileprivate func tableMaxWidth() -> Int {
+		var maxWidth = BeatTableMaxPrintWidth
+		#if os(macOS)
+		if let container = self.textContainer, let font = self.font {
+			let charWidth = ("0" as NSString).size(withAttributes: [.font: font]).width
+			if charWidth > 0 {
+				let available = container.size.width - container.lineFragmentPadding * 2
+				let chars = Int(floor(available / charWidth)) - 1
+				if chars > 20 { maxWidth = min(maxWidth, chars) }
+			}
+		}
+		#endif
+		return maxWidth
 	}
 	
-	// MARK: Writing tables
+	fileprivate func layout(_ rows: [[String]], header: Bool) -> BTLayout {
+		return btLayout(rows, header: header, maxWidth: tableMaxWidth())
+	}
 	
 	/// Writes the given rows in place of the table and moves the caret to given cell
 	fileprivate func apply(_ table: BeatTable, rows: [[String]], header: Bool, cell: BeatTableCell?, suffix: String = "") {
@@ -327,7 +469,8 @@ public extension BeatTextView {
 		
 		let ns = self.string as NSString
 		let fullRange = table.fullRange
-		let newLines = btFormat(rows, header: header)
+		let tableLayout = layout(rows, header: header)
+		let newLines = tableLayout.lines
 		let newText = newLines.joined(separator: "\n")
 		
 		if ns.substring(with: fullRange) != newText || suffix.count > 0 {
@@ -346,15 +489,26 @@ public extension BeatTextView {
 		}
 		
 		if let cell {
-			let position = fullRange.location + btFormattedOffset(rows, header: header, cell: cell)
+			let position = fullRange.location + btOffset(tableLayout, cell: cell)
 			self.selectedRange = NSRange(location: position, length: 0)
 		}
+		
+		redrawTable(NSRange(location: fullRange.location, length: btLength(newText)))
+	}
+	
+	/// The grid depends on neighboring lines, so the whole table needs to be redrawn after edits
+	fileprivate func redrawTable(_ range: NSRange) {
+		#if os(macOS)
+		let length = (self.string as NSString).length
+		guard range.location <= length else { return }
+		let clamped = NSRange(location: range.location, length: min(range.length + 1, length - range.location))
+		self.layoutManager?.invalidateDisplay(forCharacterRange: clamped)
+		#endif
 	}
 	
 	fileprivate func realign(_ table: BeatTable) {
-		let location = self.selectedRange.location
-		let cell = cellAt(table, location: location)
-		let formatted = btFormat(table.rows, header: table.header).joined(separator: "\n")
+		let cell = cellAt(table, location: self.selectedRange.location)
+		let formatted = layout(table.rows, header: table.header).lines.joined(separator: "\n")
 		let ns = self.string as NSString
 		if ns.substring(with: table.fullRange) == formatted { return }
 		apply(table, rows: table.rows, header: table.header, cell: cell)
@@ -378,7 +532,7 @@ public extension BeatTextView {
 		let body = min(max(bodyRows, 1), 50)
 		var rows: [[String]] = []
 		for _ in 0..<(body + 1) { rows.append(Array(repeating: "", count: cols)) }
-		let text = btFormat(rows, header: true).joined(separator: "\n")
+		let text = layout(rows, header: true).lines.joined(separator: "\n")
 		
 		var location: Int
 		if let lineRange {
@@ -456,14 +610,16 @@ public extension BeatTextView {
 	@objc func tableDidProcessKeyDown(_ event: NSEvent) {
 		if self.hasMarkedText() { return }
 		guard self.selectedRange.length == 0, let table = currentTable() else { return }
+		
 		// Don't re-align right after a word + space, so words can be typed (trailing spaces get trimmed)
 		let ns = self.string as NSString
 		let caret = self.selectedRange.location
 		if caret >= 2 && ns.character(at: caret - 1) == 32 {
 			let before = ns.character(at: caret - 2)
-			if before != 32 && before != 124 { return }
+			if before != 32 && before != 124 { redrawTable(table.fullRange); return }
 		}
 		realign(table)
+		if let updated = currentTable() { redrawTable(updated.fullRange) }
 	}
 	
 	fileprivate func insertTableFromCommand() -> Bool {
@@ -499,14 +655,12 @@ public extension BeatTextView {
 		let isHeader = table.header && cell.row == 0
 		
 		if restIsEmpty && cell.row > 0 && !isHeader {
-			// Exit the table
 			rows.removeSubrange(cell.row..<rows.count)
 			let ns = self.string as NSString
-			let end = NSMaxRange(table.fullRange)
-			let rest = ns.substring(from: end)
+			let rest = ns.substring(from: NSMaxRange(table.fullRange))
 			let suffix = rest.hasPrefix("\n") || rest.isEmpty ? "\n\n" : "\n\n\n"
 			
-			let newText = btFormat(rows, header: table.header).joined(separator: "\n")
+			let newText = layout(rows, header: table.header).lines.joined(separator: "\n")
 			apply(table, rows: rows, header: table.header, cell: nil, suffix: suffix)
 			self.selectedRange = NSRange(location: table.fullRange.location + btLength(newText) + 2, length: 0)
 			return
@@ -532,16 +686,28 @@ public extension BeatTextView {
 	
 	fileprivate func tableBackspace(_ table: BeatTable) -> Bool {
 		let cell = cellAt(table, location: self.selectedRange.location)
+		var rows = table.rows
+		
+		// Start of a wrapped line: delete the character before it in the cell content
+		if cell.atLineStart && cell.offset > 0 {
+			let content = rows[cell.row][cell.col] as NSString
+			let index = min(cell.offset, content.length) - 1
+			if index >= 0 {
+				rows[cell.row][cell.col] = content.replacingCharacters(in: NSRange(location: index, length: 1), with: "")
+				apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row, col: cell.col, offset: index))
+			}
+			return true
+		}
+		
 		guard cell.offset == 0 else { return false }
 		
-		var rows = table.rows
 		let emptyRow = rows[cell.row].allSatisfy { $0.isEmpty }
 		
 		if emptyRow && cell.col == 0 && rows.count > 1 {
 			// Remove an empty row and move to the end of the previous one
 			rows.remove(at: cell.row)
 			let target = max(cell.row - 1, 0)
-			apply(table, rows: rows, header: table.header && rows.count > 0, cell: BeatTableCell(row: target, col: table.columnCount - 1, offset: Int.max))
+			apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: target, col: table.columnCount - 1, offset: Int.max))
 		} else if cell.col > 0 {
 			// Don't delete the column separator, just move to the previous cell
 			apply(table, rows: rows, header: table.header, cell: BeatTableCell(row: cell.row, col: cell.col - 1, offset: Int.max))
@@ -569,8 +735,7 @@ public extension BeatTextView {
 			items.append(NSMenuItem(title: "Insert Table", action: #selector(tableInsert(_:)), keyEquivalent: ""))
 		}
 		
-		let separator = NSMenuItem.separator()
-		items.append(separator)
+		items.append(NSMenuItem.separator())
 		
 		for (i, item) in items.enumerated() {
 			item.tag = BeatTableMenuItemTag

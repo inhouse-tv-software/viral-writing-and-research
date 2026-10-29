@@ -375,7 +375,8 @@
     
     if (length == 0) return content;
     
-    [content addAttribute:@"BeatTableRow" value:@{ @"pipes": pipes, @"separator": @(separator) } range:NSMakeRange(0, length)];
+    bool rowSeparator = separator && [line.string containsString:@":"];
+    [content addAttribute:@"BeatTableRow" value:@{ @"pipes": pipes, @"separator": @(separator), @"rowSeparator": @(rowSeparator) } range:NSMakeRange(0, length)];
     
     // Header separator rows are collapsed into a thin strip
     if (separator) {

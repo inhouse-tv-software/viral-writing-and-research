@@ -494,16 +494,38 @@
 #pragma mark - Draw tables
 
 /// Draws a Notion-style grid for a table row. Column separators (`|`) are rendered as spaces in glyph generation, and we draw real lines in their place.
+/// Separator rows (`|---|` and `|:---|`) are collapsed into thin strips and drawn as horizontal rules.
+/// If a table has row separators (`|:---|`), its rows span multiple lines (wrapped cells), so there are no rules between those lines.
 - (void)drawTableGridForLine:(Line*)line usedRect:(CGRect)usedRect glyphRange:(NSRange)fragmentGlyphs inset:(CGSize)inset
 {
-    // Separator rows (|---|---|) are collapsed and not drawn at all
-    if (line.isTableSeparator) return;
+    NSArray<Line*>* lines = self.editorDelegate.parser.safeLines;
+    NSUInteger foundIndex = [self.editorDelegate.parser indexOfLine:line];
+    if (foundIndex == NSNotFound || foundIndex >= lines.count) return;
+    NSInteger index = (NSInteger)foundIndex;
+    NSInteger count = (NSInteger)lines.count;
     
-    Line* prevLine = [self.editorDelegate.parser previousLine:line];
-    Line* nextLine = [self.editorDelegate.parser nextLine:line];
+    // Find the table around this line
+    NSInteger first = index;
+    NSInteger last = index;
+    while (first > 0 && index - first < 500 && lines[first - 1].type == action && lines[first - 1].isTableRow) first--;
+    while (last < count - 1 && last - index < 500 && lines[last + 1].type == action && lines[last + 1].isTableRow) last++;
     
-    bool firstRow = !(prevLine != nil && prevLine.type == action && prevLine.isTableRow);
-    bool headerRow = firstRow && nextLine != nil && nextLine.isTableSeparator;
+    // Header separator is the first separator, if it doesn't contain ':' or is right after the first line
+    NSInteger firstSeparator = NSNotFound;
+    for (NSInteger i = first; i <= last; i++) {
+        if (lines[i].isTableSeparator) { firstSeparator = i; break; }
+    }
+    
+    NSInteger headerSeparator = NSNotFound;
+    if (firstSeparator != NSNotFound && firstSeparator > first &&
+        (![lines[firstSeparator].string containsString:@":"] || firstSeparator == first + 1)) {
+        headerSeparator = firstSeparator;
+    }
+    
+    bool hasRowSeparators = false;
+    for (NSInteger i = first; i <= last; i++) {
+        if (lines[i].isTableSeparator && i != headerSeparator) { hasRowSeparators = true; break; }
+    }
     
     NSTextContainer* tc = self.textContainers.firstObject;
     NSMutableArray<NSNumber*>* xs = NSMutableArray.new;
@@ -525,28 +547,39 @@
     CGFloat height = usedRect.size.height;
     CGFloat left = xs.firstObject.doubleValue;
     CGFloat right = xs.lastObject.doubleValue;
+    CGFloat width = right - left + 1.0;
     
     BXColor* textColor = ThemeManager.sharedManager.textColor.effectiveColor;
     if (textColor == nil) textColor = BXColor.grayColor;
+    BXColor* lineColor = [textColor colorWithAlphaComponent:0.22];
     
     // Header background
-    if (headerRow) {
+    if (headerSeparator != NSNotFound && index < headerSeparator && !line.isTableSeparator) {
         [[textColor colorWithAlphaComponent:0.06] setFill];
         BXRectFill(CGRectMake(left, top, right - left, height));
     }
     
-    [[textColor colorWithAlphaComponent:0.22] setFill];
+    [lineColor setFill];
     
     // Vertical lines
     for (NSNumber* x in xs) {
         BXRectFill(CGRectMake(floor(x.doubleValue), top, 1.0, height));
     }
     
-    // Top line for the first row
-    if (firstRow) BXRectFill(CGRectMake(left, floor(top), right - left + 1.0, 1.0));
+    if (line.isTableSeparator) {
+        // Separator rows are drawn as a rule
+        BXRectFill(CGRectMake(left, floor(top + height / 2.0), width, 1.0));
+        return;
+    }
     
-    // Bottom line for every row
-    BXRectFill(CGRectMake(left, floor(top + height) - 1.0, right - left + 1.0, 1.0));
+    // Top line for the first row
+    if (index == first) BXRectFill(CGRectMake(left, floor(top), width, 1.0));
+    
+    // Bottom line for the last row, and between rows when rows are single lines
+    bool nextIsRow = (index < last && !lines[index + 1].isTableSeparator);
+    if (index == last || (nextIsRow && !hasRowSeparators)) {
+        BXRectFill(CGRectMake(left, floor(top + height) - 1.0, width, 1.0));
+    }
 }
 
 -(NSArray*)rectsForGlyphRange:(NSRange)glyphsToShow
