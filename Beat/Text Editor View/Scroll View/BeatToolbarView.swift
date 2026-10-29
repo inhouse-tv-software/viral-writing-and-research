@@ -38,10 +38,11 @@ class BeatToolbarView:NSView {
 		infoButton.imagePosition = .imageOnly
 		infoButton.imageScaling = template?.imageScaling ?? .scaleProportionallyDown
 		infoButton.contentTintColor = template?.contentTintColor
-		let pointSize = template?.image.map { max(11, $0.size.height * 0.8) } ?? 13
+		// A fixed size that matches the other icons. (The template images are large assets, sizing from them made a huge button.)
 		if let image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Info") {
-			infoButton.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)) ?? image
+			infoButton.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)) ?? image
 		}
+		infoButton.setAccessibilityLabel("Info")
 		infoButton.toolTip = "Info and shortcuts"
 		infoButton.target = self
 		infoButton.action = #selector(showInfo(_:))
@@ -57,7 +58,8 @@ class BeatToolbarView:NSView {
 	}
 	
 	/// The Info button sits to the left of the other buttons on the right, with the same size and spacing.
-	/// It resizes with the toolbar the same way they do.
+	/// Placed once from the nib layout. After that it moves with the toolbar the same way they do (autoresizing),
+	/// so nothing has to be moved during layout passes.
 	private func placeInfoButton() {
 		let buttons = rightButtons
 		guard let first = buttons.first else { return }
@@ -74,7 +76,6 @@ class BeatToolbarView:NSView {
 	override func layout() {
 		super.layout()
 		
-		placeInfoButton()
 		updateBackgrounds()
 	}
 	

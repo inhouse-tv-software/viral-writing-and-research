@@ -918,7 +918,8 @@ public extension BeatTextView {
 							   width: width + BTMetrics.addButtonSize + 8,
 							   height: view.totalHeight)
 			if view.frame != frame { view.frame = frame }
-			view.isHidden = isFolded(block.range.location)
+			let folded = isFolded(block.range.location)
+			if view.isHidden != folded { view.isHidden = folded }
 		}
 		
 		tableViews = views
@@ -2960,7 +2961,8 @@ public extension BeatTextView {
 				? NSRect(x: origin.x + 2, y: origin.y + lineRect.minY, width: tc.size.width - 4, height: view.totalHeight)
 				: NSRect(x: origin.x + tc.lineFragmentPadding, y: origin.y + lineRect.minY, width: width + 24, height: view.totalHeight)
 			if view.frame != frame { view.frame = frame }
-			view.isHidden = isFolded(block.range.location)
+			let folded = isFolded(block.range.location)
+			if view.isHidden != folded { view.isHidden = folded }
 		}
 		
 		embedViews = ordered
