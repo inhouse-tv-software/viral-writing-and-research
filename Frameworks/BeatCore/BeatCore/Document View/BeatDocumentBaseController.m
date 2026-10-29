@@ -786,6 +786,16 @@
         [self unblockUserInteraction]; // What is this?
 #endif
         
+        // Viral: drop stored images that the text no longer uses
+        NSDictionary* viralImages = [self.documentSettings get:@"ViralImages"];
+        if ([viralImages isKindOfClass:NSDictionary.class] && viralImages.count > 0 && content != nil) {
+            NSMutableDictionary* usedImages = NSMutableDictionary.new;
+            for (NSString* key in viralImages) {
+                if ([content containsString:key]) usedImages[key] = viralImages[key];
+            }
+            if (usedImages.count != viralImages.count) [self.documentSettings set:@"ViralImages" as:usedImages];
+        }
+        
         NSString* settingsString = [self.documentSettings getSettingsStringWithAdditionalSettings:additionalSettings excluding:excludedKeys];
         if (settingsString != nil) {
             // Add line break if needed

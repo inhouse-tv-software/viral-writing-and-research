@@ -511,10 +511,26 @@ static bool BeatIsTableRowString(NSString* string)
     return range;
 }
 
+/// Embedded blocks drawn by views: 1 = table row, 2 = image, 3 = carousel. Consecutive lines of kind 1 or 2 form one block.
+static NSInteger BeatEmbedKindForString(NSString* string)
+{
+    if (BeatIsTableRowString(string)) return 1;
+    NSString* t = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if (![t hasSuffix:@")"]) return 0;
+    if ([t hasPrefix:@"![image](viral:"]) return 2;
+    if ([t hasPrefix:@"![carousel](viral:"]) return 3;
+    return 0;
+}
+
+- (NSInteger)embedKindOf:(NSRange)range
+{
+    if (range.location == NSNotFound || range.length < 2) return 0;
+    return BeatEmbedKindForString([self.textStorage.string substringWithRange:range]);
+}
+
 - (bool)isTableParagraph:(NSRange)range
 {
-    if (range.location == NSNotFound || range.length < 2) return false;
-    return BeatIsTableRowString([self.textStorage.string substringWithRange:range]);
+    return [self embedKindOf:range] != 0;
 }
 
 - (CGFloat)heightForTableAt:(NSUInteger)location
@@ -1080,8 +1096,9 @@ CGGlyph* GetGlyphsForCharacters(CTFontRef font, CFStringRef string)
     
     // Tables: the first line holds the space for the table view, other lines are collapsed
     NSRange tableParagraph = [self tableParagraphRangeAt:range.location];
-    if ([self isTableParagraph:tableParagraph]) {
-        bool first = (tableParagraph.location == 0) || ![self isTableParagraph:[self tableParagraphRangeAt:tableParagraph.location - 1]];
+    NSInteger embedKind = [self embedKindOf:tableParagraph];
+    if (embedKind != 0) {
+        bool first = (embedKind == 3) || (tableParagraph.location == 0) || [self embedKindOf:[self tableParagraphRangeAt:tableParagraph.location - 1]] != embedKind;
         CGFloat height = first ? [self heightForTableAt:tableParagraph.location] : 0.0;
         lineFragmentRect->size.height = height;
         lineFragmentUsedRect->size.height = height;

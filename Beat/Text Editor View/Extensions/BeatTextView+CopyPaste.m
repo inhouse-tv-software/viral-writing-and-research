@@ -8,6 +8,7 @@
 
 #import "BeatTextView+CopyPaste.h"
 #import "BeatPasteboardItem.h"
+#import "Beat-Swift.h"
 
 @implementation BeatTextView (CopyPaste)
 
@@ -106,6 +107,10 @@
 -(void)paste:(id)sender withoutFormatting:(bool)noFormatting
 {
 	NSPasteboard *pasteboard = NSPasteboard.generalPasteboard;
+	
+	// Pasted images become image blocks (see BeatTextView+TabBehavior.swift)
+	if (!noFormatting && [self pasteImagesIfNeeded:pasteboard]) return;
+	
 	NSArray<Class>* classes = @[BeatPasteboardItem.class, NSAttributedString.class, NSString.class];
 		
 	// See if we can read anything from the pasteboard

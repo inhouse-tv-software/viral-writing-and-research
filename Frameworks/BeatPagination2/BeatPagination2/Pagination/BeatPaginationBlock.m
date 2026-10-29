@@ -115,6 +115,16 @@
 #if TARGET_OS_OSX
     // Tables: separators take no space, rows are measured as real text tables
     if (line.type == action && line.isTableSeparator) return 0.0;
+    if (line.type == action && line.isEmbedLine) {
+        if (line.embedHidden || line.embedRow == nil) return 0.0;
+        BeatPaperSize embedPaper = self.delegate.settings.paperSize;
+        RenderStyle* embedStyle = [self.delegate.styles forLine:line];
+        CGFloat embedWidth = [embedStyle widthWithPageSize:embedPaper];
+        if (embedWidth == 0.0) embedWidth = [self.delegate.styles.page defaultWidthWithPageSize:embedPaper];
+        CGFloat embedHeight = [BeatRenderer embedHeightFor:line.embedRow width:embedWidth settings:self.delegate.settings] + 1.0;
+        self.lineHeights[line.uuid] = @(embedHeight);
+        return embedHeight;
+    }
     if (line.type == action && line.isTableRow) {
         BeatPaperSize tablePaper = self.delegate.settings.paperSize;
         RenderStyle* tableStyle = [self.delegate.styles forLine:line];
@@ -396,7 +406,7 @@
     // First find a spiller
     Line* spiller = [self findSpillerAt:remainingSpace];
     
-    if (spiller.type == action && spiller.isTableRow) {
+    if (spiller.type == action && (spiller.isTableRow || spiller.isEmbedLine)) {
         // Never split a table row, move it to the next page as a whole
         NSInteger index = [self.lines indexOfObject:spiller];
         if (index == NSNotFound) index = 0;

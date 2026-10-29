@@ -460,6 +460,20 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (NSArray<NSString*>*)tableCells;
 /// Table row rendered as fixed-width text for printing: columns share the width equally, cell text wraps, and wrapped lines are joined with U+2028.
 - (NSString*)tableRowStringForWidth:(NSInteger)totalWidth;
+/// Viral images: `![image](viral:ID 50)` (width in percent of the text width)
+- (bool)isEmbedImageLine;
+/// Viral carousels: `![carousel](viral:ID1,ID2 100)`
+- (bool)isEmbedCarouselLine;
+/// Image or carousel line
+- (bool)isEmbedLine;
+/// Image IDs on an image or carousel line
+- (NSArray<NSString*>*)embedImageIDs;
+/// Width in percent (5...100)
+- (NSInteger)embedWidthPercent;
+/// Set by pagination: the image lines laid out on one row, stored in the first line of the row
+@property (nonatomic) NSArray<Line*>* embedRow;
+/// Set by pagination: this image is drawn by an earlier line on the same row
+@property (nonatomic) bool embedHidden;
 /// Set by pagination: this row is followed by the header separator
 @property (nonatomic) bool tableHeaderRow;
 /// Set by pagination: this is the first row of a table

@@ -8,6 +8,7 @@
 
 import Foundation
 import AppKit
+import UniformTypeIdentifiers
 
 public extension BeatTextView {
 	@objc func handleTabPress() {
@@ -734,6 +735,7 @@ public extension BeatTextView {
 	@objc var isEditingTable: Bool {
 		if isWritingTable { return true }
 		if let cell = window?.firstResponder as? BeatTableCellView, cell.table?.host === self { return true }
+		if let embed = window?.firstResponder as? ViralEmbedView, embed.host === self { return true }
 		return false
 	}
 	
@@ -814,6 +816,7 @@ public extension BeatTextView {
 	// MARK: BeatTableHost
 	
 	@objc func tableHeightAtLocation(_ location: Int) -> CGFloat {
+		if let embedHeight = embedHeightAtLocation(location) { return embedHeight }
 		let strings = tableLines(at: location)
 		if strings.isEmpty { return 0 }
 		
@@ -918,6 +921,7 @@ public extension BeatTextView {
 		}
 		
 		tableViews = views
+		updateEmbedViews()
 		
 		// Focus a newly inserted table
 		if let pending = pendingTableFocus, let view = views.first(where: { $0.tableRange.location == pending[0] }) {
@@ -1058,6 +1062,19 @@ public extension BeatTextView {
 		let selection = self.selectedRange()
 		guard selection.length == 0 else { return }
 		
+		for view in embedViews {
+			let range = view.blockRange
+			if selection.location >= range.location && selection.location <= NSMaxRange(range) && range.length > 0 {
+				let atStart = selection.location == range.location
+				DispatchQueue.main.async { [weak self] in
+					guard let self, self.window?.firstResponder === self, !self.isWritingTable,
+						  self.selectedRange().location == selection.location else { return }
+					view.activate(atEnd: !atStart)
+				}
+				return
+			}
+		}
+		
 		for view in tableViews {
 			let range = view.tableRange
 			if selection.location >= range.location && selection.location <= NSMaxRange(range) && range.length > 0 {
@@ -1127,6 +1144,50 @@ public extension BeatTextView {
 		// Return on a `/table` line inserts a table
 		if (event.keyCode == 36 || event.keyCode == 76) && flags.isEmpty && selection.length == 0 {
 			if insertTableFromCommand() { return true }
+			if insertEmbedFromCommand() { return true }
+		}
+		
+		// Never type into hidden image text
+		if selection.length == 0 {
+			for view in embedViews where selection.location > view.blockRange.location && selection.location <= NSMaxRange(view.blockRange) {
+				view.activate(atEnd: true)
+				return true
+			}
+		}
+		
+		// Backspace at the start of a line right after a table or images selects the block instead of joining the lines
+		if event.keyCode == 51 && selection.length == 0 && selection.location > 0 && flags.subtracting(.shift).isEmpty {
+			let ns = self.string as NSString
+			let lineEnd = ns.lineRange(for: NSRange(location: selection.location, length: 0))
+			let lineHasText = selection.location < ns.length && ns.character(at: selection.location) != 10 && lineEnd.length > 0
+			if ns.character(at: selection.location - 1) == 10 && lineHasText {
+				let previous = selection.location - 1
+				for view in embedViews where NSMaxRange(view.blockRange) == previous {
+					view.activate(atEnd: true)
+					return true
+				}
+				for view in tableViews where NSMaxRange(view.tableRange) == previous {
+					let lastRow = max(view.model.rows.count - 1, 0)
+					view.focus(row: lastRow, col: max(view.model.columnCount - 1, 0), atEnd: true)
+					return true
+				}
+			}
+		}
+		
+		// Forward delete at the end of a line right before a block
+		if event.keyCode == 117 && selection.length == 0 {
+			let ns = self.string as NSString
+			if selection.location < ns.length && ns.character(at: selection.location) == 10 {
+				let next = selection.location + 1
+				for view in embedViews where view.blockRange.location == next {
+					view.activate(atEnd: false)
+					return true
+				}
+				for view in tableViews where view.tableRange.location == next {
+					view.focus(row: 0, col: 0, atEnd: false)
+					return true
+				}
+			}
 		}
 		
 		// Never type into hidden table text
@@ -1180,12 +1241,1135 @@ public extension BeatTextView {
 		item.tag = BeatTableMenuItemTag
 		item.target = self
 		menu.insertItem(item, at: 0)
+		let imageItem = NSMenuItem(title: "Insert Image…", action: #selector(viralInsertImage(_:)), keyEquivalent: "")
+		imageItem.tag = BeatTableMenuItemTag
+		imageItem.target = self
+		menu.insertItem(imageItem, at: 1)
+		let carouselItem = NSMenuItem(title: "Insert Carousel", action: #selector(viralInsertCarousel(_:)), keyEquivalent: "")
+		carouselItem.tag = BeatTableMenuItemTag
+		carouselItem.target = self
+		menu.insertItem(carouselItem, at: 2)
 		let separator = NSMenuItem.separator()
 		separator.tag = BeatTableMenuItemTag
-		menu.insertItem(separator, at: 1)
+		menu.insertItem(separator, at: 3)
 	}
 	
 	@objc func tableInsert(_ sender: Any?) {
 		insertTable(columns: 3, bodyRows: 2)
+	}
+}
+
+// MARK: - Images and carousels
+/*
+ 
+ Images are stored in the document settings (base64, key `ViralImages`) and referenced from the text:
+ 
+ ![image](viral:ID 50)                  an image, 50% of the text width
+ ![carousel](viral:ID1,ID2,ID3 100)     a carousel
+ 
+ Consecutive image lines are laid out side by side when they fit, otherwise they wrap to the next row.
+ Like tables, the text is hidden in the editor and a view is drawn on top of it.
+ 
+ Paste images anywhere, or type `/image` or `/carousel` and press Return.
+ 
+ */
+
+fileprivate let ViralImagesKey = "ViralImages"
+fileprivate var ViralEmbedViewsKey: UInt8 = 0
+fileprivate var ViralPendingEmbedFocusKey: UInt8 = 0
+
+fileprivate enum EMetrics {
+	static let marginTop: CGFloat = 8
+	static let marginBottom: CGFloat = 14
+	static let carouselBottom: CGFloat = 26
+	static let handle: CGFloat = 12
+}
+
+fileprivate enum EmbedKind { case image, carousel }
+
+fileprivate struct EmbedLine {
+	var kind: EmbedKind
+	var ids: [String]
+	var width: Int
+	
+	static let imagePrefix = "![image](viral:"
+	static let carouselPrefix = "![carousel](viral:"
+	
+	static func parse(_ string: String) -> EmbedLine? {
+		let t = string.trimmingCharacters(in: .whitespaces)
+		guard t.hasSuffix(")") else { return nil }
+		let kind: EmbedKind
+		let prefix: String
+		if t.hasPrefix(imagePrefix) { kind = .image; prefix = imagePrefix }
+		else if t.hasPrefix(carouselPrefix) { kind = .carousel; prefix = carouselPrefix }
+		else { return nil }
+		guard t.count > prefix.count else { return nil }
+		
+		let inner = String(t.dropFirst(prefix.count).dropLast())
+		let parts = inner.components(separatedBy: " ")
+		let ids = (parts.first ?? "").components(separatedBy: ",")
+			.map { $0.trimmingCharacters(in: .whitespaces) }
+			.filter { !$0.isEmpty }
+		var width = 100
+		if let w = parts.dropFirst().compactMap({ Int($0) }).first(where: { $0 > 0 }) { width = w }
+		return EmbedLine(kind: kind, ids: ids, width: min(max(width, 5), 100))
+	}
+	
+	var text: String {
+		let prefix = (kind == .image) ? EmbedLine.imagePrefix : EmbedLine.carouselPrefix
+		return prefix + ids.joined(separator: ",") + " \(width))"
+	}
+}
+
+// MARK: Image store
+
+fileprivate enum ViralImages {
+	static var cache: [String: NSImage] = [:]
+	
+	static func image(_ id: String, settings: BeatDocumentSettings?) -> NSImage? {
+		if let image = cache[id] { return image }
+		guard let dict = settings?.get(ViralImagesKey) as? [String: Any],
+			  let encoded = dict[id] as? String,
+			  let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters),
+			  let image = NSImage(data: data)
+		else { return nil }
+		cache[id] = image
+		return image
+	}
+	
+	static func pixelSize(_ image: NSImage) -> NSSize {
+		if let rep = image.representations.first, rep.pixelsWide > 0, rep.pixelsHigh > 0 {
+			return NSSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+		}
+		if image.size.width > 0 && image.size.height > 0 { return image.size }
+		return NSSize(width: 4, height: 3)
+	}
+	
+	/// Height divided by width
+	static func aspect(_ id: String?, settings: BeatDocumentSettings?) -> CGFloat {
+		guard let id, let image = image(id, settings: settings) else { return 0.75 }
+		let size = pixelSize(image)
+		return size.height / max(size.width, 1)
+	}
+	
+	/// Width in percent for a newly added image: its own size, at most the full text width
+	static func defaultWidth(_ image: NSImage, textWidth: CGFloat) -> Int {
+		let w = image.size.width > 0 ? image.size.width : pixelSize(image).width
+		return min(100, max(20, Int((w / max(textWidth, 1) * 100).rounded())))
+	}
+	
+	/// Stores an image in the document and returns its ID. Large images are scaled down.
+	static func add(_ image: NSImage, settings: BeatDocumentSettings) -> String? {
+		let px = pixelSize(image)
+		let scale = min(1, 2000 / max(px.width, px.height))
+		let w = max(Int(px.width * scale), 1)
+		let h = max(Int(px.height * scale), 1)
+		let hasAlpha = image.representations.contains { $0.hasAlpha }
+		let usePNG = hasAlpha && w * h <= 1_500_000
+		
+		guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8,
+										 samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+										 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+		else { return nil }
+		rep.size = NSSize(width: w, height: h)
+		
+		NSGraphicsContext.saveGraphicsState()
+		NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+		NSGraphicsContext.current?.imageInterpolation = .high
+		let rect = NSRect(x: 0, y: 0, width: w, height: h)
+		if !usePNG {
+			NSColor.white.setFill()
+			rect.fill()
+		}
+		image.draw(in: rect, from: .zero, operation: usePNG ? .copy : .sourceOver, fraction: 1)
+		NSGraphicsContext.restoreGraphicsState()
+		
+		let data = usePNG ? rep.representation(using: .png, properties: [:])
+						  : rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85])
+		guard let data else { return nil }
+		
+		let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+		var dict = settings.get(ViralImagesKey) as? [String: Any] ?? [:]
+		dict[id] = data.base64EncodedString()
+		settings.set(ViralImagesKey, as: dict)
+		cache[id] = NSImage(data: data) ?? image
+		return id
+	}
+}
+
+/// Images on the pasteboard: image files, or image data (but not rich text that happens to contain images)
+fileprivate func viralImages(from pasteboard: NSPasteboard) -> [NSImage] {
+	var images: [NSImage] = []
+	if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+		for url in urls {
+			if let image = NSImage(contentsOf: url), !image.representations.isEmpty { images.append(image) }
+		}
+		if !images.isEmpty { return images }
+	}
+	
+	let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")]
+	let richTypes: [NSPasteboard.PasteboardType] = [.rtf, .rtfd]
+	if pasteboard.availableType(from: imageTypes) != nil, pasteboard.availableType(from: richTypes) == nil,
+	   let image = NSImage(pasteboard: pasteboard) {
+		images.append(image)
+	}
+	return images
+}
+
+// MARK: Image group layout
+
+/// Lays out images in rows. An image fits on a row if the widths (plus 2% gaps) stay within 100%.
+fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings: BeatDocumentSettings?, override: [Int: CGFloat] = [:]) -> (frames: [NSRect], height: CGFloat) {
+	let gap = floor(width * 0.02)
+	var frames = Array(repeating: NSRect.zero, count: items.count)
+	
+	var rows: [[Int]] = []
+	var current: [Int] = []
+	var rowPercent = 0
+	for (i, item) in items.enumerated() {
+		let percent = override[i].map { Int(($0 / max(width, 1) * 100).rounded()) } ?? item.width
+		if !current.isEmpty && rowPercent + 2 + percent <= 100 {
+			current.append(i)
+			rowPercent += 2 + percent
+		} else {
+			if !current.isEmpty { rows.append(current) }
+			current = [i]
+			rowPercent = percent
+		}
+	}
+	if !current.isEmpty { rows.append(current) }
+	
+	var y = EMetrics.marginTop
+	for (r, row) in rows.enumerated() {
+		var x: CGFloat = 0
+		var rowHeight: CGFloat = 0
+		for i in row {
+			let w = floor(min(width, override[i] ?? width * CGFloat(items[i].width) / 100))
+			let h = floor(w * ViralImages.aspect(items[i].ids.first, settings: settings))
+			frames[i] = NSRect(x: x, y: y, width: w, height: h)
+			x += w + gap
+			rowHeight = max(rowHeight, h)
+		}
+		y += rowHeight
+		if r < rows.count - 1 { y += gap }
+	}
+	return (frames, y + EMetrics.marginBottom)
+}
+
+// MARK: Base view
+
+fileprivate class ViralEmbedView: NSView {
+	weak var host: BeatTextView?
+	var kind: EmbedKind = .image
+	var blockRange = NSRange(location: 0, length: 0)
+	var sourceText = ""
+	var embedWidth: CGFloat = 400
+	
+	init(host: BeatTextView) {
+		self.host = host
+		super.init(frame: .zero)
+	}
+	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+	
+	override var isFlipped: Bool { return true }
+	override var acceptsFirstResponder: Bool { return true }
+	
+	var isActive: Bool { return window?.firstResponder === self }
+	var settings: BeatDocumentSettings? { return host?.editorDelegate?.documentSettings }
+	var color: NSColor { return host?.textColor ?? .textColor }
+	
+	var totalHeight: CGFloat { return 0 }
+	func load(text: String, lines: [String]) {}
+	func activate(atEnd: Bool) {
+		window?.makeFirstResponder(self)
+		scrollToVisible(bounds)
+	}
+	func addImages(_ images: [NSImage]) {}
+	
+	override func becomeFirstResponder() -> Bool { redraw(); return true }
+	override func resignFirstResponder() -> Bool { redraw(); return true }
+	
+	func redraw() {
+		needsDisplay = true
+		for view in subviews { view.needsDisplay = true }
+	}
+	
+	/// Writes this block's lines back into the document
+	func write(_ lines: [String]) {
+		guard let host else { return }
+		let text = lines.joined(separator: "\n")
+		let wasActive = isActive
+		sourceText = text
+		host.replaceBlockText(blockRange, with: text)
+		blockRange.length = (text as NSString).length
+		if wasActive && window?.firstResponder !== self { window?.makeFirstResponder(self) }
+		host.scheduleTableUpdate()
+	}
+	
+	func newImageLines(_ images: [NSImage]) -> [EmbedLine] {
+		guard let settings else { return [] }
+		return images.compactMap { image in
+			guard let id = ViralImages.add(image, settings: settings) else { return nil }
+			return EmbedLine(kind: .image, ids: [id], width: ViralImages.defaultWidth(image, textWidth: embedWidth))
+		}
+	}
+	
+	@objc func paste(_ sender: Any?) {
+		let images = viralImages(from: NSPasteboard.general)
+		if images.isEmpty { NSSound.beep(); return }
+		addImages(images)
+	}
+	
+	@objc func chooseAndAddImages(_ sender: Any?) {
+		host?.chooseImages { [weak self] images in self?.addImages(images) }
+	}
+	
+	override func keyDown(with event: NSEvent) {
+		switch event.keyCode {
+		case 53, 36, 76: host?.exitEmbed(self, below: true)
+		case 126: host?.exitEmbed(self, below: false)
+		case 125: host?.exitEmbed(self, below: true)
+		default:
+			// Never let typing fall through to the hidden text behind the block
+			if event.modifierFlags.contains(.command) { super.keyDown(with: event) } else { NSSound.beep() }
+		}
+	}
+	
+	func drawHandle(in rect: NSRect) {
+		let handle = NSRect(x: rect.maxX - EMetrics.handle, y: rect.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
+		NSColor.controlAccentColor.setFill()
+		NSBezierPath(roundedRect: handle.insetBy(dx: 1, dy: 1), xRadius: 2, yRadius: 2).fill()
+		NSColor.white.setStroke()
+		let line = NSBezierPath()
+		line.move(to: NSPoint(x: handle.minX + 4, y: handle.maxY - 3))
+		line.line(to: NSPoint(x: handle.maxX - 3, y: handle.minY + 4))
+		line.lineWidth = 1
+		line.stroke()
+	}
+	
+	func widthMenu(into menu: NSMenu) {
+		let sizes = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
+		let sub = NSMenu()
+		for percent in [25, 33, 50, 75, 100] {
+			let item = NSMenuItem(title: "\(percent)%", action: #selector(setWidthFromMenu(_:)), keyEquivalent: "")
+			item.tag = percent
+			item.target = self
+			sub.addItem(item)
+		}
+		sizes.submenu = sub
+		menu.addItem(sizes)
+	}
+	
+	@objc func setWidthFromMenu(_ sender: NSMenuItem) {}
+}
+
+// MARK: Image tile
+
+fileprivate final class ViralImageTile: NSView {
+	weak var group: ViralImageGroupView?
+	var index = 0
+	var image: NSImage?
+	var hovering = false
+	var resizing = false
+	var startX: CGFloat = 0
+	var startWidth: CGFloat = 0
+	
+	override var isFlipped: Bool { return true }
+	
+	var handleRect: NSRect {
+		return NSRect(x: bounds.maxX - EMetrics.handle, y: bounds.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
+	}
+	var isSelected: Bool { return group?.isActive == true && group?.selectedIndex == index }
+	
+	override func draw(_ dirtyRect: NSRect) {
+		if let image {
+			image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+		} else {
+			(group?.color ?? .textColor).withAlphaComponent(0.08).setFill()
+			bounds.fill()
+			let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
+			let text = NSAttributedString(string: "Missing image", attributes: attrs)
+			text.draw(at: NSPoint(x: bounds.midX - text.size().width / 2, y: bounds.midY - text.size().height / 2))
+		}
+		
+		if isSelected || hovering || resizing {
+			let selected = isSelected || resizing
+			(selected ? NSColor.controlAccentColor : (group?.color ?? .textColor).withAlphaComponent(0.3)).setStroke()
+			let path = NSBezierPath(rect: bounds.insetBy(dx: selected ? 1 : 0.5, dy: selected ? 1 : 0.5))
+			path.lineWidth = selected ? 2 : 1
+			path.stroke()
+			group?.drawHandle(in: bounds)
+		}
+	}
+	
+	override func updateTrackingAreas() {
+		super.updateTrackingAreas()
+		for area in trackingAreas { removeTrackingArea(area) }
+		addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+	}
+	override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+	override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+	
+	override func resetCursorRects() {
+		addCursorRect(handleRect, cursor: .resizeLeftRight)
+	}
+	
+	override func mouseDown(with event: NSEvent) {
+		guard let group else { return }
+		group.select(index)
+		let point = convert(event.locationInWindow, from: nil)
+		if handleRect.insetBy(dx: -3, dy: -3).contains(point) {
+			resizing = true
+			startX = group.convert(event.locationInWindow, from: nil).x
+			startWidth = frame.width
+		}
+	}
+	
+	override func mouseDragged(with event: NSEvent) {
+		guard resizing, let group else { return }
+		let x = group.convert(event.locationInWindow, from: nil).x
+		let width = max(40, min(group.embedWidth, startWidth + x - startX))
+		group.preview(index: index, width: width)
+	}
+	
+	override func mouseUp(with event: NSEvent) {
+		guard resizing, let group else { return }
+		resizing = false
+		group.commit(index: index, width: frame.width)
+	}
+	
+	override func menu(for event: NSEvent) -> NSMenu? {
+		group?.select(index)
+		return group?.contextMenu()
+	}
+}
+
+// MARK: Image group
+
+fileprivate final class ViralImageGroupView: ViralEmbedView {
+	var items: [EmbedLine] = []
+	var tiles: [ViralImageTile] = []
+	var selectedIndex = 0
+	var previewWidths: [Int: CGFloat] = [:]
+	
+	override init(host: BeatTextView) {
+		super.init(host: host)
+		kind = .image
+	}
+	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+	
+	override var totalHeight: CGFloat {
+		return viralGroupLayout(items, width: embedWidth, settings: settings).height
+	}
+	
+	override func load(text: String, lines: [String]) {
+		sourceText = text
+		items = lines.compactMap { EmbedLine.parse($0) }
+		reloadTiles()
+	}
+	
+	func reloadTiles() {
+		while tiles.count < items.count {
+			let tile = ViralImageTile(frame: .zero)
+			tile.group = self
+			addSubview(tile)
+			tiles.append(tile)
+		}
+		while tiles.count > items.count { tiles.removeLast().removeFromSuperview() }
+		for (i, tile) in tiles.enumerated() {
+			tile.index = i
+			tile.image = items[i].ids.first.flatMap { ViralImages.image($0, settings: settings) }
+		}
+		selectedIndex = min(selectedIndex, max(items.count - 1, 0))
+		relayout()
+	}
+	
+	func relayout() {
+		let frames = viralGroupLayout(items, width: embedWidth, settings: settings, override: previewWidths).frames
+		for (i, tile) in tiles.enumerated() where i < frames.count {
+			if tile.frame != frames[i] { tile.frame = frames[i] }
+			tile.needsDisplay = true
+		}
+		window?.invalidateCursorRects(for: self)
+	}
+	
+	override func activate(atEnd: Bool) {
+		selectedIndex = atEnd ? max(items.count - 1, 0) : 0
+		super.activate(atEnd: atEnd)
+		if selectedIndex < tiles.count { tiles[selectedIndex].scrollToVisible(tiles[selectedIndex].bounds) }
+	}
+	
+	func select(_ index: Int) {
+		selectedIndex = index
+		if !isActive { window?.makeFirstResponder(self) }
+		redraw()
+	}
+	
+	func preview(index: Int, width: CGFloat) {
+		previewWidths = [index: width]
+		relayout()
+		// Grow the view while dragging so the image isn't clipped
+		let height = viralGroupLayout(items, width: embedWidth, settings: settings, override: previewWidths).height
+		if height > frame.height { setFrameSize(NSSize(width: frame.width, height: height)) }
+	}
+	
+	func commit(index: Int, width: CGFloat) {
+		previewWidths = [:]
+		guard index < items.count else { return }
+		items[index].width = min(max(Int((width / max(embedWidth, 1) * 100).rounded()), 5), 100)
+		relayout()
+		write(items.map { $0.text })
+	}
+	
+	override func setWidthFromMenu(_ sender: NSMenuItem) {
+		guard selectedIndex < items.count else { return }
+		items[selectedIndex].width = sender.tag
+		relayout()
+		write(items.map { $0.text })
+	}
+	
+	override func addImages(_ images: [NSImage]) {
+		let lines = newImageLines(images)
+		guard !lines.isEmpty else { return }
+		let at = min(selectedIndex + 1, items.count)
+		items.insert(contentsOf: lines, at: at)
+		selectedIndex = at + lines.count - 1
+		reloadTiles()
+		write(items.map { $0.text })
+	}
+	
+	func deleteSelected() {
+		guard selectedIndex < items.count else { return }
+		items.remove(at: selectedIndex)
+		if items.isEmpty {
+			host?.deleteEmbed(self)
+			return
+		}
+		selectedIndex = min(selectedIndex, items.count - 1)
+		reloadTiles()
+		write(items.map { $0.text })
+	}
+	
+	@objc func delete(_ sender: Any?) { deleteSelected() }
+	@objc func deleteImageFromMenu(_ sender: Any?) { deleteSelected() }
+	
+	override func keyDown(with event: NSEvent) {
+		switch event.keyCode {
+		case 51, 117: deleteSelected()
+		case 123:
+			if selectedIndex > 0 { select(selectedIndex - 1) } else { host?.exitEmbed(self, below: false) }
+		case 124:
+			if selectedIndex < items.count - 1 { select(selectedIndex + 1) } else { host?.exitEmbed(self, below: true) }
+		default: super.keyDown(with: event)
+		}
+	}
+	
+	func contextMenu() -> NSMenu {
+		let menu = NSMenu()
+		widthMenu(into: menu)
+		menu.addItem(NSMenuItem.separator())
+		let add = NSMenuItem(title: "Add Images…", action: #selector(chooseAndAddImages(_:)), keyEquivalent: "")
+		add.target = self
+		menu.addItem(add)
+		let delete = NSMenuItem(title: "Delete Image", action: #selector(deleteImageFromMenu(_:)), keyEquivalent: "")
+		delete.target = self
+		menu.addItem(delete)
+		return menu
+	}
+	
+	override func menu(for event: NSEvent) -> NSMenu? { return contextMenu() }
+}
+
+// MARK: Carousel
+
+fileprivate final class ViralCarouselView: ViralEmbedView {
+	var item = EmbedLine(kind: .carousel, ids: [], width: 100)
+	var index = 0
+	var hovering = false
+	var resizing = false
+	var resizeStartX: CGFloat = 0
+	var resizeStartWidth: CGFloat = 0
+	var previewWidth: CGFloat? = nil
+	
+	let previousButton = NSButton(frame: .zero)
+	let nextButton = NSButton(frame: .zero)
+	let addButton = NSButton(frame: .zero)
+	let counter = NSTextField(labelWithString: "")
+	
+	static let aspect: CGFloat = 0.6
+	
+	static func height(for item: EmbedLine, width: CGFloat) -> CGFloat {
+		let w = min(width, width * CGFloat(item.width) / 100)
+		return EMetrics.marginTop + floor(w * aspect) + EMetrics.carouselBottom
+	}
+	
+	override init(host: BeatTextView) {
+		super.init(host: host)
+		kind = .carousel
+		setup(previousButton, symbol: "chevron.left.circle.fill", fallback: "‹", tip: "Previous image", action: #selector(showPrevious(_:)))
+		setup(nextButton, symbol: "chevron.right.circle.fill", fallback: "›", tip: "Next image", action: #selector(showNext(_:)))
+		setup(addButton, symbol: "plus.circle.fill", fallback: "+", tip: "Add images", action: #selector(chooseAndAddImages(_:)))
+		counter.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+		counter.textColor = .secondaryLabelColor
+		counter.alignment = .center
+		addSubview(counter)
+	}
+	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+	
+	func setup(_ button: NSButton, symbol: String, fallback: String, tip: String, action: Selector) {
+		button.isBordered = false
+		button.bezelStyle = .regularSquare
+		button.title = ""
+		button.toolTip = tip
+		if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip) {
+			button.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 24, weight: .regular)) ?? image
+			button.imagePosition = .imageOnly
+			button.imageScaling = .scaleProportionallyUpOrDown
+		} else {
+			button.title = fallback
+		}
+		button.contentTintColor = NSColor(white: 0.1, alpha: 0.7)
+		button.wantsLayer = true
+		button.layer?.shadowColor = NSColor.white.cgColor
+		button.layer?.shadowOpacity = 0.9
+		button.layer?.shadowRadius = 3
+		button.layer?.shadowOffset = .zero
+		button.target = self
+		button.action = action
+		addSubview(button)
+	}
+	
+	var boxWidth: CGFloat { return floor(min(embedWidth, previewWidth ?? embedWidth * CGFloat(item.width) / 100)) }
+	var boxRect: NSRect { return NSRect(x: 0, y: EMetrics.marginTop, width: boxWidth, height: floor(boxWidth * ViralCarouselView.aspect)) }
+	var handleRect: NSRect {
+		let box = boxRect
+		return NSRect(x: box.maxX - EMetrics.handle, y: box.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
+	}
+	
+	override var totalHeight: CGFloat { return ViralCarouselView.height(for: item, width: embedWidth) }
+	
+	override func load(text: String, lines: [String]) {
+		sourceText = text
+		item = EmbedLine.parse(lines.first ?? "") ?? EmbedLine(kind: .carousel, ids: [], width: 100)
+		index = min(index, max(item.ids.count - 1, 0))
+		relayout()
+	}
+	
+	var currentImage: NSImage? {
+		guard index < item.ids.count else { return nil }
+		return ViralImages.image(item.ids[index], settings: settings)
+	}
+	
+	func relayout() {
+		let box = boxRect
+		let size: CGFloat = 30
+		previousButton.frame = NSRect(x: box.minX + 8, y: box.midY - size / 2, width: size, height: size)
+		nextButton.frame = NSRect(x: box.maxX - 8 - size, y: box.midY - size / 2, width: size, height: size)
+		addButton.frame = NSRect(x: box.minX + 8, y: box.minY + 8, width: 24, height: 24)
+		let many = item.ids.count > 1
+		previousButton.isHidden = !many
+		nextButton.isHidden = !many
+		counter.stringValue = item.ids.isEmpty ? "" : "\(index + 1) / \(item.ids.count)"
+		counter.frame = NSRect(x: box.minX, y: box.maxY + 4, width: box.width, height: 16)
+		window?.invalidateCursorRects(for: self)
+		needsDisplay = true
+	}
+	
+	override func draw(_ dirtyRect: NSRect) {
+		let box = boxRect
+		let path = NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6)
+		color.withAlphaComponent(0.05).setFill()
+		path.fill()
+		
+		if let image = currentImage {
+			let size = ViralImages.pixelSize(image)
+			let area = box.insetBy(dx: 4, dy: 4)
+			let scale = min(area.width / max(size.width, 1), area.height / max(size.height, 1))
+			let w = size.width * scale, h = size.height * scale
+			let rect = NSRect(x: area.midX - w / 2, y: area.midY - h / 2, width: w, height: h)
+			NSGraphicsContext.saveGraphicsState()
+			path.addClip()
+			image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+			NSGraphicsContext.restoreGraphicsState()
+		} else {
+			let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor]
+			let text = NSAttributedString(string: item.ids.isEmpty ? "Paste images here, or click +" : "Missing image", attributes: attrs)
+			let s = text.size()
+			text.draw(at: NSPoint(x: box.midX - s.width / 2, y: box.midY - s.height / 2))
+		}
+		
+		if isActive || hovering || resizing {
+			(isActive || resizing ? NSColor.controlAccentColor : color.withAlphaComponent(0.25)).setStroke()
+			let border = NSBezierPath(roundedRect: box.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
+			border.lineWidth = isActive ? 2 : 1
+			border.stroke()
+			drawHandle(in: box)
+		}
+	}
+	
+	override func updateTrackingAreas() {
+		super.updateTrackingAreas()
+		for area in trackingAreas { removeTrackingArea(area) }
+		addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+	}
+	override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+	override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+	override func resetCursorRects() { addCursorRect(handleRect, cursor: .resizeLeftRight) }
+	
+	override func mouseDown(with event: NSEvent) {
+		window?.makeFirstResponder(self)
+		let point = convert(event.locationInWindow, from: nil)
+		if handleRect.insetBy(dx: -3, dy: -3).contains(point) {
+			resizing = true
+			resizeStartX = point.x
+			resizeStartWidth = boxWidth
+		}
+	}
+	
+	override func mouseDragged(with event: NSEvent) {
+		guard resizing else { return }
+		let x = convert(event.locationInWindow, from: nil).x
+		previewWidth = max(120, min(embedWidth, resizeStartWidth + x - resizeStartX))
+		let height = EMetrics.marginTop + floor(boxWidth * ViralCarouselView.aspect) + EMetrics.carouselBottom
+		if height > frame.height { setFrameSize(NSSize(width: frame.width, height: height)) }
+		relayout()
+	}
+	
+	override func mouseUp(with event: NSEvent) {
+		guard resizing else { return }
+		resizing = false
+		let width = boxWidth
+		previewWidth = nil
+		item.width = min(max(Int((width / max(embedWidth, 1) * 100).rounded()), 5), 100)
+		relayout()
+		write([item.text])
+	}
+	
+	@objc func showPrevious(_ sender: Any?) {
+		guard !item.ids.isEmpty else { return }
+		index = (index - 1 + item.ids.count) % item.ids.count
+		relayout()
+	}
+	
+	@objc func showNext(_ sender: Any?) {
+		guard !item.ids.isEmpty else { return }
+		index = (index + 1) % item.ids.count
+		relayout()
+	}
+	
+	override func addImages(_ images: [NSImage]) {
+		let lines = newImageLines(images)
+		guard !lines.isEmpty else { return }
+		let ids = lines.compactMap { $0.ids.first }
+		let at = item.ids.isEmpty ? 0 : min(index + 1, item.ids.count)
+		item.ids.insert(contentsOf: ids, at: at)
+		index = at
+		relayout()
+		write([item.text])
+	}
+	
+	func removeCurrent() {
+		guard index < item.ids.count else {
+			host?.deleteEmbed(self)
+			return
+		}
+		item.ids.remove(at: index)
+		index = min(index, max(item.ids.count - 1, 0))
+		relayout()
+		write([item.text])
+	}
+	
+	@objc func delete(_ sender: Any?) { removeCurrent() }
+	@objc func removeImageFromMenu(_ sender: Any?) { removeCurrent() }
+	@objc func deleteCarouselFromMenu(_ sender: Any?) { host?.deleteEmbed(self) }
+	
+	override func setWidthFromMenu(_ sender: NSMenuItem) {
+		item.width = sender.tag
+		relayout()
+		write([item.text])
+	}
+	
+	override func keyDown(with event: NSEvent) {
+		switch event.keyCode {
+		case 123: showPrevious(nil)
+		case 124: showNext(nil)
+		case 51, 117: removeCurrent()
+		default: super.keyDown(with: event)
+		}
+	}
+	
+	override func menu(for event: NSEvent) -> NSMenu? {
+		window?.makeFirstResponder(self)
+		let menu = NSMenu()
+		let add = NSMenuItem(title: "Add Images…", action: #selector(chooseAndAddImages(_:)), keyEquivalent: "")
+		add.target = self
+		menu.addItem(add)
+		if !item.ids.isEmpty {
+			let remove = NSMenuItem(title: "Remove This Image", action: #selector(removeImageFromMenu(_:)), keyEquivalent: "")
+			remove.target = self
+			menu.addItem(remove)
+		}
+		menu.addItem(NSMenuItem.separator())
+		widthMenu(into: menu)
+		menu.addItem(NSMenuItem.separator())
+		let delete = NSMenuItem(title: "Delete Carousel", action: #selector(deleteCarouselFromMenu(_:)), keyEquivalent: "")
+		delete.target = self
+		menu.addItem(delete)
+		return menu
+	}
+}
+
+// MARK: - Text view integration (images)
+
+public extension BeatTextView {
+	
+	fileprivate var embedViews: [ViralEmbedView] {
+		get { return objc_getAssociatedObject(self, &ViralEmbedViewsKey) as? [ViralEmbedView] ?? [] }
+		set { objc_setAssociatedObject(self, &ViralEmbedViewsKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+	}
+	
+	fileprivate var pendingEmbedFocus: Int? {
+		get { return objc_getAssociatedObject(self, &ViralPendingEmbedFocusKey) as? Int }
+		set { objc_setAssociatedObject(self, &ViralPendingEmbedFocusKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+	}
+	
+	fileprivate struct EmbedBlock {
+		var range: NSRange
+		var lines: [String]
+		var kind: EmbedKind
+	}
+	
+	/// Finds image groups and carousels from the text
+	fileprivate func embedBlocks() -> [EmbedBlock] {
+		let ns = self.string as NSString
+		var blocks: [EmbedBlock] = []
+		var current: EmbedBlock? = nil
+		var location = 0
+		
+		while location < ns.length {
+			let lineRange = ns.lineRange(for: NSRange(location: location, length: 0))
+			if lineRange.length == 0 { break }
+			var content = lineRange
+			if content.length > 0 && ns.character(at: NSMaxRange(content) - 1) == 10 { content.length -= 1 }
+			
+			var embed: EmbedLine? = nil
+			if content.length > 10 {
+				let line = ns.substring(with: content)
+				if line.trimmingCharacters(in: .whitespaces).hasPrefix("![") { embed = EmbedLine.parse(line) }
+				
+				if let embed {
+					if embed.kind == .image, var block = current, block.kind == .image {
+						block.lines.append(line)
+						block.range.length = NSMaxRange(content) - block.range.location
+						current = block
+					} else {
+						if let block = current { blocks.append(block) }
+						current = EmbedBlock(range: content, lines: [line], kind: embed.kind)
+						if embed.kind == .carousel, let block = current {
+							blocks.append(block)
+							current = nil
+						}
+					}
+				}
+			}
+			if embed == nil, let block = current {
+				blocks.append(block)
+				current = nil
+			}
+			location = NSMaxRange(lineRange)
+		}
+		if let block = current { blocks.append(block) }
+		return blocks
+	}
+	
+	/// Image lines starting at the given location (a single line for a carousel)
+	fileprivate func embedLines(at location: Int) -> [EmbedLine] {
+		let ns = self.string as NSString
+		var result: [EmbedLine] = []
+		var loc = location
+		while loc < ns.length {
+			let lineRange = ns.lineRange(for: NSRange(location: loc, length: 0))
+			if lineRange.length == 0 { break }
+			var content = lineRange
+			if content.length > 0 && ns.character(at: NSMaxRange(content) - 1) == 10 { content.length -= 1 }
+			guard content.length > 10, let embed = EmbedLine.parse(ns.substring(with: content)) else { break }
+			if embed.kind == .carousel {
+				if result.isEmpty { result.append(embed) }
+				break
+			}
+			result.append(embed)
+			loc = NSMaxRange(lineRange)
+		}
+		return result
+	}
+	
+	fileprivate func embedHeightAtLocation(_ location: Int) -> CGFloat? {
+		let lines = embedLines(at: location)
+		guard let first = lines.first else { return nil }
+		if first.kind == .carousel { return ViralCarouselView.height(for: first, width: tableWidth) }
+		return viralGroupLayout(lines, width: tableWidth, settings: editorDelegate?.documentSettings).height
+	}
+	
+	fileprivate func updateEmbedViews() {
+		guard let lm = layoutManager, let tc = textContainer else { return }
+		let blocks = embedBlocks()
+		var unused = embedViews
+		var ordered: [ViralEmbedView] = []
+		
+		for block in blocks {
+			let candidates = unused.indices.filter { unused[$0].kind == block.kind }
+			if let index = candidates.min(by: { abs(unused[$0].blockRange.location - block.range.location) < abs(unused[$1].blockRange.location - block.range.location) }) {
+				ordered.append(unused.remove(at: index))
+			} else {
+				let view: ViralEmbedView = (block.kind == .image) ? ViralImageGroupView(host: self) : ViralCarouselView(host: self)
+				addSubview(view)
+				ordered.append(view)
+			}
+		}
+		for view in unused {
+			if window?.firstResponder === view { window?.makeFirstResponder(self) }
+			view.removeFromSuperview()
+		}
+		
+		let width = tableWidth
+		let ns = self.string as NSString
+		
+		for (i, block) in blocks.enumerated() {
+			let view = ordered[i]
+			view.blockRange = block.range
+			let widthChanged = view.embedWidth != width
+			view.embedWidth = width
+			
+			let text = ns.substring(with: block.range)
+			if text != view.sourceText || widthChanged {
+				view.load(text: text, lines: block.lines)
+			}
+			
+			let glyph = lm.glyphIndexForCharacter(at: block.range.location)
+			let lineRect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+			let origin = textContainerOrigin
+			let frame = NSRect(x: origin.x + tc.lineFragmentPadding, y: origin.y + lineRect.minY,
+							   width: width + 24, height: view.totalHeight)
+			if view.frame != frame { view.frame = frame }
+		}
+		
+		embedViews = ordered
+		
+		if let pending = pendingEmbedFocus, let view = ordered.first(where: { $0.blockRange.location == pending }) {
+			pendingEmbedFocus = nil
+			view.activate(atEnd: false)
+		}
+	}
+	
+	/// Replaces block text in the document. Only changed lines are replaced, which keeps the parser happy.
+	fileprivate func replaceBlockText(_ range: NSRange, with text: String) {
+		guard let textActions = editorDelegate?.textActions else { return }
+		let ns = self.string as NSString
+		guard NSMaxRange(range) <= ns.length else { return }
+		
+		isWritingTable = true
+		defer { isWritingTable = false }
+		if window?.firstResponder !== self {
+			self.setSelectedRange(NSRange(location: range.location, length: 0))
+		}
+		
+		let old = ns.substring(with: range).components(separatedBy: "\n")
+		let new = text.components(separatedBy: "\n")
+		
+		var starts: [Int] = []
+		var pos = range.location
+		for line in old { starts.append(pos); pos += (line as NSString).length + 1 }
+		
+		var prefix = 0
+		while prefix < min(old.count, new.count) && old[prefix] == new[prefix] { prefix += 1 }
+		var suffix = 0
+		while suffix < min(old.count, new.count) - prefix && old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+		
+		if old.count == new.count {
+			for i in stride(from: old.count - 1 - suffix, through: prefix, by: -1) where old[i] != new[i] {
+				textActions.replace(NSRange(location: starts[i], length: (old[i] as NSString).length), with: new[i])
+			}
+		} else {
+			let oldMid = Array(old[prefix..<(old.count - suffix)])
+			let newMid = Array(new[prefix..<(new.count - suffix)])
+			
+			if oldMid.count > 0 {
+				let first = starts[prefix]
+				let lastIndex = old.count - suffix - 1
+				let end = starts[lastIndex] + (old[lastIndex] as NSString).length
+				if newMid.count > 0 {
+					textActions.replace(NSRange(location: first, length: end - first), with: newMid.joined(separator: "\n"))
+				} else if prefix > 0 {
+					textActions.replace(NSRange(location: first - 1, length: end - first + 1), with: "")
+				} else {
+					textActions.replace(NSRange(location: first, length: end - first + 1), with: "")
+				}
+			} else if prefix < old.count {
+				textActions.replace(NSRange(location: starts[prefix], length: 0), with: newMid.joined(separator: "\n") + "\n")
+			} else {
+				textActions.replace(NSRange(location: NSMaxRange(range), length: 0), with: "\n" + newMid.joined(separator: "\n"))
+			}
+		}
+		
+		// The block height lives on its first line, so make sure that line is laid out again
+		let length = (self.string as NSString).length
+		if range.location < length {
+			layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
+		}
+	}
+	
+	fileprivate func deleteEmbed(_ view: ViralEmbedView) {
+		guard let textActions = editorDelegate?.textActions else { return }
+		let ns = self.string as NSString
+		var range = view.blockRange
+		guard NSMaxRange(range) <= ns.length else { return }
+		if NSMaxRange(range) < ns.length { range.length += 1 }
+		window?.makeFirstResponder(self)
+		textActions.replace(range, with: "")
+		self.setSelectedRange(NSRange(location: min(range.location, (self.string as NSString).length), length: 0))
+		scheduleTableUpdate()
+	}
+	
+	/// Moves the caret out of an image block into the script
+	fileprivate func exitEmbed(_ view: ViralEmbedView, below: Bool) {
+		guard let textActions = editorDelegate?.textActions else { return }
+		window?.makeFirstResponder(self)
+		
+		let range = view.blockRange
+		if below {
+			let length = (self.string as NSString).length
+			if NSMaxRange(range) >= length {
+				textActions.replace(NSRange(location: length, length: 0), with: "\n")
+			}
+			let ns = self.string as NSString
+			let target = min(NSMaxRange(range) + 1, ns.length)
+			self.setSelectedRange(NSRange(location: target, length: 0))
+		} else {
+			if range.location == 0 {
+				textActions.replace(NSRange(location: 0, length: 0), with: "\n")
+				self.setSelectedRange(NSRange(location: 0, length: 0))
+			} else {
+				self.setSelectedRange(NSRange(location: range.location - 1, length: 0))
+			}
+		}
+		scrollRangeToVisible(self.selectedRange())
+	}
+	
+	/// Inserts image lines at the caret. Images go on their own lines, after the current line if it has text.
+	fileprivate func insertEmbedLines(_ lines: [String], focus: Bool = false) {
+		guard let textActions = editorDelegate?.textActions, !lines.isEmpty else { return }
+		let ns = self.string as NSString
+		let location = min(self.selectedRange().location, ns.length)
+		var lineOnly = ns.lineRange(for: NSRange(location: location, length: 0))
+		if lineOnly.length > 0 && ns.character(at: NSMaxRange(lineOnly) - 1) == 10 { lineOnly.length -= 1 }
+		let current = ns.substring(with: lineOnly)
+		
+		let block = lines.joined(separator: "\n")
+		var text = block
+		var range: NSRange
+		var offset = 0
+		
+		if current.trimmingCharacters(in: .whitespaces).isEmpty {
+			range = lineOnly
+		} else if EmbedLine.parse(current)?.kind == .image && lines.allSatisfy({ EmbedLine.parse($0)?.kind == .image }) {
+			range = NSRange(location: NSMaxRange(lineOnly), length: 0)
+			text = "\n" + text
+			offset = 1
+		} else {
+			range = NSRange(location: NSMaxRange(lineOnly), length: 0)
+			text = "\n\n" + text
+			offset = 2
+		}
+		
+		let after = NSMaxRange(range)
+		if after >= ns.length || ns.character(at: after) != 10 { text += "\n" }
+		
+		textActions.replace(range, with: text)
+		
+		let start = range.location + offset
+		if focus {
+			pendingEmbedFocus = start
+		} else {
+			let end = min(start + (block as NSString).length + 1, (self.string as NSString).length)
+			self.setSelectedRange(NSRange(location: end, length: 0))
+		}
+		scheduleTableUpdate()
+	}
+	
+	fileprivate func insertImages(_ images: [NSImage]) {
+		guard let settings = editorDelegate?.documentSettings else { return }
+		let lines = images.compactMap { image -> String? in
+			guard let id = ViralImages.add(image, settings: settings) else { return nil }
+			return EmbedLine(kind: .image, ids: [id], width: ViralImages.defaultWidth(image, textWidth: tableWidth)).text
+		}
+		insertEmbedLines(lines)
+	}
+	
+	fileprivate func insertCarousel() {
+		insertEmbedLines([EmbedLine(kind: .carousel, ids: [], width: 100).text], focus: true)
+	}
+	
+	fileprivate func chooseImages(_ completion: @escaping ([NSImage]) -> Void) {
+		let panel = NSOpenPanel()
+		panel.allowsMultipleSelection = true
+		panel.canChooseDirectories = false
+		panel.canChooseFiles = true
+		panel.allowedContentTypes = [.image]
+		panel.prompt = "Add"
+		
+		let handler: (NSApplication.ModalResponse) -> Void = { response in
+			guard response == .OK else { return }
+			let images = panel.urls.compactMap { NSImage(contentsOf: $0) }
+			if !images.isEmpty { completion(images) }
+		}
+		if let window { panel.beginSheetModal(for: window, completionHandler: handler) }
+		else { handler(panel.runModal()) }
+	}
+	
+	/// `/image` opens a file dialog, `/carousel` inserts a carousel
+	fileprivate func insertEmbedFromCommand() -> Bool {
+		let ns = self.string as NSString
+		var lineRange = ns.lineRange(for: NSRange(location: self.selectedRange().location, length: 0))
+		if lineRange.length > 0 && ns.character(at: NSMaxRange(lineRange) - 1) == 10 { lineRange.length -= 1 }
+		let command = ns.substring(with: lineRange).trimmingCharacters(in: .whitespaces).lowercased()
+		guard let textActions = editorDelegate?.textActions else { return false }
+		
+		if command == "/carousel" {
+			textActions.replace(lineRange, with: "")
+			self.setSelectedRange(NSRange(location: lineRange.location, length: 0))
+			insertCarousel()
+			return true
+		}
+		if command == "/image" || command == "/images" {
+			textActions.replace(lineRange, with: "")
+			self.setSelectedRange(NSRange(location: lineRange.location, length: 0))
+			chooseImages { [weak self] images in self?.insertImages(images) }
+			return true
+		}
+		return false
+	}
+	
+	/// Called from `paste:`. Returns `true` if images were pasted.
+	@objc func pasteImagesIfNeeded(_ pasteboard: NSPasteboard) -> Bool {
+		if let embed = window?.firstResponder as? ViralEmbedView, embed.host === self {
+			let images = viralImages(from: pasteboard)
+			if images.isEmpty { return false }
+			embed.addImages(images)
+			return true
+		}
+		let images = viralImages(from: pasteboard)
+		guard !images.isEmpty else { return false }
+		insertImages(images)
+		return true
+	}
+	
+	@objc func viralInsertImage(_ sender: Any?) {
+		chooseImages { [weak self] images in self?.insertImages(images) }
+	}
+	
+	@objc func viralInsertCarousel(_ sender: Any?) {
+		insertCarousel()
 	}
 }

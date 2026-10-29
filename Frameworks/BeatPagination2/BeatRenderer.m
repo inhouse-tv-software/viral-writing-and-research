@@ -196,6 +196,16 @@
     // Create attributed string with attributes for current style
     NSDictionary* attrs = [self attributesForLine:line dualDialogue:(block != nil) ? block.dualDialogueElement : false];
     
+#if TARGET_OS_OSX
+    // Viral images are rendered as rows of image attachments
+    if (line.type == action && line.isEmbedLine) {
+        if (line.embedHidden || line.embedRow == nil) return NSAttributedString.new;
+        NSParagraphStyle* embedStyle = attrs[NSParagraphStyleAttributeName];
+        CGFloat embedIndent = (embedStyle != nil) ? embedStyle.headIndent : 0.0;
+        return [BeatRenderer embedRowFor:line.embedRow indent:embedIndent width:[self widthFor:line] settings:self.settings firstOnPage:firstElementOnPage];
+    }
+#endif
+    
     // Support for empty character cues
     if (line.isAnyCharacter && line.stripFormatting.length == 0 && line.numberOfPrecedingFormattingCharacters == 1) {
         return [self emptyCharacterCueWith:attrs];
@@ -376,6 +386,163 @@
 #pragma mark Tables
 
 + (CGFloat)tableFontSize { return 10.0; }
+
+#pragma mark Images
+
++ (CGFloat)embedSpacing { return 8.0; }
+
+/// Returns `@[ image, width, height ]` rows for the given image line row
++ (NSArray<NSArray<NSArray*>*>*)embedLayoutFor:(NSArray<Line*>*)row width:(CGFloat)width settings:(BeatExportSettings*)settings
+{
+    NSMutableArray* rows = NSMutableArray.new;
+    Line* first = row.firstObject;
+    if (first == nil) return rows;
+    CGFloat gap = floor(width * 0.02);
+    
+    if (first.isEmbedCarouselLine) {
+        // A carousel can't scroll on paper, so its images are printed in a grid
+        NSArray<NSString*>* ids = first.embedImageIDs;
+        if (ids.count == 0) return rows;
+        CGFloat total = width * (CGFloat)first.embedWidthPercent / 100.0;
+        NSInteger perRow = MIN((NSInteger)ids.count, 4);
+        CGFloat w = floor((total - gap * (perRow - 1)) / perRow);
+        NSMutableArray* current = NSMutableArray.new;
+        for (NSString* ID in ids) {
+            [current addObject:[self embedItem:[self embedImageWithID:ID settings:settings] width:w]];
+            if (current.count == perRow) { [rows addObject:current]; current = NSMutableArray.new; }
+        }
+        if (current.count > 0) [rows addObject:current];
+    } else {
+        NSMutableArray* current = NSMutableArray.new;
+        for (Line* l in row) {
+            CGFloat w = floor(MIN(width, width * (CGFloat)l.embedWidthPercent / 100.0));
+            [current addObject:[self embedItem:[self embedImageWithID:l.embedImageIDs.firstObject settings:settings] width:w]];
+        }
+        if (current.count > 0) [rows addObject:current];
+    }
+    return rows;
+}
+
++ (NSArray*)embedItem:(BXImage*)image width:(CGFloat)width
+{
+    CGFloat aspect = 0.75;
+#if TARGET_OS_OSX
+    if (image != nil) {
+        NSImageRep* rep = image.representations.firstObject;
+        CGFloat pw = (rep.pixelsWide > 0) ? rep.pixelsWide : image.size.width;
+        CGFloat ph = (rep.pixelsHigh > 0) ? rep.pixelsHigh : image.size.height;
+        if (pw > 0 && ph > 0) aspect = ph / pw;
+    }
+#endif
+    id img = (image != nil) ? image : NSNull.null;
+    return @[img, @(width), @(floor(width * aspect))];
+}
+
++ (BXImage*)embedImageWithID:(NSString*)ID settings:(BeatExportSettings*)settings
+{
+#if TARGET_OS_OSX
+    static NSCache<NSString*, NSImage*>* cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = NSCache.new; });
+    
+    if (ID.length == 0) return nil;
+    NSImage* image = [cache objectForKey:ID];
+    if (image != nil) return image;
+    
+    BeatDocumentSettings* documentSettings = settings.documentSettings;
+    NSDictionary* images = [documentSettings get:@"ViralImages"];
+    if (![images isKindOfClass:NSDictionary.class]) return nil;
+    NSString* encoded = images[ID];
+    if (![encoded isKindOfClass:NSString.class]) return nil;
+    
+    NSData* data = [NSData.alloc initWithBase64EncodedString:encoded options:NSDataBase64DecodingIgnoreUnknownCharacters];
+    if (data == nil) return nil;
+    image = [NSImage.alloc initWithData:data];
+    if (image != nil) [cache setObject:image forKey:ID];
+    return image;
+#else
+    return nil;
+#endif
+}
+
++ (CGFloat)embedHeightFor:(NSArray<Line*>*)row width:(CGFloat)width settings:(BeatExportSettings*)settings
+{
+    CGFloat height = 0.0;
+    for (NSArray<NSArray*>* items in [self embedLayoutFor:row width:width settings:settings]) {
+        CGFloat rowHeight = 0.0;
+        for (NSArray* item in items) rowHeight = MAX(rowHeight, [item[2] floatValue]);
+        height += rowHeight + self.embedSpacing;
+    }
+    return ceil(height);
+}
+
+#if TARGET_OS_OSX
++ (NSMutableAttributedString*)embedRowFor:(NSArray<Line*>*)row indent:(CGFloat)indent width:(CGFloat)width settings:(BeatExportSettings*)settings firstOnPage:(bool)firstOnPage
+{
+    NSMutableAttributedString* result = NSMutableAttributedString.new;
+    NSArray* rows = [self embedLayoutFor:row width:width settings:settings];
+    CGFloat gap = floor(width * 0.02);
+    NSFont* font = [NSFont systemFontOfSize:1.0];
+    
+    for (NSInteger r = 0; r < rows.count; r++) {
+        NSArray<NSArray*>* items = rows[r];
+        CGFloat rowHeight = 0.0;
+        for (NSArray* item in items) rowHeight = MAX(rowHeight, [item[2] floatValue]);
+        
+        NSMutableParagraphStyle* pStyle = NSMutableParagraphStyle.new;
+        pStyle.firstLineHeadIndent = indent;
+        pStyle.headIndent = indent;
+        pStyle.minimumLineHeight = rowHeight;
+        pStyle.maximumLineHeight = rowHeight;
+        pStyle.paragraphSpacingBefore = (r == 0 && firstOnPage) ? 0.0 : self.embedSpacing;
+        pStyle.lineBreakMode = NSLineBreakByClipping;
+        
+        NSMutableAttributedString* rowString = NSMutableAttributedString.new;
+        for (NSInteger i = 0; i < items.count; i++) {
+            NSArray* item = items[i];
+            CGFloat w = [item[1] floatValue];
+            CGFloat h = [item[2] floatValue];
+            NSImage* image = [item[0] isKindOfClass:NSImage.class] ? item[0] : [self embedPlaceholder];
+            
+            // Attachments sit on the baseline, so shorter images get empty space below them to align the row at the top
+            if (h < rowHeight) {
+                NSImage* original = image;
+                CGFloat padded = rowHeight;
+                image = [NSImage imageWithSize:NSMakeSize(w, padded) flipped:false drawingHandler:^BOOL(NSRect rect) {
+                    [original drawInRect:NSMakeRect(0, padded - h, w, h) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+                    return true;
+                }];
+                h = rowHeight;
+            }
+            
+            NSTextAttachment* attachment = NSTextAttachment.new;
+            attachment.image = image;
+            attachment.bounds = CGRectMake(0, 0, w, h);
+            [rowString appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
+            
+            if (i < items.count - 1) {
+                [rowString appendAttributedString:[NSAttributedString.alloc initWithString:@" " attributes:@{ NSKernAttributeName: @(gap) }]];
+            }
+        }
+        [rowString appendAttributedString:[NSAttributedString.alloc initWithString:@"\n"]];
+        [rowString addAttributes:@{ NSFontAttributeName: font, NSParagraphStyleAttributeName: pStyle, NSForegroundColorAttributeName: NSColor.blackColor } range:NSMakeRange(0, rowString.length)];
+        [result appendAttributedString:rowString];
+    }
+    
+    // Don't let the render layout manager clamp the line height
+    if (result.length > 0) [result addAttribute:@"BeatTableCell" value:@YES range:NSMakeRange(0, result.length)];
+    return result;
+}
+
++ (NSImage*)embedPlaceholder
+{
+    return [NSImage imageWithSize:NSMakeSize(400, 300) flipped:false drawingHandler:^BOOL(NSRect rect) {
+        [[NSColor colorWithWhite:0.9 alpha:1.0] setFill];
+        NSRectFill(rect);
+        return true;
+    }];
+}
+#endif
 + (CGFloat)tableBottomSpacing { return 10.0; }
 
 + (bool)isTableLine:(Line*)l { return l.type == action && (l.isTableRow || l.isTableSeparator); }

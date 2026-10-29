@@ -959,6 +959,52 @@ static NSArray<NSString*>* BeatWrapTableCell(NSString* text, NSInteger width)
     return lines;
 }
 
+#pragma mark - Viral images
+
+static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
+{
+    if (string.length < prefix.length + 1) return nil;
+    NSString* t = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if (![t hasPrefix:prefix] || ![t hasSuffix:@")"] || t.length < prefix.length + 1) return nil;
+    return [t substringWithRange:NSMakeRange(prefix.length, t.length - prefix.length - 1)];
+}
+
+- (NSString*)embedInner
+{
+    NSString* inner = BeatEmbedInner(self.string, @"![image](viral:");
+    if (inner == nil) inner = BeatEmbedInner(self.string, @"![carousel](viral:");
+    return inner;
+}
+
+- (bool)isEmbedImageLine { return BeatEmbedInner(self.string, @"![image](viral:") != nil; }
+- (bool)isEmbedCarouselLine { return BeatEmbedInner(self.string, @"![carousel](viral:") != nil; }
+- (bool)isEmbedLine { return self.isEmbedImageLine || self.isEmbedCarouselLine; }
+
+- (NSArray<NSString*>*)embedImageIDs
+{
+    NSString* inner = self.embedInner;
+    if (inner == nil) return @[];
+    NSString* ids = [inner componentsSeparatedByString:@" "].firstObject;
+    NSMutableArray* result = NSMutableArray.new;
+    for (NSString* part in [ids componentsSeparatedByString:@","]) {
+        NSString* ID = [part stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (ID.length > 0) [result addObject:ID];
+    }
+    return result;
+}
+
+- (NSInteger)embedWidthPercent
+{
+    NSString* inner = self.embedInner;
+    if (inner == nil) return 100;
+    NSArray* parts = [inner componentsSeparatedByString:@" "];
+    for (NSInteger i = 1; i < parts.count; i++) {
+        NSInteger w = [parts[i] integerValue];
+        if (w > 0) return MIN(MAX(w, 5), 100);
+    }
+    return 100;
+}
+
 - (NSString*)tableRowStringForWidth:(NSInteger)totalWidth
 {
     NSArray<NSString*>* cells = self.tableCells;

@@ -376,6 +376,37 @@
 		}
 	}
 	
+	// Viral images: consecutive image lines are laid out side by side in rows
+	{
+		NSMutableArray<Line*>* row = nil;
+		NSInteger rowWidth = 0;
+		Line* previous = nil;
+		for (Line* l in self.lines) {
+			l.embedRow = nil;
+			l.embedHidden = false;
+			
+			if (l.type == action && l.isEmbedCarouselLine) {
+				l.embedRow = @[l];
+				row = nil;
+			} else if (l.type == action && l.isEmbedImageLine) {
+				NSInteger w = l.embedWidthPercent;
+				bool continues = (row != nil && previous != nil && previous.isEmbedImageLine && !l.beginsNewParagraph);
+				if (continues && rowWidth + 2 + w <= 100) {
+					[row addObject:l];
+					rowWidth += 2 + w;
+					l.embedHidden = true;
+				} else {
+					row = [NSMutableArray arrayWithObject:l];
+					rowWidth = w;
+					l.embedRow = row;
+				}
+			} else {
+				row = nil;
+			}
+			previous = l;
+		}
+	}
+	
 	// Reset queue and use cached pagination if applicable
 	_lineQueue = [NSMutableArray arrayWithArray:[self.lines subarrayWithRange:NSMakeRange(index, self.lines.count - index)]];
 	

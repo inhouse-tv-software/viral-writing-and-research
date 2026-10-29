@@ -67,6 +67,12 @@ NS_ASSUME_NONNULL_BEGIN
 #if TARGET_OS_OSX
 /// Builds a table row as a real `NSTextTable` row. Used for both rendering and height calculation, so they always match.
 + (NSMutableAttributedString*)tableRowFor:(Line*)line font:(BXFont*)font indent:(CGFloat)indent width:(CGFloat)width header:(bool)header topBorder:(bool)topBorder;
+/// Builds a row of images (or a carousel printed as a grid). `row` comes from `Line.embedRow`.
++ (NSMutableAttributedString*)embedRowFor:(NSArray<Line*>*)row indent:(CGFloat)indent width:(CGFloat)width settings:(BeatExportSettings*)settings firstOnPage:(bool)firstOnPage;
+#endif
+/// Height of an image row, including the space above it
++ (CGFloat)embedHeightFor:(NSArray<Line*>*)row width:(CGFloat)width settings:(BeatExportSettings*)settings;
+#if TARGET_OS_OSX
 /// Measures the given attributed string with a real layout manager (supports text tables)
 + (CGFloat)layoutHeightFor:(NSAttributedString*)string width:(CGFloat)width;
 #endif
