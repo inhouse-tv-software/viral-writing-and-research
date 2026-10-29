@@ -88,7 +88,8 @@ static NSTouchBarItemIdentifier ColorPickerItemIdentifier = @"com.TouchBarCatalo
 @implementation BeatTextView
 
 + (CGFloat)linePadding {
-	return 100.0;
+	// Viral: half of the original page margin
+	return 50.0;
 }
 
 -(instancetype)initWithCoder:(NSCoder *)coder

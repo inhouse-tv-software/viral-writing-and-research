@@ -410,9 +410,9 @@
         NSMutableArray<NSNumber*>* aspects = NSMutableArray.new;
         NSMutableArray* images = NSMutableArray.new;
         for (NSString* ID in ids) {
-            BXImage* image = [self embedImageWithID:ID settings:settings];
+            BXImage* image = [self embedImageForEntry:ID settings:settings];
             [images addObject:(image != nil) ? image : NSNull.null];
-            [aspects addObject:@([self embedAspect:image])];
+            [aspects addObject:@([self embedAspectForEntry:ID image:image])];
         }
         
         CGFloat height = floor(width * (CGFloat)first.embedHeightPercent / 100.0);
@@ -448,17 +448,74 @@
     } else {
         NSMutableArray* current = NSMutableArray.new;
         for (Line* l in row) {
-            BXImage* image = [self embedImageWithID:l.embedImageIDs.firstObject settings:settings];
+            NSString* entry = l.embedImageIDs.firstObject;
+            BXImage* image = [self embedImageForEntry:entry settings:settings];
             CGFloat w = floor(MIN(width, width * (CGFloat)l.embedWidthPercent / 100.0));
             // Very tall images are made smaller so they fit on a page
-            CGFloat aspect = [self embedAspect:image];
+            CGFloat aspect = [self embedAspectForEntry:entry image:image];
             if (w * aspect > self.embedMaxHeight) w = floor(self.embedMaxHeight / aspect);
-            NSArray* item = [self embedItem:image width:w];
+            NSArray* item = @[ (image != nil) ? image : NSNull.null, @(w), @(floor(w * aspect)) ];
             [current addObject:[item arrayByAddingObject:@(l.embedRounded)]];
         }
         if (current.count > 0) [rows addObject:current];
     }
     return rows;
+}
+
+/// Video entries are URLs, optionally followed by `^` and a thumbnail image ID
++ (bool)embedEntryIsVideo:(NSString*)entry { return [entry containsString:@"://"]; }
+
++ (CGFloat)embedVideoAspect:(NSString*)url
+{
+    NSString* u = url.lowercaseString;
+    if ([u containsString:@"/shorts/"] || [u containsString:@"/reel"]) return 16.0 / 9.0;
+    if ([u containsString:@"instagram.com/p/"] || [u containsString:@"instagram.com/tv/"]) return 1.25;
+    return 9.0 / 16.0;
+}
+
++ (CGFloat)embedAspectForEntry:(NSString*)entry image:(BXImage*)image
+{
+    if ([self embedEntryIsVideo:entry]) return [self embedVideoAspect:entry];
+    return [self embedAspect:image];
+}
+
++ (BXImage*)embedImageForEntry:(NSString*)entry settings:(BeatExportSettings*)settings
+{
+    if (entry.length == 0) return nil;
+    if (![self embedEntryIsVideo:entry]) return [self embedImageWithID:entry settings:settings];
+#if TARGET_OS_OSX
+    // Videos print as their thumbnail with a play button
+    NSString* thumbID = nil;
+    NSRange caret = [entry rangeOfString:@"^" options:NSBackwardsSearch];
+    if (caret.location != NSNotFound) thumbID = [entry substringFromIndex:NSMaxRange(caret)];
+    NSImage* thumbnail = (thumbID.length > 0) ? [self embedImageWithID:thumbID settings:settings] : nil;
+    CGFloat aspect = [self embedVideoAspect:entry];
+    CGFloat w = 1200.0, h = floor(1200.0 * aspect);
+    return [NSImage imageWithSize:NSMakeSize(w, h) flipped:false drawingHandler:^BOOL(NSRect rect) {
+        [[NSColor colorWithWhite:0.12 alpha:1.0] setFill];
+        NSRectFill(rect);
+        if (thumbnail != nil) {
+            NSSize size = thumbnail.size;
+            CGFloat scale = MAX(rect.size.width / MAX(size.width, 1), rect.size.height / MAX(size.height, 1));
+            NSRect r = NSMakeRect(NSMidX(rect) - size.width * scale / 2, NSMidY(rect) - size.height * scale / 2, size.width * scale, size.height * scale);
+            [thumbnail drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+        }
+        CGFloat d = MIN(rect.size.width, rect.size.height) * 0.22;
+        NSRect circle = NSMakeRect(NSMidX(rect) - d / 2, NSMidY(rect) - d / 2, d, d);
+        [[NSColor colorWithWhite:0.0 alpha:0.55] setFill];
+        [[NSBezierPath bezierPathWithOvalInRect:circle] fill];
+        NSBezierPath* triangle = NSBezierPath.new;
+        [triangle moveToPoint:NSMakePoint(NSMidX(circle) - d * 0.15, NSMidY(circle) - d * 0.22)];
+        [triangle lineToPoint:NSMakePoint(NSMidX(circle) - d * 0.15, NSMidY(circle) + d * 0.22)];
+        [triangle lineToPoint:NSMakePoint(NSMidX(circle) + d * 0.25, NSMidY(circle))];
+        [triangle closePath];
+        [NSColor.whiteColor setFill];
+        [triangle fill];
+        return true;
+    }];
+#else
+    return nil;
+#endif
 }
 
 + (CGFloat)embedAspect:(BXImage*)image

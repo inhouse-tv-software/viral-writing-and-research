@@ -462,6 +462,8 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (NSString*)tableRowStringForWidth:(NSInteger)totalWidth;
 /// Viral images: `![image](viral:ID 50)` (width in percent of the text width)
 - (bool)isEmbedImageLine;
+/// Viral videos: `![video](viral:URL^THUMBNAIL 50)`. Also counts as an image line.
+- (bool)isEmbedVideoLine;
 /// Viral carousels: `![carousel](viral:ID1,ID2 100)`
 - (bool)isEmbedCarouselLine;
 /// Image or carousel line

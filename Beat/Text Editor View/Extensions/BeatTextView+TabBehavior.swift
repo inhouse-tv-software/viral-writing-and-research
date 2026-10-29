@@ -9,6 +9,7 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import WebKit
 
 public extension BeatTextView {
 	@objc func handleTabPress() {
@@ -1259,33 +1260,39 @@ public extension BeatTextView {
 	}
 }
 
-// MARK: - Images and carousels
+
+// MARK: - Images, videos and carousels
 /*
  
  Images are stored in the document settings (base64, key `ViralImages`) and referenced from the text:
  
- ![image](viral:ID 50)                  an image, 50% of the text width
- ![carousel](viral:ID1,ID2,ID3 100)     a carousel
+ ![image](viral:ID 50 r)                      an image, 50% of the text width, rounded corners
+ ![video](viral:URL^THUMB 50)                 a video link (YouTube, Vimeo, Instagram, Facebook), with a thumbnail for print
+ ![carousel](viral:ID1,ID2,URL^THUMB h40 r)   a carousel, 40% of the text width high
  
- Consecutive image lines are laid out side by side when they fit, otherwise they wrap to the next row.
+ Consecutive image and video lines are laid out side by side when they fit, otherwise they wrap to the next row.
  Like tables, the text is hidden in the editor and a view is drawn on top of it.
  
- Paste images anywhere, or type `/image` or `/carousel` and press Return.
+ Paste or drop images or video links anywhere, or type `/image` or `/carousel` and press Return.
  
  */
 
 fileprivate let ViralImagesKey = "ViralImages"
+fileprivate let ViralVideosReloadNotification = Notification.Name("ViralVideosReload")
 fileprivate var ViralEmbedViewsKey: UInt8 = 0
 fileprivate var ViralPendingEmbedFocusKey: UInt8 = 0
 
 fileprivate enum EMetrics {
 	static let marginTop: CGFloat = 8
 	static let marginBottom: CGFloat = 14
-	static let carouselBottom: CGFloat = 26
 	static let handle: CGFloat = 12
+	static let fade: CGFloat = 56
 }
 
-fileprivate enum EmbedKind { case image, carousel }
+fileprivate enum EmbedKind {
+	case image, video, carousel
+	var isGroupItem: Bool { return self != .carousel }
+}
 
 fileprivate struct EmbedLine {
 	var kind: EmbedKind
@@ -1296,6 +1303,7 @@ fileprivate struct EmbedLine {
 	var rounded: Bool = false
 	
 	static let imagePrefix = "![image](viral:"
+	static let videoPrefix = "![video](viral:"
 	static let carouselPrefix = "![carousel](viral:"
 	
 	static func parse(_ string: String) -> EmbedLine? {
@@ -1304,6 +1312,7 @@ fileprivate struct EmbedLine {
 		let kind: EmbedKind
 		let prefix: String
 		if t.hasPrefix(imagePrefix) { kind = .image; prefix = imagePrefix }
+		else if t.hasPrefix(videoPrefix) { kind = .video; prefix = videoPrefix }
 		else if t.hasPrefix(carouselPrefix) { kind = .carousel; prefix = carouselPrefix }
 		else { return nil }
 		guard t.count > prefix.count else { return nil }
@@ -1325,13 +1334,197 @@ fileprivate struct EmbedLine {
 	}
 	
 	var text: String {
-		let prefix = (kind == .image) ? EmbedLine.imagePrefix : EmbedLine.carouselPrefix
-		let size = (kind == .image) ? "\(width)" : "h\(height)"
+		let prefix: String
+		switch kind {
+		case .image: prefix = EmbedLine.imagePrefix
+		case .video: prefix = EmbedLine.videoPrefix
+		case .carousel: prefix = EmbedLine.carouselPrefix
+		}
+		let size = (kind == .carousel) ? "h\(height)" : "\(width)"
 		return prefix + ids.joined(separator: ",") + " " + size + (rounded ? " r" : "") + ")"
 	}
 	
 	static func cornerRadius(_ rect: NSRect) -> CGFloat {
 		return min(12, min(rect.width, rect.height) * 0.1)
+	}
+}
+
+// MARK: Media entries
+
+/// An entry is either an image ID, or a video URL optionally followed by `^` and a thumbnail image ID
+fileprivate enum ViralMedia {
+	static func isVideo(_ entry: String) -> Bool { return entry.contains("://") }
+	
+	static func encode(_ url: String) -> String {
+		return url.replacingOccurrences(of: " ", with: "%20")
+			.replacingOccurrences(of: ",", with: "%2C")
+			.replacingOccurrences(of: "(", with: "%28")
+			.replacingOccurrences(of: ")", with: "%29")
+			.replacingOccurrences(of: "^", with: "%5E")
+	}
+	
+	static func decode(_ url: String) -> String {
+		return url.replacingOccurrences(of: "%20", with: " ")
+			.replacingOccurrences(of: "%2C", with: ",")
+			.replacingOccurrences(of: "%28", with: "(")
+			.replacingOccurrences(of: "%29", with: ")")
+			.replacingOccurrences(of: "%5E", with: "^")
+	}
+	
+	static func url(_ entry: String) -> String {
+		return decode(entry.components(separatedBy: "^").first ?? entry)
+	}
+	
+	static func thumbnail(_ entry: String) -> String? {
+		let parts = entry.components(separatedBy: "^")
+		return parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil
+	}
+	
+	static func make(url: String, thumbnail: String?) -> String {
+		return encode(url) + (thumbnail.map { "^" + $0 } ?? "")
+	}
+}
+
+// MARK: Video links
+
+fileprivate enum ViralVideo {
+	struct Info {
+		var embed: String
+		/// Height divided by width
+		var aspect: CGFloat
+		var provider: String
+	}
+	
+	static func info(_ string: String) -> Info? {
+		let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !trimmed.contains(" "), !trimmed.contains("\n"),
+			  let url = URL(string: trimmed), let host = url.host?.lowercased(),
+			  url.scheme == "https" || url.scheme == "http"
+		else { return nil }
+		let parts = url.path.split(separator: "/").map(String.init)
+		
+		if host == "youtu.be" || host.hasSuffix("youtube.com") || host.hasSuffix("youtube-nocookie.com") {
+			var id: String? = nil
+			var vertical = false
+			if host == "youtu.be" { id = parts.first }
+			else if parts.first == "watch" { id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "v" })?.value }
+			else if parts.first == "shorts", parts.count > 1 { id = parts[1]; vertical = true }
+			else if ["embed", "live", "v"].contains(parts.first ?? ""), parts.count > 1 { id = parts[1] }
+			guard let id, !id.isEmpty else { return nil }
+			return Info(embed: "https://www.youtube.com/embed/\(id)?playsinline=1&rel=0", aspect: vertical ? 16.0 / 9.0 : 9.0 / 16.0, provider: "YouTube")
+		}
+		
+		if host.hasSuffix("vimeo.com") {
+			guard let id = parts.last(where: { Int($0) != nil }) else { return nil }
+			return Info(embed: "https://player.vimeo.com/video/\(id)", aspect: 9.0 / 16.0, provider: "Vimeo")
+		}
+		
+		if host.hasSuffix("instagram.com") {
+			guard parts.count >= 2, ["p", "reel", "reels", "tv"].contains(parts[0]) else { return nil }
+			let kind = (parts[0] == "reels") ? "reel" : parts[0]
+			return Info(embed: "https://www.instagram.com/\(kind)/\(parts[1])/embed/", aspect: (kind == "reel") ? 16.0 / 9.0 : 1.25, provider: "Instagram")
+		}
+		
+		if host.hasSuffix("facebook.com") || host == "fb.watch" {
+			let isVideo = trimmed.contains("/videos/") || trimmed.contains("/watch") || trimmed.contains("/reel") || host == "fb.watch" || trimmed.contains("/share/v/") || trimmed.contains("/share/r/")
+			guard isVideo else { return nil }
+			let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? trimmed
+			let vertical = trimmed.contains("/reel") || trimmed.contains("/share/r/")
+			return Info(embed: "https://www.facebook.com/plugins/video.php?href=\(encoded)&show_text=false", aspect: vertical ? 16.0 / 9.0 : 9.0 / 16.0, provider: "Facebook")
+		}
+		
+		return nil
+	}
+	
+	/// Matches the rules used for printing (see `BeatRenderer`)
+	static func aspect(_ url: String) -> CGFloat {
+		return info(url)?.aspect ?? 9.0 / 16.0
+	}
+}
+
+fileprivate enum ViralWeb {
+	static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+	static let baseURL = URL(string: "https://inhousetv.us/")!
+	
+	static func configuration() -> WKWebViewConfiguration {
+		let configuration = WKWebViewConfiguration()
+		configuration.websiteDataStore = .default()
+		configuration.mediaTypesRequiringUserActionForPlayback = []
+		if #available(macOS 12.3, *) { configuration.preferences.isElementFullscreenEnabled = true }
+		return configuration
+	}
+	
+	static func makeView() -> WKWebView {
+		let view = WKWebView(frame: .zero, configuration: configuration())
+		view.customUserAgent = userAgent
+		view.underPageBackgroundColor = .black
+		view.wantsLayer = true
+		view.layer?.backgroundColor = NSColor.black.cgColor
+		return view
+	}
+	
+	static func load(_ view: WKWebView, url: String) {
+		guard let info = ViralVideo.info(url) else {
+			view.loadHTMLString("<html><body style='background:#111;color:#aaa;font:13px -apple-system;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>This link can't be played here</body></html>", baseURL: baseURL)
+			return
+		}
+		let html = """
+		<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+		<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
+		iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head>
+		<body><iframe src="\(info.embed)" allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>
+		"""
+		view.loadHTMLString(html, baseURL: baseURL)
+	}
+}
+
+/// Takes a snapshot of a video once it has loaded, so the video can be printed
+fileprivate final class ViralVideoLoader: NSObject, WKNavigationDelegate, WKUIDelegate {
+	var onSnapshot: ((NSImage) -> Void)?
+	var wantsSnapshot = false
+	
+	func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+		guard wantsSnapshot else { return }
+		DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self, weak webView] in
+			guard let self, let webView, self.wantsSnapshot, webView.bounds.width > 20 else { return }
+			webView.takeSnapshot(with: nil) { image, _ in
+				guard let image, self.wantsSnapshot else { return }
+				self.wantsSnapshot = false
+				self.onSnapshot?(image)
+			}
+		}
+	}
+	
+	/// Links that open new windows go to the browser
+	func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+		if let url = navigationAction.request.url { NSWorkspace.shared.open(url) }
+		return nil
+	}
+}
+
+/// A window for signing in to Instagram or Facebook. The session is shared with the videos in documents.
+fileprivate final class ViralLoginWindow: NSWindowController, NSWindowDelegate {
+	static var current: ViralLoginWindow?
+	
+	static func show(_ address: String, title: String) {
+		guard let url = URL(string: address) else { return }
+		let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 520, height: 720), configuration: ViralWeb.configuration())
+		web.customUserAgent = ViralWeb.userAgent
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 720), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+		window.title = title
+		window.contentView = web
+		window.isReleasedWhenClosed = false
+		window.center()
+		let controller = ViralLoginWindow(window: window)
+		window.delegate = controller
+		current = controller
+		controller.showWindow(nil)
+		web.load(URLRequest(url: url))
+	}
+	
+	func windowWillClose(_ notification: Notification) {
+		NotificationCenter.default.post(name: ViralVideosReloadNotification, object: nil)
+		DispatchQueue.main.async { ViralLoginWindow.current = nil }
 	}
 }
 
@@ -1359,9 +1552,11 @@ fileprivate enum ViralImages {
 		return NSSize(width: 4, height: 3)
 	}
 	
-	/// Height divided by width
-	static func aspect(_ id: String?, settings: BeatDocumentSettings?) -> CGFloat {
-		guard let id, let image = image(id, settings: settings) else { return 0.75 }
+	/// Height divided by width, for an image ID or a video entry
+	static func aspect(_ entry: String?, settings: BeatDocumentSettings?) -> CGFloat {
+		guard let entry else { return 0.75 }
+		if ViralMedia.isVideo(entry) { return ViralVideo.aspect(ViralMedia.url(entry)) }
+		guard let image = image(entry, settings: settings) else { return 0.75 }
 		let size = pixelSize(image)
 		return size.height / max(size.width, 1)
 	}
@@ -1430,6 +1625,19 @@ fileprivate func viralImages(from pasteboard: NSPasteboard) -> [NSImage] {
 	return images
 }
 
+/// Video links on the pasteboard (one link per line)
+fileprivate func viralVideoLinks(from pasteboard: NSPasteboard) -> [String] {
+	var candidates: [String] = []
+	if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+		candidates = urls.filter { !$0.isFileURL }.map { $0.absoluteString }
+	}
+	if candidates.isEmpty, let string = pasteboard.string(forType: .string) {
+		candidates = string.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+	}
+	guard !candidates.isEmpty, candidates.allSatisfy({ ViralVideo.info($0) != nil }) else { return [] }
+	return candidates
+}
+
 // MARK: Image group layout
 
 /// Lays out images in rows. An image fits on a row if the widths (plus 2% gaps) stay within 100%.
@@ -1482,8 +1690,13 @@ fileprivate class ViralEmbedView: NSView {
 	init(host: BeatTextView) {
 		self.host = host
 		super.init(frame: .zero)
+		// Layer backing keeps redraws clean while scrolling and resizing
+		wantsLayer = true
+		layerContentsRedrawPolicy = .onSetNeedsDisplay
+		NotificationCenter.default.addObserver(self, selector: #selector(reloadVideos(_:)), name: ViralVideosReloadNotification, object: nil)
 	}
 	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+	deinit { NotificationCenter.default.removeObserver(self) }
 	
 	override var isFlipped: Bool { return true }
 	override var acceptsFirstResponder: Bool { return true }
@@ -1499,6 +1712,8 @@ fileprivate class ViralEmbedView: NSView {
 		scrollToVisible(bounds)
 	}
 	func addImages(_ images: [NSImage]) {}
+	func addVideos(_ urls: [String]) {}
+	@objc func reloadVideos(_ notification: Notification?) {}
 	
 	override func becomeFirstResponder() -> Bool { redraw(); return true }
 	override func resignFirstResponder() -> Bool { redraw(); return true }
@@ -1506,7 +1721,9 @@ fileprivate class ViralEmbedView: NSView {
 	func redraw() {
 		needsDisplay = true
 		for view in subviews { view.needsDisplay = true }
+		updateChrome()
 	}
+	func updateChrome() {}
 	
 	/// Writes this block's lines back into the document
 	func write(_ lines: [String]) {
@@ -1529,13 +1746,28 @@ fileprivate class ViralEmbedView: NSView {
 	}
 	
 	@objc func paste(_ sender: Any?) {
-		let images = viralImages(from: NSPasteboard.general)
+		let pasteboard = NSPasteboard.general
+		let links = viralVideoLinks(from: pasteboard)
+		if !links.isEmpty { addVideos(links); return }
+		let images = viralImages(from: pasteboard)
 		if images.isEmpty { NSSound.beep(); return }
 		addImages(images)
 	}
 	
 	@objc func chooseAndAddImages(_ sender: Any?) {
 		host?.chooseImages { [weak self] images in self?.addImages(images) }
+	}
+	
+	@objc func signInToInstagram(_ sender: Any?) { ViralLoginWindow.show("https://www.instagram.com/accounts/login/", title: "Sign In to Instagram") }
+	@objc func signInToFacebook(_ sender: Any?) { ViralLoginWindow.show("https://www.facebook.com/login/", title: "Sign In to Facebook") }
+	
+	func signInMenu(into menu: NSMenu) {
+		let instagram = NSMenuItem(title: "Sign In to Instagram…", action: #selector(signInToInstagram(_:)), keyEquivalent: "")
+		instagram.target = self
+		menu.addItem(instagram)
+		let facebook = NSMenuItem(title: "Sign In to Facebook…", action: #selector(signInToFacebook(_:)), keyEquivalent: "")
+		facebook.target = self
+		menu.addItem(facebook)
 	}
 	
 	override func keyDown(with event: NSEvent) {
@@ -1547,18 +1779,6 @@ fileprivate class ViralEmbedView: NSView {
 			// Never let typing fall through to the hidden text behind the block
 			if event.modifierFlags.contains(.command) { super.keyDown(with: event) } else { NSSound.beep() }
 		}
-	}
-	
-	func drawHandle(in rect: NSRect) {
-		let handle = NSRect(x: rect.maxX - EMetrics.handle, y: rect.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
-		NSColor.controlAccentColor.setFill()
-		NSBezierPath(roundedRect: handle.insetBy(dx: 1, dy: 1), xRadius: 2, yRadius: 2).fill()
-		NSColor.white.setStroke()
-		let line = NSBezierPath()
-		line.move(to: NSPoint(x: handle.minX + 4, y: handle.maxY - 3))
-		line.line(to: NSPoint(x: handle.maxX - 3, y: handle.minY + 4))
-		line.lineWidth = 1
-		line.stroke()
 	}
 	
 	func widthMenu(into menu: NSMenu) {
@@ -1577,12 +1797,41 @@ fileprivate class ViralEmbedView: NSView {
 	@objc func setWidthFromMenu(_ sender: NSMenuItem) {}
 }
 
+/// The little square in the corner for resizing
+fileprivate final class ViralHandleView: NSView {
+	var onBegin: ((NSEvent) -> Void)?
+	var onDrag: ((NSEvent) -> Void)?
+	var onEnd: ((NSEvent) -> Void)?
+	var cursor: NSCursor = .resizeLeftRight
+	
+	override func draw(_ dirtyRect: NSRect) {
+		let rect = bounds.insetBy(dx: 1, dy: 1)
+		NSColor.controlAccentColor.setFill()
+		NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+		NSColor.white.setStroke()
+		let line = NSBezierPath()
+		line.move(to: NSPoint(x: rect.minX + 3, y: rect.minY + 3))
+		line.line(to: NSPoint(x: rect.maxX - 3, y: rect.maxY - 3))
+		line.lineWidth = 1
+		line.stroke()
+	}
+	override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
+	override func mouseDown(with event: NSEvent) { onBegin?(event) }
+	override func mouseDragged(with event: NSEvent) { onDrag?(event) }
+	override func mouseUp(with event: NSEvent) { onEnd?(event) }
+}
+
 // MARK: Image tile
 
 fileprivate final class ViralImageTile: NSView {
 	weak var group: ViralImageGroupView?
 	var index = 0
 	var image: NSImage?
+	var videoURL: String?
+	var webView: WKWebView?
+	let loader = ViralVideoLoader()
+	let handle = ViralHandleView(frame: .zero)
+	let menuButton = NSButton(frame: .zero)
 	var hovering = false
 	var resizing = false
 	var startX: CGFloat = 0
@@ -1590,36 +1839,112 @@ fileprivate final class ViralImageTile: NSView {
 	
 	override var isFlipped: Bool { return true }
 	
-	var handleRect: NSRect {
-		return NSRect(x: bounds.maxX - EMetrics.handle, y: bounds.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
+	override init(frame frameRect: NSRect) {
+		super.init(frame: frameRect)
+		wantsLayer = true
+		layerContentsRedrawPolicy = .onSetNeedsDisplay
+		
+		handle.onBegin = { [weak self] event in self?.beginResize(event) }
+		handle.onDrag = { [weak self] event in self?.dragResize(event) }
+		handle.onEnd = { [weak self] event in self?.endResize(event) }
+		addSubview(handle)
+		
+		menuButton.isBordered = false
+		menuButton.bezelStyle = .regularSquare
+		menuButton.title = ""
+		if let image = NSImage(systemSymbolName: "ellipsis.circle.fill", accessibilityDescription: "Options") {
+			menuButton.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)) ?? image
+			menuButton.imagePosition = .imageOnly
+		} else {
+			menuButton.title = "•••"
+		}
+		menuButton.contentTintColor = .white
+		menuButton.target = self
+		menuButton.action = #selector(showMenu(_:))
+		menuButton.toolTip = "Options"
+		addSubview(menuButton)
+		updateChrome()
+	}
+	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+	
+	var item: EmbedLine? {
+		guard let group, index < group.items.count else { return nil }
+		return group.items[index]
 	}
 	var isSelected: Bool { return group?.isActive == true && group?.selectedIndex == index }
 	
+	func configure(entry: String?, settings: BeatDocumentSettings?) {
+		guard let entry else { image = nil; return }
+		if ViralMedia.isVideo(entry) {
+			image = nil
+			let url = ViralMedia.url(entry)
+			if videoURL != url || webView == nil {
+				videoURL = url
+				webView?.removeFromSuperview()
+				let web = ViralWeb.makeView()
+				web.navigationDelegate = loader
+				web.uiDelegate = loader
+				addSubview(web, positioned: .below, relativeTo: handle)
+				webView = web
+				ViralWeb.load(web, url: url)
+			}
+			loader.wantsSnapshot = (ViralMedia.thumbnail(entry) == nil)
+			let tileIndex = index
+			loader.onSnapshot = { [weak self] snapshot in
+				guard let self, let group = self.group else { return }
+				group.setThumbnail(snapshot, at: tileIndex)
+			}
+		} else {
+			videoURL = nil
+			webView?.removeFromSuperview()
+			webView = nil
+			loader.wantsSnapshot = false
+			image = ViralImages.image(entry, settings: settings)
+		}
+		layoutChrome()
+		updateChrome()
+		needsDisplay = true
+	}
+	
+	func reloadVideo() {
+		guard let webView, let videoURL else { return }
+		ViralWeb.load(webView, url: videoURL)
+	}
+	
+	override func setFrameSize(_ newSize: NSSize) {
+		super.setFrameSize(newSize)
+		layoutChrome()
+	}
+	
+	func layoutChrome() {
+		webView?.frame = bounds
+		handle.frame = NSRect(x: bounds.maxX - EMetrics.handle - 2, y: bounds.maxY - EMetrics.handle - 2, width: EMetrics.handle, height: EMetrics.handle)
+		menuButton.frame = NSRect(x: bounds.maxX - 30, y: 6, width: 24, height: 24)
+		let radius = (item?.rounded ?? false) ? EmbedLine.cornerRadius(bounds) : 0
+		layer?.cornerRadius = radius
+		layer?.masksToBounds = radius > 0
+	}
+	
+	func updateChrome() {
+		let selected = isSelected || resizing
+		handle.isHidden = !(selected || hovering)
+		menuButton.isHidden = !(webView != nil && (selected || hovering))
+		layer?.borderWidth = selected ? 2 : (hovering ? 1 : 0)
+		layer?.borderColor = (selected ? NSColor.controlAccentColor : (group?.color ?? .textColor).withAlphaComponent(0.3)).cgColor
+		layoutChrome()
+	}
+	
 	override func draw(_ dirtyRect: NSRect) {
-		let rounded = group.map { index < $0.items.count && $0.items[index].rounded } ?? false
-		let radius = rounded ? EmbedLine.cornerRadius(bounds) : 0
+		guard webView == nil else { return }
 		if let image {
-			NSGraphicsContext.saveGraphicsState()
-			if radius > 0 { NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).addClip() }
 			image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
 					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
-			NSGraphicsContext.restoreGraphicsState()
 		} else {
 			(group?.color ?? .textColor).withAlphaComponent(0.08).setFill()
 			bounds.fill()
 			let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
 			let text = NSAttributedString(string: "Missing image", attributes: attrs)
 			text.draw(at: NSPoint(x: bounds.midX - text.size().width / 2, y: bounds.midY - text.size().height / 2))
-		}
-		
-		if isSelected || hovering || resizing {
-			let selected = isSelected || resizing
-			(selected ? NSColor.controlAccentColor : (group?.color ?? .textColor).withAlphaComponent(0.3)).setStroke()
-			let inset = bounds.insetBy(dx: selected ? 1 : 0.5, dy: selected ? 1 : 0.5)
-			let path = NSBezierPath(roundedRect: inset, xRadius: radius, yRadius: radius)
-			path.lineWidth = selected ? 2 : 1
-			path.stroke()
-			group?.drawHandle(in: bounds)
 		}
 	}
 	
@@ -1628,35 +1953,41 @@ fileprivate final class ViralImageTile: NSView {
 		for area in trackingAreas { removeTrackingArea(area) }
 		addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
 	}
-	override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
-	override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
-	
-	override func resetCursorRects() {
-		addCursorRect(handleRect, cursor: .resizeLeftRight)
-	}
+	override func mouseEntered(with event: NSEvent) { hovering = true; updateChrome() }
+	override func mouseExited(with event: NSEvent) { hovering = false; updateChrome() }
 	
 	override func mouseDown(with event: NSEvent) {
-		guard let group else { return }
-		group.select(index)
-		let point = convert(event.locationInWindow, from: nil)
-		if handleRect.insetBy(dx: -3, dy: -3).contains(point) {
-			resizing = true
-			startX = group.convert(event.locationInWindow, from: nil).x
-			startWidth = frame.width
-		}
+		group?.select(index)
 	}
 	
-	override func mouseDragged(with event: NSEvent) {
+	func beginResize(_ event: NSEvent) {
+		guard let group else { return }
+		group.select(index)
+		resizing = true
+		startX = group.convert(event.locationInWindow, from: nil).x
+		startWidth = frame.width
+		updateChrome()
+	}
+	
+	func dragResize(_ event: NSEvent) {
 		guard resizing, let group else { return }
 		let x = group.convert(event.locationInWindow, from: nil).x
 		let width = max(40, min(group.embedWidth, startWidth + x - startX))
 		group.preview(index: index, width: width)
 	}
 	
-	override func mouseUp(with event: NSEvent) {
+	func endResize(_ event: NSEvent) {
 		guard resizing, let group else { return }
 		resizing = false
 		group.commit(index: index, width: frame.width)
+		updateChrome()
+	}
+	
+	@objc func showMenu(_ sender: Any?) {
+		guard let group else { return }
+		group.select(index)
+		let menu = group.contextMenu()
+		_ = menu.popUp(positioning: nil, at: NSPoint(x: menuButton.frame.minX, y: menuButton.frame.maxY), in: self)
 	}
 	
 	override func menu(for event: NSEvent) -> NSMenu? {
@@ -1699,7 +2030,7 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		while tiles.count > items.count { tiles.removeLast().removeFromSuperview() }
 		for (i, tile) in tiles.enumerated() {
 			tile.index = i
-			tile.image = items[i].ids.first.flatMap { ViralImages.image($0, settings: settings) }
+			tile.configure(entry: items[i].ids.first, settings: settings)
 		}
 		selectedIndex = min(selectedIndex, max(items.count - 1, 0))
 		relayout()
@@ -1709,9 +2040,18 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		let frames = viralGroupLayout(items, width: embedWidth, settings: settings, override: previewWidths).frames
 		for (i, tile) in tiles.enumerated() where i < frames.count {
 			if tile.frame != frames[i] { tile.frame = frames[i] }
+			tile.updateChrome()
 			tile.needsDisplay = true
 		}
 		window?.invalidateCursorRects(for: self)
+	}
+	
+	override func updateChrome() {
+		for tile in tiles { tile.updateChrome() }
+	}
+	
+	override func reloadVideos(_ notification: Notification?) {
+		for tile in tiles { tile.reloadVideo() }
 	}
 	
 	override func activate(atEnd: Bool) {
@@ -1742,6 +2082,15 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		write(items.map { $0.text })
 	}
 	
+	func setThumbnail(_ image: NSImage, at index: Int) {
+		guard index < items.count, let settings, let entry = items[index].ids.first,
+			  ViralMedia.isVideo(entry), ViralMedia.thumbnail(entry) == nil,
+			  let id = ViralImages.add(image, settings: settings)
+		else { return }
+		items[index].ids[0] = ViralMedia.make(url: ViralMedia.url(entry), thumbnail: id)
+		write(items.map { $0.text })
+	}
+	
 	override func setWidthFromMenu(_ sender: NSMenuItem) {
 		guard selectedIndex < items.count else { return }
 		items[selectedIndex].width = sender.tag
@@ -1749,14 +2098,21 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		write(items.map { $0.text })
 	}
 	
-	override func addImages(_ images: [NSImage]) {
-		let lines = newImageLines(images)
+	func insertItems(_ lines: [EmbedLine]) {
 		guard !lines.isEmpty else { return }
 		let at = min(selectedIndex + 1, items.count)
 		items.insert(contentsOf: lines, at: at)
 		selectedIndex = at + lines.count - 1
 		reloadTiles()
 		write(items.map { $0.text })
+	}
+	
+	override func addImages(_ images: [NSImage]) {
+		insertItems(newImageLines(images))
+	}
+	
+	override func addVideos(_ urls: [String]) {
+		insertItems(urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 100) })
 	}
 	
 	func deleteSelected() {
@@ -1779,6 +2135,11 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		relayout()
 		write(items.map { $0.text })
 	}
+	@objc func openInBrowser(_ sender: Any?) {
+		guard selectedIndex < items.count, let entry = items[selectedIndex].ids.first, ViralMedia.isVideo(entry),
+			  let url = URL(string: ViralMedia.url(entry)) else { return }
+		NSWorkspace.shared.open(url)
+	}
 	
 	override func keyDown(with event: NSEvent) {
 		switch event.keyCode {
@@ -1793,17 +2154,24 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	
 	func contextMenu() -> NSMenu {
 		let menu = NSMenu()
+		let isVideo = selectedIndex < items.count && items[selectedIndex].kind == .video
 		widthMenu(into: menu)
-		menu.addItem(NSMenuItem.separator())
-		let add = NSMenuItem(title: "Add Images…", action: #selector(chooseAndAddImages(_:)), keyEquivalent: "")
-		add.target = self
-		menu.addItem(add)
 		let round = NSMenuItem(title: "Rounded Corners", action: #selector(toggleRounded(_:)), keyEquivalent: "")
 		round.target = self
 		round.state = (selectedIndex < items.count && items[selectedIndex].rounded) ? .on : .off
 		menu.addItem(round)
 		menu.addItem(NSMenuItem.separator())
-		let delete = NSMenuItem(title: "Delete Image", action: #selector(deleteImageFromMenu(_:)), keyEquivalent: "")
+		if isVideo {
+			let open = NSMenuItem(title: "Open in Browser", action: #selector(openInBrowser(_:)), keyEquivalent: "")
+			open.target = self
+			menu.addItem(open)
+			signInMenu(into: menu)
+			menu.addItem(NSMenuItem.separator())
+		}
+		let add = NSMenuItem(title: "Add Images…", action: #selector(chooseAndAddImages(_:)), keyEquivalent: "")
+		add.target = self
+		menu.addItem(add)
+		let delete = NSMenuItem(title: isVideo ? "Delete Video" : "Delete Image", action: #selector(deleteImageFromMenu(_:)), keyEquivalent: "")
 		delete.target = self
 		menu.addItem(delete)
 		return menu
@@ -1814,11 +2182,41 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 
 // MARK: Carousel
 
-/// A horizontal strip of images at the carousel height. Scroll with the arrows or sideways on the trackpad.
+/// Draws the soft fade at both edges of a carousel, plus the selection and resize handle
+fileprivate final class ViralCarouselOverlay: NSView {
+	weak var carousel: ViralCarouselView?
+	override var isFlipped: Bool { return true }
+	override func hitTest(_ point: NSPoint) -> NSView? { return nil }
+	
+	override func draw(_ dirtyRect: NSRect) {
+		guard let carousel else { return }
+		let strip = carousel.stripRect
+		let fade = ThemeManager.shared().backgroundColor.effectiveColor()
+		
+		if carousel.scrollX > 0.5 || carousel.maxScroll > 0.5 {
+			let left = NSGradient(starting: fade, ending: fade.withAlphaComponent(0))
+			left?.draw(in: NSRect(x: strip.minX, y: strip.minY, width: EMetrics.fade, height: strip.height), angle: 0)
+			let right = NSGradient(starting: fade.withAlphaComponent(0), ending: fade)
+			right?.draw(in: NSRect(x: strip.maxX - EMetrics.fade, y: strip.minY, width: EMetrics.fade, height: strip.height), angle: 0)
+		}
+		
+		if carousel.isActive, let frame = carousel.visibleFrame(of: carousel.selectedIndex) {
+			NSColor.controlAccentColor.setStroke()
+			let radius = carousel.item.rounded ? EmbedLine.cornerRadius(frame) : 0
+			let outline = NSBezierPath(roundedRect: frame.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius)
+			outline.lineWidth = 2
+			outline.stroke()
+		}
+	}
+}
+
+/// A horizontal strip of images and videos at the carousel height, running edge to edge on the page
 fileprivate final class ViralCarouselView: ViralEmbedView {
 	var item = EmbedLine(kind: .carousel, ids: [], width: 100)
 	var selectedIndex = 0
 	var scrollX: CGFloat = 0
+	/// Space before the first image, so it lines up with the text
+	var textInset: CGFloat = 50
 	var hovering = false
 	var resizing = false
 	var resizeStartY: CGFloat = 0
@@ -1826,24 +2224,42 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	var previewHeight: CGFloat? = nil
 	var animation: Timer? = nil
 	
+	var videos: [Int: (url: String, view: WKWebView, loader: ViralVideoLoader)] = [:]
+	let clip = ViralFlippedView(frame: .zero)
+	let overlay = ViralCarouselOverlay(frame: .zero)
+	let handle = ViralHandleView(frame: .zero)
 	let previousButton = NSButton(frame: .zero)
 	let nextButton = NSButton(frame: .zero)
 	let addButton = NSButton(frame: .zero)
 	
-	static let gap: CGFloat = 8
-	static let padding: CGFloat = 6
+	static let gap: CGFloat = 10
 	
-	static func boxHeight(for item: EmbedLine, width: CGFloat) -> CGFloat {
-		return max(60, floor(width * CGFloat(item.height) / 100))
+	/// Text width is the reference for the height percentage
+	static func stripHeight(for item: EmbedLine, textWidth: CGFloat) -> CGFloat {
+		return max(60, floor(textWidth * CGFloat(item.height) / 100))
 	}
 	
-	static func height(for item: EmbedLine, width: CGFloat) -> CGFloat {
-		return EMetrics.marginTop + boxHeight(for: item, width: width) + EMetrics.marginBottom
+	static func height(for item: EmbedLine, textWidth: CGFloat) -> CGFloat {
+		return EMetrics.marginTop + stripHeight(for: item, textWidth: textWidth) + EMetrics.marginBottom
 	}
+	
+	var textWidth: CGFloat { return max(embedWidth - textInset * 2, 100) }
 	
 	override init(host: BeatTextView) {
 		super.init(host: host)
 		kind = .carousel
+		clip.wantsLayer = true
+		clip.layer?.masksToBounds = true
+		addSubview(clip)
+		overlay.carousel = self
+		addSubview(overlay)
+		
+		handle.cursor = .resizeUpDown
+		handle.onBegin = { [weak self] event in self?.beginResize(event) }
+		handle.onDrag = { [weak self] event in self?.dragResize(event) }
+		handle.onEnd = { [weak self] event in self?.endResize(event) }
+		addSubview(handle)
+		
 		setup(previousButton, symbol: "chevron.left.circle.fill", fallback: "‹", tip: "Scroll left", action: #selector(showPrevious(_:)))
 		setup(nextButton, symbol: "chevron.right.circle.fill", fallback: "›", tip: "Scroll right", action: #selector(showNext(_:)))
 		setup(addButton, symbol: "plus.circle.fill", fallback: "+", tip: "Add images", action: #selector(chooseAndAddImages(_:)))
@@ -1873,35 +2289,37 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		addSubview(button)
 	}
 	
-	var boxHeight: CGFloat { return previewHeight ?? ViralCarouselView.boxHeight(for: item, width: embedWidth) }
-	var boxRect: NSRect { return NSRect(x: 0, y: EMetrics.marginTop, width: embedWidth, height: boxHeight) }
-	var handleRect: NSRect {
-		let box = boxRect
-		return NSRect(x: box.maxX - EMetrics.handle, y: box.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
-	}
+	var stripHeight: CGFloat { return previewHeight ?? ViralCarouselView.stripHeight(for: item, textWidth: textWidth) }
+	var stripRect: NSRect { return NSRect(x: 0, y: EMetrics.marginTop, width: embedWidth, height: stripHeight) }
 	
-	override var totalHeight: CGFloat { return ViralCarouselView.height(for: item, width: embedWidth) }
+	override var totalHeight: CGFloat { return ViralCarouselView.height(for: item, textWidth: textWidth) }
 	
-	/// Image frames in strip coordinates (before scrolling)
-	var stripFrames: [NSRect] {
-		let h = boxHeight - ViralCarouselView.padding * 2
-		var x = ViralCarouselView.padding
+	/// Item frames in strip coordinates (before scrolling)
+	var itemFrames: [NSRect] {
+		let h = stripHeight
+		var x = textInset
 		var frames: [NSRect] = []
-		for id in item.ids {
-			let aspect = ViralImages.aspect(id, settings: settings)
+		for entry in item.ids {
+			let aspect = ViralImages.aspect(entry, settings: settings)
 			let w = max(20, floor(h / max(aspect, 0.05)))
-			frames.append(NSRect(x: x, y: EMetrics.marginTop + ViralCarouselView.padding, width: w, height: h))
+			frames.append(NSRect(x: x, y: EMetrics.marginTop, width: w, height: h))
 			x += w + ViralCarouselView.gap
 		}
 		return frames
 	}
 	
 	var contentWidth: CGFloat {
-		guard let last = stripFrames.last else { return 0 }
-		return last.maxX + ViralCarouselView.padding
+		guard let last = itemFrames.last else { return 0 }
+		return last.maxX + textInset
 	}
 	
 	var maxScroll: CGFloat { return max(0, contentWidth - embedWidth) }
+	
+	func visibleFrame(of index: Int) -> NSRect? {
+		let frames = itemFrames
+		guard index < frames.count else { return nil }
+		return frames[index].offsetBy(dx: -scrollX, dy: 0)
+	}
 	
 	override func load(text: String, lines: [String]) {
 		sourceText = text
@@ -1910,66 +2328,104 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		relayout()
 	}
 	
+	override func reloadVideos(_ notification: Notification?) {
+		for (_, video) in videos { ViralWeb.load(video.view, url: video.url) }
+	}
+	
+	/// Creates, moves and removes the video views
+	func layoutVideos() {
+		let frames = itemFrames
+		var keep = Set<Int>()
+		for (i, entry) in item.ids.enumerated() where ViralMedia.isVideo(entry) && i < frames.count {
+			let url = ViralMedia.url(entry)
+			if videos[i]?.url != url {
+				videos[i]?.view.removeFromSuperview()
+				let web = ViralWeb.makeView()
+				let loader = ViralVideoLoader()
+				web.navigationDelegate = loader
+				web.uiDelegate = loader
+				clip.addSubview(web)
+				ViralWeb.load(web, url: url)
+				videos[i] = (url, web, loader)
+			}
+			if let video = videos[i] {
+				video.loader.wantsSnapshot = (ViralMedia.thumbnail(entry) == nil)
+				video.loader.onSnapshot = { [weak self] image in self?.setThumbnail(image, at: i) }
+				let frame = frames[i].offsetBy(dx: -scrollX, dy: -EMetrics.marginTop)
+				video.view.frame = frame
+				let radius = item.rounded ? EmbedLine.cornerRadius(frame) : 0
+				video.view.layer?.cornerRadius = radius
+				video.view.layer?.masksToBounds = radius > 0
+			}
+			keep.insert(i)
+		}
+		for key in videos.keys where !keep.contains(key) {
+			videos[key]?.view.removeFromSuperview()
+			videos[key] = nil
+		}
+	}
+	
 	func relayout() {
 		scrollX = min(max(scrollX, 0), maxScroll)
-		let box = boxRect
+		let strip = stripRect
+		clip.frame = strip
+		overlay.frame = bounds
+		layoutVideos()
+		
 		let size: CGFloat = 30
-		previousButton.frame = NSRect(x: box.minX + 8, y: box.midY - size / 2, width: size, height: size)
-		nextButton.frame = NSRect(x: box.maxX - 8 - size, y: box.midY - size / 2, width: size, height: size)
-		addButton.frame = NSRect(x: box.minX + 10, y: box.minY + 10, width: 24, height: 24)
+		previousButton.frame = NSRect(x: strip.minX + 10, y: strip.midY - size / 2, width: size, height: size)
+		nextButton.frame = NSRect(x: strip.maxX - 10 - size, y: strip.midY - size / 2, width: size, height: size)
+		addButton.frame = NSRect(x: textInset + 8, y: strip.minY + 8, width: 24, height: 24)
+		handle.frame = NSRect(x: strip.maxX - textInset - EMetrics.handle, y: strip.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
 		previousButton.isHidden = scrollX <= 0.5
 		nextButton.isHidden = scrollX >= maxScroll - 0.5
+		updateChrome()
 		window?.invalidateCursorRects(for: self)
 		needsDisplay = true
+		overlay.needsDisplay = true
+	}
+	
+	override func updateChrome() {
+		handle.isHidden = !(isActive || hovering || resizing)
+		addButton.isHidden = !(isActive || hovering || item.ids.isEmpty)
+		overlay.needsDisplay = true
 	}
 	
 	override func draw(_ dirtyRect: NSRect) {
-		let box = boxRect
-		let path = NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6)
-		color.withAlphaComponent(0.05).setFill()
-		path.fill()
+		let strip = stripRect
 		
 		if item.ids.isEmpty {
+			let box = NSRect(x: textInset, y: strip.minY, width: textWidth, height: strip.height)
+			let path = NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6)
+			color.withAlphaComponent(0.05).setFill()
+			path.fill()
 			let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor]
-			let text = NSAttributedString(string: "Paste or drop images here, or click +", attributes: attrs)
+			let text = NSAttributedString(string: "Paste or drop images and video links here, or click +", attributes: attrs)
 			let s = text.size()
 			text.draw(at: NSPoint(x: box.midX - s.width / 2, y: box.midY - s.height / 2))
-		} else {
+			return
+		}
+		
+		NSGraphicsContext.saveGraphicsState()
+		NSBezierPath(rect: strip).addClip()
+		for (i, frame) in itemFrames.enumerated() {
+			let entry = item.ids[i]
+			if ViralMedia.isVideo(entry) { continue }
+			let rect = frame.offsetBy(dx: -scrollX, dy: 0)
+			guard rect.maxX > strip.minX, rect.minX < strip.maxX else { continue }
+			let radius = item.rounded ? EmbedLine.cornerRadius(rect) : 0
 			NSGraphicsContext.saveGraphicsState()
-			path.addClip()
-			for (i, frame) in stripFrames.enumerated() {
-				let rect = frame.offsetBy(dx: -scrollX, dy: 0)
-				guard rect.maxX > box.minX, rect.minX < box.maxX else { continue }
-				let radius = item.rounded ? EmbedLine.cornerRadius(rect) : 0
-				NSGraphicsContext.saveGraphicsState()
-				let clip = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-				clip.addClip()
-				if let image = ViralImages.image(item.ids[i], settings: settings) {
-					image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
-							   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
-				} else {
-					color.withAlphaComponent(0.1).setFill()
-					rect.fill()
-				}
-				NSGraphicsContext.restoreGraphicsState()
-				
-				if isActive && i == selectedIndex {
-					NSColor.controlAccentColor.setStroke()
-					let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius)
-					outline.lineWidth = 2
-					outline.stroke()
-				}
+			NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).addClip()
+			if let image = ViralImages.image(entry, settings: settings) {
+				image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+						   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+			} else {
+				color.withAlphaComponent(0.1).setFill()
+				rect.fill()
 			}
 			NSGraphicsContext.restoreGraphicsState()
 		}
-		
-		if isActive || hovering || resizing {
-			(isActive || resizing ? NSColor.controlAccentColor : color.withAlphaComponent(0.25)).setStroke()
-			let border = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-			border.lineWidth = 1
-			border.stroke()
-			drawHandle(in: box)
-		}
+		NSGraphicsContext.restoreGraphicsState()
 	}
 	
 	override func updateTrackingAreas() {
@@ -1977,41 +2433,42 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		for area in trackingAreas { removeTrackingArea(area) }
 		addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
 	}
-	override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
-	override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
-	override func resetCursorRects() { addCursorRect(handleRect, cursor: .resizeUpDown) }
+	override func mouseEntered(with event: NSEvent) { hovering = true; updateChrome() }
+	override func mouseExited(with event: NSEvent) { hovering = false; updateChrome() }
 	
 	override func mouseDown(with event: NSEvent) {
 		window?.makeFirstResponder(self)
 		let point = convert(event.locationInWindow, from: nil)
-		if handleRect.insetBy(dx: -3, dy: -3).contains(point) {
-			resizing = true
-			resizeStartY = point.y
-			resizeStartHeight = boxHeight
-			return
-		}
-		if let i = stripFrames.firstIndex(where: { $0.offsetBy(dx: -scrollX, dy: 0).contains(point) }) {
+		if let i = itemFrames.firstIndex(where: { $0.offsetBy(dx: -scrollX, dy: 0).contains(point) }) {
 			selectedIndex = i
 			scrollToSelected()
 		}
-		needsDisplay = true
+		updateChrome()
 	}
 	
-	override func mouseDragged(with event: NSEvent) {
+	func beginResize(_ event: NSEvent) {
+		window?.makeFirstResponder(self)
+		resizing = true
+		resizeStartY = convert(event.locationInWindow, from: nil).y
+		resizeStartHeight = stripHeight
+		updateChrome()
+	}
+	
+	func dragResize(_ event: NSEvent) {
 		guard resizing else { return }
 		let y = convert(event.locationInWindow, from: nil).y
-		previewHeight = max(60, min(embedWidth * 1.5, resizeStartHeight + y - resizeStartY))
-		let height = EMetrics.marginTop + boxHeight + EMetrics.marginBottom
+		previewHeight = max(60, min(textWidth * 1.5, resizeStartHeight + y - resizeStartY))
+		let height = EMetrics.marginTop + stripHeight + EMetrics.marginBottom
 		if height > frame.height { setFrameSize(NSSize(width: frame.width, height: height)) }
 		relayout()
 	}
 	
-	override func mouseUp(with event: NSEvent) {
+	func endResize(_ event: NSEvent) {
 		guard resizing else { return }
 		resizing = false
-		let height = boxHeight
+		let height = stripHeight
 		previewHeight = nil
-		item.height = min(max(Int((height / max(embedWidth, 1) * 100).rounded()), 10), 150)
+		item.height = min(max(Int((height / max(textWidth, 1) * 100).rounded()), 10), 150)
 		relayout()
 		write([item.text])
 	}
@@ -2034,7 +2491,7 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		let end = min(max(target, 0), maxScroll)
 		guard abs(end - start) > 0.5 else { return }
 		let began = Date()
-		let duration = 0.28
+		let duration = 0.3
 		animation = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
 			guard let self else { timer.invalidate(); return }
 			let t = min(1, Date().timeIntervalSince(began) / duration)
@@ -2045,57 +2502,73 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		}
 	}
 	
-	/// Scrolls so that the selected image is fully visible
+	/// Scrolls so that the selected item is fully visible inside the text area
 	func scrollToSelected() {
-		let frames = stripFrames
+		let frames = itemFrames
 		guard selectedIndex < frames.count else { return }
 		let frame = frames[selectedIndex]
-		if frame.minX - ViralCarouselView.padding < scrollX {
-			animateScroll(to: frame.minX - ViralCarouselView.padding)
-		} else if frame.maxX + ViralCarouselView.padding > scrollX + embedWidth {
-			animateScroll(to: frame.maxX + ViralCarouselView.padding - embedWidth)
+		if frame.minX - textInset < scrollX {
+			animateScroll(to: frame.minX - textInset)
+		} else if frame.maxX + textInset > scrollX + embedWidth {
+			animateScroll(to: frame.maxX + textInset - embedWidth)
 		}
 	}
 	
 	@objc func showPrevious(_ sender: Any?) {
-		// Bring the image cut off on the left fully into view (or scroll a full width)
-		let frames = stripFrames
-		if let i = frames.lastIndex(where: { $0.minX < scrollX - 1 }) {
-			var target = max(frames[i].maxX + ViralCarouselView.padding - embedWidth, scrollX - embedWidth * 0.8)
-			if target >= scrollX - 1 { target = scrollX - embedWidth * 0.8 }
+		let frames = itemFrames
+		if let i = frames.lastIndex(where: { $0.minX - textInset < scrollX - 1 }) {
+			var target = max(frames[i].maxX + textInset - embedWidth, scrollX - textWidth * 0.8)
+			if target >= scrollX - 1 { target = scrollX - textWidth * 0.8 }
 			animateScroll(to: target)
 			selectedIndex = i
 		} else {
 			animateScroll(to: 0)
 		}
-		needsDisplay = true
+		updateChrome()
 	}
 	
 	@objc func showNext(_ sender: Any?) {
-		// Bring the image cut off on the right fully into view (or scroll a full width)
-		let frames = stripFrames
-		let right = scrollX + embedWidth
+		let frames = itemFrames
+		let right = scrollX + embedWidth - textInset
 		if let i = frames.firstIndex(where: { $0.maxX > right + 1 }) {
-			var target = min(frames[i].minX - ViralCarouselView.padding, scrollX + embedWidth * 0.8)
-			if target <= scrollX + 1 { target = scrollX + embedWidth * 0.8 }
+			var target = min(frames[i].minX - textInset, scrollX + textWidth * 0.8)
+			if target <= scrollX + 1 { target = scrollX + textWidth * 0.8 }
 			animateScroll(to: target)
 			selectedIndex = i
 		} else {
 			animateScroll(to: maxScroll)
 		}
-		needsDisplay = true
+		updateChrome()
 	}
 	
-	override func addImages(_ images: [NSImage]) {
-		let lines = newImageLines(images)
-		guard !lines.isEmpty else { return }
-		let ids = lines.compactMap { $0.ids.first }
+	func insertEntries(_ entries: [String]) {
+		guard !entries.isEmpty else { return }
 		let at = item.ids.isEmpty ? 0 : min(selectedIndex + 1, item.ids.count)
-		item.ids.insert(contentsOf: ids, at: at)
-		selectedIndex = at + ids.count - 1
+		// Video views are keyed by position, so they are rebuilt after an insert
+		for (_, video) in videos { video.view.removeFromSuperview() }
+		videos = [:]
+		item.ids.insert(contentsOf: entries, at: at)
+		selectedIndex = at + entries.count - 1
 		relayout()
 		write([item.text])
 		scrollToSelected()
+	}
+	
+	override func addImages(_ images: [NSImage]) {
+		insertEntries(newImageLines(images).compactMap { $0.ids.first })
+	}
+	
+	override func addVideos(_ urls: [String]) {
+		insertEntries(urls.map { ViralMedia.make(url: $0, thumbnail: nil) })
+	}
+	
+	func setThumbnail(_ image: NSImage, at index: Int) {
+		guard index < item.ids.count, let settings else { return }
+		let entry = item.ids[index]
+		guard ViralMedia.isVideo(entry), ViralMedia.thumbnail(entry) == nil,
+			  let id = ViralImages.add(image, settings: settings) else { return }
+		item.ids[index] = ViralMedia.make(url: ViralMedia.url(entry), thumbnail: id)
+		write([item.text])
 	}
 	
 	func removeSelected() {
@@ -2103,6 +2576,8 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 			host?.deleteEmbed(self)
 			return
 		}
+		for (_, video) in videos { video.view.removeFromSuperview() }
+		videos = [:]
 		item.ids.remove(at: selectedIndex)
 		selectedIndex = min(selectedIndex, max(item.ids.count - 1, 0))
 		relayout()
@@ -2122,13 +2597,18 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		relayout()
 		write([item.text])
 	}
+	@objc func openInBrowser(_ sender: Any?) {
+		guard selectedIndex < item.ids.count, ViralMedia.isVideo(item.ids[selectedIndex]),
+			  let url = URL(string: ViralMedia.url(item.ids[selectedIndex])) else { return }
+		NSWorkspace.shared.open(url)
+	}
 	
 	override func keyDown(with event: NSEvent) {
 		switch event.keyCode {
 		case 123:
-			if selectedIndex > 0 { selectedIndex -= 1; scrollToSelected(); needsDisplay = true }
+			if selectedIndex > 0 { selectedIndex -= 1; scrollToSelected(); updateChrome() }
 		case 124:
-			if selectedIndex < item.ids.count - 1 { selectedIndex += 1; scrollToSelected(); needsDisplay = true }
+			if selectedIndex < item.ids.count - 1 { selectedIndex += 1; scrollToSelected(); updateChrome() }
 		case 51, 117: removeSelected()
 		default: super.keyDown(with: event)
 		}
@@ -2137,19 +2617,26 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	override func menu(for event: NSEvent) -> NSMenu? {
 		window?.makeFirstResponder(self)
 		let point = convert(event.locationInWindow, from: nil)
-		if let i = stripFrames.firstIndex(where: { $0.offsetBy(dx: -scrollX, dy: 0).contains(point) }) {
+		if let i = itemFrames.firstIndex(where: { $0.offsetBy(dx: -scrollX, dy: 0).contains(point) }) {
 			selectedIndex = i
-			needsDisplay = true
+			updateChrome()
 		}
+		let isVideo = selectedIndex < item.ids.count && ViralMedia.isVideo(item.ids[selectedIndex])
 		
 		let menu = NSMenu()
 		let add = NSMenuItem(title: "Add Images…", action: #selector(chooseAndAddImages(_:)), keyEquivalent: "")
 		add.target = self
 		menu.addItem(add)
 		if !item.ids.isEmpty {
-			let remove = NSMenuItem(title: "Remove This Image", action: #selector(removeImageFromMenu(_:)), keyEquivalent: "")
+			let remove = NSMenuItem(title: isVideo ? "Remove This Video" : "Remove This Image", action: #selector(removeImageFromMenu(_:)), keyEquivalent: "")
 			remove.target = self
 			menu.addItem(remove)
+		}
+		if isVideo {
+			let open = NSMenuItem(title: "Open in Browser", action: #selector(openInBrowser(_:)), keyEquivalent: "")
+			open.target = self
+			menu.addItem(open)
+			signInMenu(into: menu)
 		}
 		menu.addItem(NSMenuItem.separator())
 		
@@ -2178,6 +2665,9 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	}
 }
 
+fileprivate final class ViralFlippedView: NSView {
+	override var isFlipped: Bool { return true }
+}
 // MARK: - Text view integration (images)
 
 public extension BeatTextView {
@@ -2217,13 +2707,13 @@ public extension BeatTextView {
 				if line.trimmingCharacters(in: .whitespaces).hasPrefix("![") { embed = EmbedLine.parse(line) }
 				
 				if let embed {
-					if embed.kind == .image, var block = current, block.kind == .image {
+					if embed.kind.isGroupItem, var block = current, block.kind == .image {
 						block.lines.append(line)
 						block.range.length = NSMaxRange(content) - block.range.location
 						current = block
 					} else {
 						if let block = current { blocks.append(block) }
-						current = EmbedBlock(range: content, lines: [line], kind: embed.kind)
+						current = EmbedBlock(range: content, lines: [line], kind: embed.kind.isGroupItem ? .image : .carousel)
 						if embed.kind == .carousel, let block = current {
 							blocks.append(block)
 							current = nil
@@ -2265,7 +2755,7 @@ public extension BeatTextView {
 	fileprivate func embedHeightAtLocation(_ location: Int) -> CGFloat? {
 		let lines = embedLines(at: location)
 		guard let first = lines.first else { return nil }
-		if first.kind == .carousel { return ViralCarouselView.height(for: first, width: tableWidth) }
+		if first.kind == .carousel { return ViralCarouselView.height(for: first, textWidth: tableWidth) }
 		return viralGroupLayout(lines, width: tableWidth, settings: editorDelegate?.documentSettings).height
 	}
 	
@@ -2296,8 +2786,16 @@ public extension BeatTextView {
 		for (i, block) in blocks.enumerated() {
 			let view = ordered[i]
 			view.blockRange = block.range
-			let widthChanged = view.embedWidth != width
-			view.embedWidth = width
+			
+			// Carousels run from edge to edge of the page, everything else stays within the text
+			let isCarousel = (block.kind == .carousel)
+			let viewWidth = isCarousel ? tc.size.width : width
+			var widthChanged = view.embedWidth != viewWidth
+			view.embedWidth = viewWidth
+			if let carousel = view as? ViralCarouselView, carousel.textInset != tc.lineFragmentPadding {
+				carousel.textInset = tc.lineFragmentPadding
+				widthChanged = true
+			}
 			
 			let text = ns.substring(with: block.range)
 			if text != view.sourceText || widthChanged {
@@ -2307,8 +2805,9 @@ public extension BeatTextView {
 			let glyph = lm.glyphIndexForCharacter(at: block.range.location)
 			let lineRect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
 			let origin = textContainerOrigin
-			let frame = NSRect(x: origin.x + tc.lineFragmentPadding, y: origin.y + lineRect.minY,
-							   width: width + 24, height: view.totalHeight)
+			let frame = isCarousel
+				? NSRect(x: origin.x, y: origin.y + lineRect.minY, width: tc.size.width, height: view.totalHeight)
+				: NSRect(x: origin.x + tc.lineFragmentPadding, y: origin.y + lineRect.minY, width: width + 24, height: view.totalHeight)
 			if view.frame != frame { view.frame = frame }
 		}
 		
@@ -2434,7 +2933,7 @@ public extension BeatTextView {
 		
 		if current.trimmingCharacters(in: .whitespaces).isEmpty {
 			range = lineOnly
-		} else if EmbedLine.parse(current)?.kind == .image && lines.allSatisfy({ EmbedLine.parse($0)?.kind == .image }) {
+		} else if EmbedLine.parse(current)?.kind.isGroupItem == true && lines.allSatisfy({ EmbedLine.parse($0)?.kind.isGroupItem == true }) {
 			range = NSRange(location: NSMaxRange(lineOnly), length: 0)
 			text = "\n" + text
 			offset = 1
@@ -2465,6 +2964,11 @@ public extension BeatTextView {
 			guard let id = ViralImages.add(image, settings: settings) else { return nil }
 			return EmbedLine(kind: .image, ids: [id], width: ViralImages.defaultWidth(image, textWidth: tableWidth)).text
 		}
+		insertEmbedLines(lines)
+	}
+	
+	fileprivate func insertVideos(_ urls: [String]) {
+		let lines = urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 100).text }
 		insertEmbedLines(lines)
 	}
 	
@@ -2514,10 +3018,16 @@ public extension BeatTextView {
 	
 	/// Called from `paste:`. Returns `true` if images were pasted.
 	@objc func pasteImagesIfNeeded(_ pasteboard: NSPasteboard) -> Bool {
+		let links = viralVideoLinks(from: pasteboard)
 		if let embed = window?.firstResponder as? ViralEmbedView, embed.host === self {
+			if !links.isEmpty { embed.addVideos(links); return true }
 			let images = viralImages(from: pasteboard)
 			if images.isEmpty { return false }
 			embed.addImages(images)
+			return true
+		}
+		if !links.isEmpty {
+			insertVideos(links)
 			return true
 		}
 		let images = viralImages(from: pasteboard)
@@ -2528,19 +3038,21 @@ public extension BeatTextView {
 	
 	/// Called from `performDragOperation:`. Returns `true` if images were dropped.
 	@objc func dropImagesIfNeeded(_ sender: NSDraggingInfo) -> Bool {
-		let images = viralImages(from: sender.draggingPasteboard)
-		guard !images.isEmpty else { return false }
+		let pasteboard = sender.draggingPasteboard
+		let links = viralVideoLinks(from: pasteboard)
+		let images = links.isEmpty ? viralImages(from: pasteboard) : []
+		guard !links.isEmpty || !images.isEmpty else { return false }
 		
 		let point = convert(sender.draggingLocation, from: nil)
 		if let view = embedViews.first(where: { $0.frame.contains(point) }) {
-			view.addImages(images)
+			if links.isEmpty { view.addImages(images) } else { view.addVideos(links) }
 			return true
 		}
 		
 		let index = characterIndexForInsertion(at: point)
 		window?.makeFirstResponder(self)
 		setSelectedRange(NSRange(location: min(index, (self.string as NSString).length), length: 0))
-		insertImages(images)
+		if links.isEmpty { insertImages(images) } else { insertVideos(links) }
 		return true
 	}
 	

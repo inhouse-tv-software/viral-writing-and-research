@@ -972,11 +972,14 @@ static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
 - (NSString*)embedInner
 {
     NSString* inner = BeatEmbedInner(self.string, @"![image](viral:");
+    if (inner == nil) inner = BeatEmbedInner(self.string, @"![video](viral:");
     if (inner == nil) inner = BeatEmbedInner(self.string, @"![carousel](viral:");
     return inner;
 }
 
-- (bool)isEmbedImageLine { return BeatEmbedInner(self.string, @"![image](viral:") != nil; }
+/// Images and videos are laid out the same way
+- (bool)isEmbedImageLine { return BeatEmbedInner(self.string, @"![image](viral:") != nil || self.isEmbedVideoLine; }
+- (bool)isEmbedVideoLine { return BeatEmbedInner(self.string, @"![video](viral:") != nil; }
 - (bool)isEmbedCarouselLine { return BeatEmbedInner(self.string, @"![carousel](viral:") != nil; }
 - (bool)isEmbedLine { return self.isEmbedImageLine || self.isEmbedCarouselLine; }
 

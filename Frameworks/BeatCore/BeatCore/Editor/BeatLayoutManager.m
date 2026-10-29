@@ -35,7 +35,7 @@
 @end
 
 #if TARGET_OS_OSX
-    #define X_OFFSET 50.0
+    #define X_OFFSET 12.0
 #else
     #define X_OFFSET 25.0
 #endif
@@ -517,7 +517,7 @@ static NSInteger BeatEmbedKindForString(NSString* string)
     if (BeatIsTableRowString(string)) return 1;
     NSString* t = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     if (![t hasSuffix:@")"]) return 0;
-    if ([t hasPrefix:@"![image](viral:"]) return 2;
+    if ([t hasPrefix:@"![image](viral:"] || [t hasPrefix:@"![video](viral:"]) return 2;
     if ([t hasPrefix:@"![carousel](viral:"]) return 3;
     return 0;
 }
