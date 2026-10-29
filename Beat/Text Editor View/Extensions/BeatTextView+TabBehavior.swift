@@ -1477,12 +1477,71 @@ fileprivate enum ViralWeb {
 		guard width > 1 else { return }
 		// Instagram and Facebook embeds are cards with a maximum width, so they are scaled to fit that width
 		let provider = url.flatMap { ViralVideo.info($0)?.provider } ?? ""
-		let reference: CGFloat = (provider == "Instagram") ? 540 : (provider == "Facebook" ? 560 : 720)
-		let zoom = min(1.0, max(0.3, width / reference))
+		// Instagram is shown with a plain video player, which doesn't need scaling
+		let reference: CGFloat = (provider == "Facebook") ? 560 : 720
+		let zoom = (provider == "Instagram") ? 1.0 : min(1.0, max(0.3, width / reference))
 		if abs(view.pageZoom - zoom) > 0.01 { view.pageZoom = zoom }
 	}
 	
+	/// Finds the video (or photo) address in an Instagram embed page
+	static let instagramExtractScript = #"""
+	(function(){
+		var h = document.documentElement.innerHTML;
+		function grab(key) {
+			var i = h.indexOf(key);
+			if (i < 0) return null;
+			var j = h.indexOf('http', i);
+			if (j < 0 || j - i > 40) return null;
+			var e = h.indexOf('"', j);
+			if (e < 0) return null;
+			var r = h.substring(j, e);
+			r = r.replace(/\\+u0026/g, '&').replace(/\\/g, '');
+			return r;
+		}
+		var v = grab('video_url');
+		if (!v) { var el = document.querySelector('video'); if (el && el.src) v = el.src; }
+		var im = grab('display_url');
+		if (!im) { var img = document.querySelector('img.EmbeddedMediaImage'); if (img) im = img.currentSrc || img.src; }
+		return JSON.stringify({ video: v, image: im });
+	})();
+	"""#
+	
+	/// If the address can't be found, at least hide everything around the video
+	static let instagramCleanupScript = #"""
+	(function(){
+		var s = document.createElement('style');
+		s.textContent = '.Header,.HeaderView,.Footer,.SocialProof,.Caption,.CaptionComments,.Feedback,.ActionBar,.EmbedFooter,.HoverCard{display:none!important} html,body{background:#000!important}';
+		document.head.appendChild(s);
+	})();
+	"""#
+	
+	static func escapeAttribute(_ string: String) -> String {
+		return string.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;").replacingOccurrences(of: "<", with: "&lt;")
+	}
+	
+	/// A page with just the video (or photo), nothing else
+	static func mediaHTML(video: String?, image: String?) -> String {
+		let style = "<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}video,img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}</style>"
+		var body = ""
+		if let video {
+			let poster = image.map { " poster=\"\(escapeAttribute($0))\"" } ?? ""
+			body = "<video src=\"\(escapeAttribute(video))\"\(poster) controls playsinline loop preload=\"metadata\"></video>"
+		} else if let image {
+			body = "<img src=\"\(escapeAttribute(image))\">"
+		}
+		return "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\(style)</head><body>\(body)</body></html>"
+	}
+	
 	static func load(_ view: WKWebView, url: String) {
+		// Instagram embeds come with a header, likes and comments. Load the embed page, take the video address from it,
+		// and show only the video in a plain player.
+		if let info = ViralVideo.info(url), info.provider == "Instagram",
+		   let loader = view.navigationDelegate as? ViralVideoLoader, let embed = URL(string: info.embed) {
+			loader.instagramStage = 1
+			view.alphaValue = 0
+			view.load(URLRequest(url: embed))
+			return
+		}
 		guard let info = ViralVideo.info(url) else {
 			view.loadHTMLString("<html><body style='background:#111;color:#aaa;font:13px -apple-system;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>This link can't be played here</body></html>", baseURL: baseURL)
 			return
@@ -1502,7 +1561,34 @@ fileprivate final class ViralVideoLoader: NSObject, WKNavigationDelegate, WKUIDe
 	var onSnapshot: ((NSImage) -> Void)?
 	var wantsSnapshot = false
 	
+	/// 1 = loading the Instagram embed page, 2 = showing the plain player
+	var instagramStage = 0
+	
 	func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+		if instagramStage == 1 {
+			instagramStage = 2
+			webView.evaluateJavaScript(ViralWeb.instagramExtractScript) { result, _ in
+				var video: String? = nil
+				var image: String? = nil
+				if let json = result as? String, let data = json.data(using: .utf8),
+				   let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+					video = dict["video"] as? String
+					image = dict["image"] as? String
+				}
+				if video != nil || image != nil {
+					webView.loadHTMLString(ViralWeb.mediaHTML(video: video, image: image), baseURL: ViralWeb.baseURL)
+				} else {
+					self.instagramStage = 0
+					webView.evaluateJavaScript(ViralWeb.instagramCleanupScript, completionHandler: nil)
+					webView.alphaValue = 1
+				}
+			}
+			return
+		}
+		if instagramStage == 2 {
+			instagramStage = 0
+			webView.alphaValue = 1
+		}
 		guard wantsSnapshot else { return }
 		DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self, weak webView] in
 			guard let self, let webView, self.wantsSnapshot, webView.bounds.width > 20 else { return }
