@@ -855,6 +855,7 @@ public extension BeatTextView {
 		
 		NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: self, queue: .main) { [weak self] _ in
 			self?.scheduleTableUpdate()
+			self?.scheduleSaveAs()
 		}
 		NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: self, queue: .main) { [weak self] _ in
 			self?.caretMovedIntoTableIfNeeded()
@@ -1021,8 +1022,15 @@ public extension BeatTextView {
 		var range = view.tableRange
 		guard NSMaxRange(range) <= ns.length else { return }
 		if NSMaxRange(range) < ns.length { range.length += 1 }
+		
+		// Remove the view first, so nothing can move the caret back into it (which kept the table alive before)
+		tableViews.removeAll { $0 === view }
 		window?.makeFirstResponder(self)
+		view.removeFromSuperview()
+		
+		isWritingTable = true
 		textActions.replace(range, with: "")
+		isWritingTable = false
 		self.setSelectedRange(NSRange(location: min(range.location, (self.string as NSString).length), length: 0))
 		scheduleTableUpdate()
 	}
@@ -1463,6 +1471,17 @@ fileprivate enum ViralWeb {
 		return view
 	}
 	
+	/// Players draw their controls for the size they think they are. Rendering them as if they were bigger keeps the controls small.
+	static func fitZoom(_ view: WKWebView, url: String? = nil) {
+		let width = view.bounds.width
+		guard width > 1 else { return }
+		// Instagram and Facebook embeds are cards with a maximum width, so they are scaled to fit that width
+		let provider = url.flatMap { ViralVideo.info($0)?.provider } ?? ""
+		let reference: CGFloat = (provider == "Instagram") ? 540 : (provider == "Facebook" ? 560 : 720)
+		let zoom = min(1.0, max(0.3, width / reference))
+		if abs(view.pageZoom - zoom) > 0.01 { view.pageZoom = zoom }
+	}
+	
 	static func load(_ view: WKWebView, url: String) {
 		guard let info = ViralVideo.info(url) else {
 			view.loadHTMLString("<html><body style='background:#111;color:#aaa;font:13px -apple-system;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>This link can't be played here</body></html>", baseURL: baseURL)
@@ -1470,7 +1489,7 @@ fileprivate enum ViralWeb {
 		}
 		let html = """
 		<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-		<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
+		<style>html,body{margin:0;padding:0;height:100%;background:\(info.provider == "Instagram" || info.provider == "Facebook" ? "#fff" : "#000");overflow:hidden}
 		iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head>
 		<body><iframe src="\(info.embed)" allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>
 		"""
@@ -1918,6 +1937,7 @@ fileprivate final class ViralImageTile: NSView {
 	
 	func layoutChrome() {
 		webView?.frame = bounds
+		if let webView { ViralWeb.fitZoom(webView, url: videoURL) }
 		handle.frame = NSRect(x: bounds.maxX - EMetrics.handle - 2, y: bounds.maxY - EMetrics.handle - 2, width: EMetrics.handle, height: EMetrics.handle)
 		menuButton.frame = NSRect(x: bounds.maxX - 30, y: 6, width: 24, height: 24)
 		let radius = (item?.rounded ?? false) ? EmbedLine.cornerRadius(bounds) : 0
@@ -2353,6 +2373,7 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 				video.loader.onSnapshot = { [weak self] image in self?.setThumbnail(image, at: i) }
 				let frame = frames[i].offsetBy(dx: -scrollX, dy: -EMetrics.marginTop)
 				video.view.frame = frame
+				ViralWeb.fitZoom(video.view, url: url)
 				let radius = item.rounded ? EmbedLine.cornerRadius(frame) : 0
 				video.view.layer?.cornerRadius = radius
 				video.view.layer?.masksToBounds = radius > 0
@@ -2882,8 +2903,14 @@ public extension BeatTextView {
 		var range = view.blockRange
 		guard NSMaxRange(range) <= ns.length else { return }
 		if NSMaxRange(range) < ns.length { range.length += 1 }
+		
+		embedViews.removeAll { $0 === view }
 		window?.makeFirstResponder(self)
+		view.removeFromSuperview()
+		
+		isWritingTable = true
 		textActions.replace(range, with: "")
+		isWritingTable = false
 		self.setSelectedRange(NSRange(location: min(range.location, (self.string as NSString).length), length: 0))
 		scheduleTableUpdate()
 	}
@@ -3062,5 +3089,149 @@ public extension BeatTextView {
 	
 	@objc func viralInsertCarousel(_ sender: Any?) {
 		insertCarousel()
+	}
+}
+
+
+// MARK: - "Save As:" in the title page
+/*
+ 
+ Write `Save As: Name` in the title page (like `Title:`), and the document is saved as `Name.fountain`
+ and kept saved while you write. Changing the name renames the file.
+ 
+ Untitled documents go to a folder chosen once (Documents by default). The folder is remembered.
+ 
+ */
+
+fileprivate var ViralSaveTimerKey: UInt8 = 0
+fileprivate let ViralSaveFolderBookmarkKey = "ViralSaveFolderBookmark"
+fileprivate var ViralSaveFolderAccess: URL? = nil
+fileprivate var ViralSaveFolderAsking = false
+
+public extension BeatTextView {
+	
+	/// The `Save As:` value from the title page, cleaned up to be a file name
+	fileprivate var saveAsName: String? {
+		let ns = self.string as NSString
+		var location = 0
+		var count = 0
+		while location < ns.length && count < 40 {
+			let lineRange = ns.lineRange(for: NSRange(location: location, length: 0))
+			if lineRange.length == 0 { break }
+			var content = lineRange
+			if content.length > 0 && ns.character(at: NSMaxRange(content) - 1) == 10 { content.length -= 1 }
+			let line = ns.substring(with: content).trimmingCharacters(in: .whitespaces)
+			if line.isEmpty { break }
+			if line.lowercased().hasPrefix("save as:") {
+				var name = String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+				for bad in ["/", ":", "\\", "?", "*", "\"", "<", ">", "|"] { name = name.replacingOccurrences(of: bad, with: "-") }
+				if name.lowercased().hasSuffix(".fountain") { name = String(name.dropLast(9)) }
+				name = name.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+				return name.isEmpty ? nil : String(name.prefix(120))
+			}
+			location = NSMaxRange(lineRange)
+			count += 1
+		}
+		return nil
+	}
+	
+	fileprivate func scheduleSaveAs() {
+		guard saveAsName != nil else { return }
+		(objc_getAssociatedObject(self, &ViralSaveTimerKey) as? Timer)?.invalidate()
+		let timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+			self?.performSaveAs()
+		}
+		objc_setAssociatedObject(self, &ViralSaveTimerKey, timer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+	}
+	
+	fileprivate func performSaveAs() {
+		guard let name = saveAsName,
+			  let document = window?.windowController?.document as? NSDocument
+		else { return }
+		
+		let type = document.fileType ?? "Fountain script"
+		let fileName = name + ".fountain"
+		
+		if let current = document.fileURL {
+			if current.lastPathComponent == fileName {
+				// Same name, just keep it saved
+				if document.isDocumentEdited { document.save(nil) }
+				return
+			}
+			// Rename next to the current file
+			let target = current.deletingLastPathComponent().appendingPathComponent(fileName)
+			if FileManager.default.fileExists(atPath: target.path) {
+				if document.isDocumentEdited { document.save(nil) }
+				return
+			}
+			// Save under the new name, then remove the old file (moving an open document can trip NSDocument's file access checks)
+			document.save(to: target, ofType: type, for: .saveAsOperation) { [weak self] error in
+				if error != nil {
+					// No access to that folder, save into the Viral folder instead
+					DispatchQueue.main.async { self?.saveIntoViralFolder(document, fileName: fileName, type: type) }
+				} else if document.fileURL == target {
+					try? FileManager.default.removeItem(at: current)
+				}
+			}
+		} else {
+			saveIntoViralFolder(document, fileName: fileName, type: type)
+		}
+	}
+	
+	fileprivate func saveIntoViralFolder(_ document: NSDocument, fileName: String, type: String) {
+		viralSaveFolder { folder in
+			guard let folder else { return }
+			var target = folder.appendingPathComponent(fileName)
+			var n = 2
+			let base = (fileName as NSString).deletingPathExtension
+			while FileManager.default.fileExists(atPath: target.path) && target != document.fileURL {
+				target = folder.appendingPathComponent("\(base) \(n).fountain")
+				n += 1
+			}
+			document.save(to: target, ofType: type, for: .saveAsOperation) { error in
+				if let error { NSLog("Viral: Save As failed: %@", error.localizedDescription) }
+			}
+		}
+	}
+	
+	/// The folder for `Save As:` documents. Asked once, then remembered.
+	fileprivate func viralSaveFolder(_ completion: @escaping (URL?) -> Void) {
+		if let folder = ViralSaveFolderAccess { completion(folder); return }
+		
+		if let data = UserDefaults.standard.data(forKey: ViralSaveFolderBookmarkKey) {
+			var stale = false
+			if let url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale) {
+				if url.startAccessingSecurityScopedResource() {
+					ViralSaveFolderAccess = url
+					if stale, let fresh = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
+						UserDefaults.standard.set(fresh, forKey: ViralSaveFolderBookmarkKey)
+					}
+					completion(url)
+					return
+				}
+			}
+		}
+		
+		guard !ViralSaveFolderAsking, let window else { completion(nil); return }
+		ViralSaveFolderAsking = true
+		
+		let panel = NSOpenPanel()
+		panel.canChooseDirectories = true
+		panel.canChooseFiles = false
+		panel.canCreateDirectories = true
+		panel.allowsMultipleSelection = false
+		panel.prompt = "Save Here"
+		panel.message = "Choose where Viral saves documents with a \u{201C}Save As:\u{201D} name. You only need to do this once."
+		panel.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+		panel.beginSheetModal(for: window) { response in
+			ViralSaveFolderAsking = false
+			guard response == .OK, let url = panel.url else { completion(nil); return }
+			if let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
+				UserDefaults.standard.set(data, forKey: ViralSaveFolderBookmarkKey)
+			}
+			_ = url.startAccessingSecurityScopedResource()
+			ViralSaveFolderAccess = url
+			completion(url)
+		}
 	}
 }

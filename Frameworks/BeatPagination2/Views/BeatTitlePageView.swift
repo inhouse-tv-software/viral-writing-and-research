@@ -137,7 +137,7 @@ import UXKit
 		// Add the rest of the elements on left side
 		for dict in self.titlePageLines {
             // Make sure we have a value and that it's not a metadata key
-            guard let key = dict.keys.first?.lowercased(), key.prefix(2) != "x-" else {
+            guard let key = dict.keys.first?.lowercased(), key.prefix(2) != "x-", key != "save as" else {
                 continue
             }
                     
