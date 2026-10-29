@@ -116,7 +116,86 @@ public class BeatRenderLayoutManager:NSLayoutManager, NSLayoutManagerDelegate {
 	override public func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
 		super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         drawHighlight(forGlyphRange: glyphsToShow)
+        drawTables(forGlyphRange: glyphsToShow, origin: origin)
 	}
+    
+    // MARK: - Tables
+    
+    /// Draws grid lines for table rows (marked with `BeatTableRow` attribute by the renderer)
+    func drawTables(forGlyphRange glyphRange: NSRange, origin: CGPoint) {
+        guard let textStorage, let container = self.textContainers.first else { return }
+        
+        let key = NSAttributedString.Key("BeatTableRow")
+        let range = self.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        
+        textStorage.enumerateAttribute(key, in: range) { value, rowRange, stop in
+            guard let info = value as? [String: Any],
+                  let pipes = info["pipes"] as? [NSNumber],
+                  rowRange.length > 0
+            else { return }
+            
+            // Separator rows are not drawn
+            if (info["separator"] as? Bool) ?? false { return }
+            
+            // Check neighboring rows. Index - 1 is the line break of the previous row.
+            var firstRow = true
+            if rowRange.location >= 2, textStorage.attribute(key, at: rowRange.location - 2, effectiveRange: nil) != nil {
+                firstRow = false
+            }
+            
+            var headerRow = false
+            let nextIndex = NSMaxRange(rowRange) + 1
+            if firstRow, nextIndex < textStorage.length,
+               let next = textStorage.attribute(key, at: nextIndex, effectiveRange: nil) as? [String: Any],
+               (next["separator"] as? Bool) ?? false {
+                headerRow = true
+            }
+            
+            var xs: [CGFloat] = []
+            for p in pipes {
+                let charIndex = rowRange.location + p.intValue
+                guard charIndex < textStorage.length else { continue }
+                let glyphIndex = self.glyphIndexForCharacter(at: charIndex)
+                let r = self.boundingRect(forGlyphRange: NSMakeRange(glyphIndex, 1), in: container)
+                xs.append(origin.x + r.midX)
+            }
+            
+            guard xs.count >= 2, let left = xs.first, let right = xs.last else { return }
+            
+            let firstGlyph = self.glyphIndexForCharacter(at: rowRange.location)
+            let lastGlyph = self.glyphIndexForCharacter(at: NSMaxRange(rowRange) - 1)
+            let topRect = self.lineFragmentUsedRect(forGlyphAt: firstGlyph, effectiveRange: nil)
+            let bottomRect = self.lineFragmentUsedRect(forGlyphAt: lastGlyph, effectiveRange: nil)
+            
+            let top = origin.y + topRect.origin.y
+            let bottom = origin.y + bottomRect.maxY
+            let height = bottom - top
+            
+            if headerRow {
+                UXColor(white: 0.92, alpha: 1.0).setFill()
+                self.fillTableRect(CGRect(x: left, y: top, width: right - left, height: height))
+            }
+            
+            UXColor(white: 0.45, alpha: 1.0).setFill()
+            
+            for x in xs {
+                self.fillTableRect(CGRect(x: x - 0.25, y: top, width: 0.5, height: height))
+            }
+            
+            if firstRow {
+                self.fillTableRect(CGRect(x: left - 0.25, y: top, width: right - left + 0.5, height: 0.5))
+            }
+            self.fillTableRect(CGRect(x: left - 0.25, y: bottom - 0.5, width: right - left + 0.5, height: 0.5))
+        }
+    }
+    
+    private func fillTableRect(_ rect: CGRect) {
+        #if os(iOS)
+        UIRectFill(rect)
+        #else
+        rect.fill()
+        #endif
+    }
     
     /// Draws background highlights (for `Highlight` attribute) for given glyph range. Called in `drawBackground`.
     func drawHighlight(forGlyphRange glyphRange:NSRange) {

@@ -107,6 +107,9 @@
     
     // Page breaks have 0 height
     if (line.type == pageBreak) return 0.0;
+    
+    // Table header separator rows are collapsed into a thin strip
+    if (line.type == action && line.isTableSeparator) return 2.0;
         
     // If this is a *dual dialogue column*, we'll need to convert the style.
     /*

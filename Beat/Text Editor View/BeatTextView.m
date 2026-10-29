@@ -370,6 +370,9 @@ NSString *keyCodeToString(uint16_t keyCode) {
 	} else if (self.popoverController.isShown) {
 		// Forward events to popover
 		preventDefault = [self.popoverController keyPressedWithKeyCode:event.keyCode];
+	} else if (!self.editorDelegate.contentLocked && [self handleTableKeyDown:event]) {
+		// Table editing (see BeatTextView+TabBehavior.swift)
+		preventDefault = YES;
 	} else {
 		switch (event.keyCode) {
 			case 51:
@@ -417,6 +420,9 @@ NSString *keyCodeToString(uint16_t keyCode) {
 	// Run superclass method for the event (ie. do what the keyboard says)
 	[super keyDown:event];
 	
+	// Keep table columns aligned while typing
+	if (!self.editorDelegate.contentLocked) [self tableDidProcessKeyDown:event];
+	
 	// Run completion block
 	if (shouldComplete && self.editorDelegate.mode != TaggingMode) {
 		if (self.automaticTextCompletionEnabled) [self showAutocompletions];
@@ -425,6 +431,24 @@ NSString *keyCodeToString(uint16_t keyCode) {
 	}
 }
 
+
+#pragma mark - Context menu
+
+- (NSMenu *)menuForEvent:(NSEvent *)event
+{
+	NSMenu* menu = [super menuForEvent:event];
+	if (menu == nil || self.editorDelegate.contentLocked) return menu;
+	
+	// Move caret to the clicked position, so table commands act on the clicked cell
+	if (self.selectedRange.length == 0) {
+		NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+		NSUInteger index = [self characterIndexForInsertionAtPoint:point];
+		if (index <= self.string.length) [self setSelectedRange:NSMakeRange(index, 0)];
+	}
+	
+	[self addTableMenuItems:menu];
+	return menu;
+}
 
 -(NSRect)adjustScroll:(NSRect)newVisible
 {

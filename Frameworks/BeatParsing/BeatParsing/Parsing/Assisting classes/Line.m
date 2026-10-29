@@ -858,6 +858,46 @@
     return [NSString stringWithFormat:@"Line: %@  (%@ at %lu) %@", self.string, self.typeAsString, self.position, (self.nextElementIsDualDialogue) ? @"Next is dual" : @"" ];
 }
 
+#pragma mark - Tables
+
+- (bool)isTableRow
+{
+    NSString* string = self.string;
+    if (string.length < 2) return false;
+    
+    NSInteger first = 0;
+    NSInteger last = string.length - 1;
+    while (first < string.length && [string characterAtIndex:first] == ' ') first++;
+    while (last >= 0 && [string characterAtIndex:last] == ' ') last--;
+    
+    if (last - first < 1) return false;
+    return ([string characterAtIndex:first] == '|' && [string characterAtIndex:last] == '|');
+}
+
+- (bool)isTableSeparator
+{
+    if (!self.isTableRow) return false;
+    
+    NSString* string = self.string;
+    bool hasDash = false;
+    for (NSInteger i = 0; i < string.length; i++) {
+        unichar c = [string characterAtIndex:i];
+        if (c == '-') hasDash = true;
+        else if (c != '|' && c != ':' && c != ' ') return false;
+    }
+    return hasDash;
+}
+
+- (NSArray<NSNumber*>*)tableSeparatorIndices
+{
+    NSMutableArray* indices = NSMutableArray.new;
+    NSString* string = self.string;
+    for (NSInteger i = 0; i < string.length; i++) {
+        if ([string characterAtIndex:i] == '|') [indices addObject:@(i)];
+    }
+    return indices;
+}
+
 #pragma mark - Copy
 
 - (nonnull id)copyWithZone:(nullable NSZone *)zone {

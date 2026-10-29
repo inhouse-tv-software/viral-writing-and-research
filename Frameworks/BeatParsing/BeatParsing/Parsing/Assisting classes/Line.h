@@ -448,6 +448,15 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (void)parseSceneNumber;
 - (void)parseSceneNumberWithCharArray:(unichar*)string length:(NSInteger)length;
 
+#pragma mark - Tables
+
+/// Returns `true` if this line is a row of a Markdown-style pipe table, ie. `| cell | cell |`
+- (bool)isTableRow;
+/// Returns `true` if this line is the header separator row of a table, ie. `|---|---|`
+- (bool)isTableSeparator;
+/// Local indices of every column separator (`|`) on this line
+- (NSArray<NSNumber*>*)tableSeparatorIndices;
+
 #pragma mark - Debugging
 
 -(NSString *)description;

@@ -325,6 +325,11 @@
         [attributedString replaceCharactersInRange:NSMakeRange(0, attributedString.length) withAttributedString:[NSAttributedString.alloc initWithString:content attributes:attrs]];
     }
     
+    // Tables: column separators become spaces and the row is marked, so the layout manager can draw a grid
+    if (line.type == action && line.isTableRow) {
+        attributedString = [self renderTableRow:line content:attributedString];
+    }
+    
     // For headings, add some extra formatting (wrap them in a table and insert scene numbers)
     if (line.type == heading && style.sceneNumber && !self.settings.simpleSceneHeadings) {
         if (self.settings.printSceneHeadingColors) {
@@ -345,6 +350,45 @@
     }
         
     return attributedString;
+}
+
+#pragma mark Tables
+
+/// Replaces `|` characters with spaces (which keeps column positions in a monospaced font) and adds a `BeatTableRow` attribute with local separator positions.
+- (NSMutableAttributedString*)renderTableRow:(Line*)line content:(NSMutableAttributedString*)content
+{
+    bool separator = line.isTableSeparator;
+    NSMutableArray<NSNumber*>* pipes = NSMutableArray.new;
+    
+    NSInteger length = content.length;
+    if (length > 0 && [content.string characterAtIndex:length - 1] == '\n') length -= 1;
+    
+    for (NSInteger i = 0; i < length; i++) {
+        unichar c = [content.string characterAtIndex:i];
+        if (c == '|') {
+            [pipes addObject:@(i)];
+            [content replaceCharactersInRange:NSMakeRange(i, 1) withString:@" "];
+        } else if (separator) {
+            [content replaceCharactersInRange:NSMakeRange(i, 1) withString:@" "];
+        }
+    }
+    
+    if (length == 0) return content;
+    
+    [content addAttribute:@"BeatTableRow" value:@{ @"pipes": pipes, @"separator": @(separator) } range:NSMakeRange(0, length)];
+    
+    // Header separator rows are collapsed into a thin strip
+    if (separator) {
+        NSParagraphStyle* original = [content attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil];
+        NSMutableParagraphStyle* pStyle = (original != nil) ? original.mutableCopy : NSMutableParagraphStyle.new;
+        pStyle.minimumLineHeight = 2.0;
+        pStyle.maximumLineHeight = 2.0;
+        pStyle.paragraphSpacingBefore = 0.0;
+        pStyle.paragraphSpacing = 0.0;
+        [content addAttribute:NSParagraphStyleAttributeName value:pStyle range:NSMakeRange(0, content.length)];
+    }
+    
+    return content;
 }
 
 - (void)applyInlineFormattingWithStyleNames:(NSSet*)styleNames range:(NSRange)range attributedString:(inout NSMutableAttributedString*)attributedString

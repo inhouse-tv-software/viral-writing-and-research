@@ -566,6 +566,9 @@
                 [line.escapeRanges addIndex:0];
         }
         
+        // Table rows (`| cell | cell |`) are always action lines, so they never become character cues etc.
+        if (line.isTableRow) return action;
+        
         for (ParsingRule* rule in self.parsingRules) {
             // Ignore disabled types
             if ([self.delegate.disabledTypes containsIndex:(NSInteger)rule.resultingType]) continue;

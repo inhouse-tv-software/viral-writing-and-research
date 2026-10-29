@@ -338,6 +338,11 @@
         __block RevisionType revisionType = RevisionNone;
 
         Line* line = [self.editorDelegate.parser lineAtIndex:charRange.location];
+        
+        // Tables
+        if (line.type == action && line.isTableRow) {
+            [self drawTableGridForLine:line usedRect:usedRect glyphRange:glyphRange inset:inset];
+        }
 
         if (line.highlightRanges.count > 0) {
             [line.highlightRanges enumerateRangesUsingBlock:^(NSRange range, BOOL * _Nonnull stop) {
@@ -484,6 +489,64 @@
     }];
     
     [super drawBackgroundForGlyphRange:glyphsToShow atPoint:origin];
+}
+
+#pragma mark - Draw tables
+
+/// Draws a Notion-style grid for a table row. Column separators (`|`) are rendered as spaces in glyph generation, and we draw real lines in their place.
+- (void)drawTableGridForLine:(Line*)line usedRect:(CGRect)usedRect glyphRange:(NSRange)fragmentGlyphs inset:(CGSize)inset
+{
+    // Separator rows (|---|---|) are collapsed and not drawn at all
+    if (line.isTableSeparator) return;
+    
+    Line* prevLine = [self.editorDelegate.parser previousLine:line];
+    Line* nextLine = [self.editorDelegate.parser nextLine:line];
+    
+    bool firstRow = !(prevLine != nil && prevLine.type == action && prevLine.isTableRow);
+    bool headerRow = firstRow && nextLine != nil && nextLine.isTableSeparator;
+    
+    NSTextContainer* tc = self.textContainers.firstObject;
+    NSMutableArray<NSNumber*>* xs = NSMutableArray.new;
+    
+    for (NSNumber* n in line.tableSeparatorIndices) {
+        NSUInteger charIndex = line.position + n.integerValue;
+        if (charIndex >= self.textStorage.length) continue;
+        
+        NSUInteger glyphIndex = [self glyphIndexForCharacterAtIndex:charIndex];
+        if (!NSLocationInRange(glyphIndex, fragmentGlyphs)) continue;
+        
+        CGRect r = [self boundingRectForGlyphRange:NSMakeRange(glyphIndex, 1) inTextContainer:tc];
+        [xs addObject:@(inset.width + r.origin.x + r.size.width / 2.0)];
+    }
+    
+    if (xs.count < 2) return;
+    
+    CGFloat top = inset.height + usedRect.origin.y;
+    CGFloat height = usedRect.size.height;
+    CGFloat left = xs.firstObject.doubleValue;
+    CGFloat right = xs.lastObject.doubleValue;
+    
+    BXColor* textColor = ThemeManager.sharedManager.textColor.effectiveColor;
+    if (textColor == nil) textColor = BXColor.grayColor;
+    
+    // Header background
+    if (headerRow) {
+        [[textColor colorWithAlphaComponent:0.06] setFill];
+        BXRectFill(CGRectMake(left, top, right - left, height));
+    }
+    
+    [[textColor colorWithAlphaComponent:0.22] setFill];
+    
+    // Vertical lines
+    for (NSNumber* x in xs) {
+        BXRectFill(CGRectMake(floor(x.doubleValue), top, 1.0, height));
+    }
+    
+    // Top line for the first row
+    if (firstRow) BXRectFill(CGRectMake(left, floor(top), right - left + 1.0, 1.0));
+    
+    // Bottom line for every row
+    BXRectFill(CGRectMake(left, floor(top + height) - 1.0, right - left + 1.0, 1.0));
 }
 
 -(NSArray*)rectsForGlyphRange:(NSRange)glyphsToShow
@@ -849,6 +912,7 @@
     if (foldedCharacters != NSNotFound) return foldedCharacters;
     
     LineType type = line.type;
+    bool isTable = (type == action && line.isTableRow);
     bool currentlyEditing = NSLocationInRange(_editorDelegate.selectedRange.location, line.range) || NSIntersectionRange(_editorDelegate.selectedRange, line.range).length > 0;
             
     // Clear formatting characters etc.
@@ -871,7 +935,8 @@
     // Nothing to do (TODO: To avoid extra range calculations after every change to attributes, retrieve markup ranges AFTER checking if hiding markup is on)
     if (line.macroRanges.count == 0 && muIndices.count == 0 && markerIndices.count == 0 &&
         !(type == heading || type == transitionLine || type == character) &&
-        !(line.string.containsOnlyWhitespace && line.string.length > 1)
+        !(line.string.containsOnlyWhitespace && line.string.length > 1) &&
+        !isTable
         ) return 0;
     
     // Get string reference
@@ -890,6 +955,19 @@
         CFStringUppercase(modifiedStr, NULL);
     }
     
+    // Tables: column separators become spaces (same width in a monospaced font), the grid is drawn in background.
+    // Separator rows (|---|) are blanked out completely.
+    if (isTable) {
+        bool separatorRow = line.isTableSeparator;
+        CFIndex len = CFStringGetLength(modifiedStr);
+        for (CFIndex i = 0; i < len; i++) {
+            UniChar c = CFStringGetCharacterAtIndex(modifiedStr, i);
+            if (c == '|' || (separatorRow && c != '\n')) {
+                CFStringReplace(modifiedStr, CFRangeMake(i, 1), CFSTR(" "));
+            }
+        }
+    }
+    
     // Modified properties
     //NSGlyphProperty *modifiedProps = (NSGlyphProperty *)malloc(sizeof(NSGlyphProperty) * glyphRange.length);
     NSGlyphProperty *modifiedProps = CopyGlyphProperties(props, glyphRange);
@@ -897,7 +975,7 @@
     if (line.string.containsOnlyWhitespace && line.string.length >= 2) {
         // Show bullets instead of spaces on lines which contain whitespace only
         CFStringFindAndReplace(modifiedStr, CFSTR(" "), CFSTR("•"), CFRangeMake(0, CFStringGetLength(modifiedStr)), 0);
-    } else if (_editorDelegate.hideFountainMarkup && !currentlyEditing) {
+    } else if (_editorDelegate.hideFountainMarkup && !currentlyEditing && !isTable) {
         // Hide markdown characters for the line we're not currently editing
         for (NSInteger i = 0; i < glyphRange.length; i++) {
             NSUInteger index = charIndexes[i];
@@ -997,7 +1075,11 @@ CGGlyph* GetGlyphsForCharacters(CTFontRef font, CFStringRef string)
         Line* line = ((BeatWeakLine*)attrs[BeatRepresentedLineKey]).line;
         if (line != nil) {
             RenderStyle* style = [self.editorDelegate.editorStyles forLine:line];
-            if (style.lineFragmentMultiplier != 1.0) {
+            if (line.type == action && line.isTableSeparator) {
+                // Collapse table header separator rows into a thin strip
+                lineFragmentRect->size.height = 2.0;
+                lineFragmentUsedRect->size.height = 2.0;
+            } else if (style.lineFragmentMultiplier != 1.0) {
                 lineFragmentRect->size.height *= style.lineFragmentMultiplier;
             }
         }
