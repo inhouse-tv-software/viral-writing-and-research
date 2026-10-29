@@ -14,11 +14,11 @@
         <customObject id="-3" userLabel="Application" customClass="NSObject"/>
         <menu title="Main Menu" systemMenu="main" id="AYu-sK-qS6">
             <items>
-                <menuItem title="Beat" id="1Xt-HY-uBw">
+                <menuItem title="Viral" id="1Xt-HY-uBw">
                     <modifierMask key="keyEquivalentModifierMask"/>
-                    <menu key="submenu" title="Beat" systemMenu="apple" id="uQy-DD-JDr">
+                    <menu key="submenu" title="Viral" systemMenu="apple" id="uQy-DD-JDr">
                         <items>
-                            <menuItem title="About Beat" id="5kV-Vb-QxS">
+                            <menuItem title="About Viral" id="5kV-Vb-QxS">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="showAboutScreen:" target="vEX-2F-hcj" id="GZO-Bz-bRJ"/>
@@ -38,7 +38,7 @@
                                 <menu key="submenu" title="Services" systemMenu="services" id="hz9-B4-Xy5"/>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="4je-JR-u6R"/>
-                            <menuItem title="Hide Beat" keyEquivalent="h" id="Olw-nP-bQN">
+                            <menuItem title="Hide Viral" keyEquivalent="h" id="Olw-nP-bQN">
                                 <connections>
                                     <action selector="hide:" target="-1" id="PnN-Uc-m68"/>
                                 </connections>
@@ -56,7 +56,7 @@
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="kCx-OE-vgT"/>
-                            <menuItem title="Quit Beat" keyEquivalent="q" id="4sb-4s-VLi">
+                            <menuItem title="Quit Viral" keyEquivalent="q" id="4sb-4s-VLi">
                                 <connections>
                                     <action selector="terminate:" target="-1" id="Te7-pn-YzF"/>
                                 </connections>
@@ -1441,27 +1441,27 @@ DQ
                     <modifierMask key="keyEquivalentModifierMask"/>
                     <menu key="submenu" title="Help" systemMenu="help" id="jA1-Lj-Irm">
                         <items>
-                            <menuItem title="Beat Manual" id="Yiy-8c-i5h">
+                            <menuItem title="Viral Manual" id="Yiy-8c-i5h">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="showManualWithSender:" target="N5l-jq-jtZ" id="Slf-uK-AtX"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Beat Tutorial" id="ZsI-w6-Fec">
+                            <menuItem title="Viral Tutorial" id="ZsI-w6-Fec">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="openTutorial:" target="vEX-2F-hcj" id="8yt-A8-EWx"/>
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="Psf-iS-te8"/>
-                            <menuItem title="Patch Notes" id="jMf-Y4-igF">
+                            <menuItem title="Patch Notes" id="jMf-Y4-igF" hidden="YES">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="showPatchNotesWithSender:" target="N5l-jq-jtZ" id="7is-hV-1dJ"/>
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="eyc-hG-S9v"/>
-                            <menuItem title="Support Beat" id="oNz-fC-tr3" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
+                            <menuItem title="Support Beat" id="oNz-fC-tr3" hidden="YES" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <userDefinedRuntimeAttributes>
                                     <userDefinedRuntimeAttribute type="string" keyPath="website" value="https://www.beat-app.fi/support-the-development/"/>
@@ -1471,7 +1471,7 @@ DQ
                                     <action selector="openURLWithSender:" target="N5l-jq-jtZ" id="c0F-30-f9S"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Discord Community" id="u5m-eu-948" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
+                            <menuItem title="Discord Community" id="u5m-eu-948" hidden="YES" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <userDefinedRuntimeAttributes>
                                     <userDefinedRuntimeAttribute type="string" keyPath="website" value="https://discord.gg/FPHjfH7ms3"/>
@@ -1481,7 +1481,7 @@ DQ
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="gy8-Q9-fNE"/>
-                            <menuItem title="Beat Home Page (Online)" id="guF-zs-YEi" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
+                            <menuItem title="Beat Home Page (Online)" id="guF-zs-YEi" hidden="YES" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <userDefinedRuntimeAttributes>
                                     <userDefinedRuntimeAttribute type="string" keyPath="website" value="https://www.beat-app.fi/"/>
@@ -1490,7 +1490,7 @@ DQ
                                     <action selector="openURLWithSender:" target="N5l-jq-jtZ" id="Bvl-QS-YdD"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Beat Source Code (Online)" id="CUo-uf-t1s" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
+                            <menuItem title="Source Code: Beat (Online)" id="CUo-uf-t1s" customClass="BeatURLMenuItem" customModule="Beat" customModuleProvider="target">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <userDefinedRuntimeAttributes>
                                     <userDefinedRuntimeAttribute type="string" keyPath="website" value="https://github.com/lmparppei/Beat/"/>

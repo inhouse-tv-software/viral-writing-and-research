@@ -28,7 +28,7 @@
             [ParsingRule type:section options:0 previousTypes:nil beginsWith:@[@"#", @"＃"] endsWith:nil],
             [ParsingRule type:synopse options:0 previousTypes:nil beginsWith:@[@"="] endsWith:nil],
             
-            [ParsingRule type:heading options:(PreviousIsEmpty) previousTypes:nil beginsWith:@[@"int", @"ext", @"i/e", @"i./e", @"e/i", @"e./i"] endsWith:nil requiredAfterPrefix:@[@" ", @"."] excludedAfterPrefix:nil],
+            [ParsingRule type:heading options:(PreviousIsEmpty) previousTypes:nil beginsWith:@[@"int", @"ext", @"i/e", @"i./e", @"e/i", @"e./i", @"brand", @"fact", @"thought"] endsWith:nil requiredAfterPrefix:@[@" ", @"."] excludedAfterPrefix:nil],
             [ParsingRule type:centered options:(AllowsLeadingWhitespace) previousTypes:nil beginsWith:@[@">"] endsWith:@[@"<"]],
             [ParsingRule type:transitionLine options:0 previousTypes:nil beginsWith:@[@">"] endsWith:nil],
             [ParsingRule type:transitionLine options:(PreviousIsEmpty | AllCapsUntilParentheses) previousTypes:nil beginsWith:nil endsWith:@[@"TO:"]],

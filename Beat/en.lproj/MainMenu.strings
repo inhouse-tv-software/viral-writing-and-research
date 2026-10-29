@@ -5,8 +5,8 @@
 /* Class = "NSMenuItem"; title = "Smart Copy/Paste"; ObjectID = "0KX-h8-z4v"; */
 "0KX-h8-z4v.title" = "Smart Copy/Paste";
 
-/* Class = "NSMenuItem"; title = "Beat"; ObjectID = "1Xt-HY-uBw"; */
-"1Xt-HY-uBw.title" = "Beat";
+/* Class = "NSMenuItem"; title = "Viral"; ObjectID = "1Xt-HY-uBw"; */
+"1Xt-HY-uBw.title" = "Viral";
 
 /* Class = "NSMenuItem"; title = "Find and Replace…"; ObjectID = "2DA-pz-zR5"; */
 "2DA-pz-zR5.title" = "Find and Replace…";
@@ -17,8 +17,8 @@
 /* Class = "NSMenuItem"; title = "Underlined"; ObjectID = "2nS-I6-My1"; */
 "2nS-I6-My1.title" = "Underlined";
 
-/* Class = "NSMenuItem"; title = "Quit Beat"; ObjectID = "4sb-4s-VLi"; */
-"4sb-4s-VLi.title" = "Quit Beat";
+/* Class = "NSMenuItem"; title = "Quit Viral"; ObjectID = "4sb-4s-VLi"; */
+"4sb-4s-VLi.title" = "Quit Viral";
 
 /* Class = "NSMenuItem"; title = "Edit"; ObjectID = "5QF-Oa-p0T"; */
 "5QF-Oa-p0T.title" = "Edit";
@@ -26,8 +26,8 @@
 /* Class = "NSMenuItem"; title = "Omit"; ObjectID = "5Y3-LZ-qMb"; */
 "5Y3-LZ-qMb.title" = "Omit";
 
-/* Class = "NSMenuItem"; title = "About Beat"; ObjectID = "5kV-Vb-QxS"; */
-"5kV-Vb-QxS.title" = "About Beat";
+/* Class = "NSMenuItem"; title = "About Viral"; ObjectID = "5kV-Vb-QxS"; */
+"5kV-Vb-QxS.title" = "About Viral";
 
 /* Class = "NSMenuItem"; title = "Select All"; ObjectID = "5tL-Bq-kho"; */
 "5tL-Bq-kho.title" = "Select All";
@@ -134,8 +134,8 @@
 /* Class = "NSMenuItem"; title = "Minimize"; ObjectID = "OY7-WF-poV"; */
 "OY7-WF-poV.title" = "Minimize";
 
-/* Class = "NSMenuItem"; title = "Hide Beat"; ObjectID = "Olw-nP-bQN"; */
-"Olw-nP-bQN.title" = "Hide Beat";
+/* Class = "NSMenuItem"; title = "Hide Viral"; ObjectID = "Olw-nP-bQN"; */
+"Olw-nP-bQN.title" = "Hide Viral";
 
 /* Class = "NSMenuItem"; title = "Force Action"; ObjectID = "Oob-ml-0qq"; */
 "Oob-ml-0qq.title" = "Force Action";
@@ -335,8 +335,8 @@
 /* Class = "NSMenu"; title = "Spelling"; ObjectID = "uCf-KN-clX"; */
 "uCf-KN-clX.title" = "Spelling";
 
-/* Class = "NSMenu"; title = "Beat"; ObjectID = "uQy-DD-JDr"; */
-"uQy-DD-JDr.title" = "Beat";
+/* Class = "NSMenu"; title = "Viral"; ObjectID = "uQy-DD-JDr"; */
+"uQy-DD-JDr.title" = "Viral";
 
 /* Class = "NSMenuItem"; title = "Clear Menu"; ObjectID = "vNY-rz-j42"; */
 "vNY-rz-j42.title" = "Clear Menu";

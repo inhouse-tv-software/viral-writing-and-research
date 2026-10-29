@@ -36,7 +36,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Beat</string>
+	<string>Viral</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -74,17 +74,13 @@
 		</dict>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
-	<string>© 2019-2023 Lauri-Matti Parppei. Released under GPL license.</string>
+	<string>© 2026 Inhouse. Based on Beat © 2019–2026 Lauri-Matti Parppei. Released under GPL v3.</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
-	<key>SUFeedURL</key>
-	<string>https://www.beat-app.fi/xml/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>N/+ouU5mFSMMfyRg2eQECCoNAOo4DuUM+h62gcsWEpY=</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

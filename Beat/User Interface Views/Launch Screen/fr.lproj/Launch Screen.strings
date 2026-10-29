@@ -8,7 +8,7 @@
 "b4P-Uh-CmK.title" = "Distribué sous license GPL";
 
 /* Class = "NSButtonCell"; title = "→ Beat Website"; ObjectID = "cWD-Ub-2Sa"; */
-"cWD-Ub-2Sa.title" = "→ Site de Beat";
+"cWD-Ub-2Sa.title" = "→ Site de Viral";
 
 /* Class = "NSTextFieldCell"; title = "Date"; ObjectID = "d9P-af-E8t"; */
 "d9P-af-E8t.title" = "Date";
@@ -56,7 +56,7 @@
 "uau-QP-8yL.title" = "Version";
 
 /* Class = "NSTextFieldCell"; title = "Learn Beat"; ObjectID = "UjG-qn-mj6"; */
-"UjG-qn-mj6.title" = "Apprendre Beat";
+"UjG-qn-mj6.title" = "Apprendre Viral";
 
 /* Class = "NSTextFieldCell"; title = "Text Cell"; ObjectID = "upO-fb-u7s"; */
 "upO-fb-u7s.title" = "Cellule de texte";
@@ -74,5 +74,5 @@
 "Zf8-Dc-Df3.title" = "Aucun scénario récent";
 
 /* Class = "NSButtonCell"; title = "→ Support Beat"; ObjectID = "ZFK-os-h00"; */
-"ZFK-os-h00.title" = "→ Soutenir Beat";
+"ZFK-os-h00.title" = "→ Soutenir Viral";
 

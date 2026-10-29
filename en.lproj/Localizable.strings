@@ -27,14 +27,14 @@
 "plugins.input.select" = "Select...";
 
 "launch.newDocument.subtitle" = "Start a new, blank project";
-"launch.tutorial.subtitle" = "Begin here, if you are new to Beat";
-"launch.templates.subtitle" = "Learn Beat and get started quickly!";
+"launch.tutorial.subtitle" = "Begin here, if you are new to Viral";
+"launch.templates.subtitle" = "Learn Viral and get started quickly!";
 
 "unlock_document.title" = "Unlock Document";
 "unlock_document.confirm" = "Are you sure you want to unlock the document and allow changes?";
 
 "language.alert" = "Restart required";
-"language.informative" = "You need to restart Beat for language change to take effect.";
+"language.informative" = "You need to restart Viral for language change to take effect.";
 
 "about.version" = "Version";
 "about.build" = "Build";
@@ -171,7 +171,7 @@
 "templates.templates" = "Templates";
 
 "templates.tutorial.title" = "Tutorial";
-"templates.tutorial.description" = "Quickstart guide to Beat!";
+"templates.tutorial.description" = "Quickstart guide to Viral!";
 
 "templates.outliningTutorial.title" = "Outlining Tutorial";
 "templates.outliningTutorial.description" = "Learn more advanced outlining tricks";
@@ -186,7 +186,7 @@
 "templates.threeActOutline.description" = "The classical story structure in 8 sequences";
 
 "templates.novel-tutorial.title" = "Novel Tutorial";
-"templates.novel-tutorial.description" = "Get started with writing novels in Beat";
+"templates.novel-tutorial.description" = "Get started with writing novels in Viral";
 
 "templates.novel.title" = "Novel";
 "templates.novel.description" = "Bare-bones novel template";
@@ -345,7 +345,7 @@
 "pagination.paragraphPaginationMode.avoid" = "Avoid Breaking Actions";
 
 "dataHealth.warning.title" = "Ranges Out Of Sync";
-"dataHealth.warning.informative" = "The file has revisions, reviews or tags, which have been moved out of place, probably because the file was edited outside of Beat.\n\nIt's not dangerous, but previous ranges might not make sense anymore";
+"dataHealth.warning.informative" = "The file has revisions, reviews or tags, which have been moved out of place, probably because the file was edited outside of Viral.\n\nIt's not dangerous, but previous ranges might not make sense anymore";
 "dataHealth.warning.ignore" = "Ignore";
 "dataHealth.warning.remove" = "Remove All Ranges";
 

@@ -14,7 +14,7 @@
         </customObject>
         <customObject id="-1" userLabel="First Responder" customClass="FirstResponder"/>
         <customObject id="-3" userLabel="Application" customClass="NSObject"/>
-        <window title="About Beat" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" restorable="NO" releasedWhenClosed="NO" visibleAtLaunch="NO" appearanceType="darkAqua" frameAutosaveName="" animationBehavior="default" titlebarAppearsTransparent="YES" titleVisibility="hidden" id="2ip-76-u7o">
+        <window title="About Viral" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" restorable="NO" releasedWhenClosed="NO" visibleAtLaunch="NO" appearanceType="darkAqua" frameAutosaveName="" animationBehavior="default" titlebarAppearsTransparent="YES" titleVisibility="hidden" id="2ip-76-u7o">
             <windowStyleMask key="styleMask" titled="YES" closable="YES" fullSizeContentView="YES"/>
             <rect key="contentRect" x="196" y="240" width="318" height="444"/>
             <rect key="screenRect" x="0.0" y="0.0" width="1728" height="1079"/>
@@ -37,7 +37,7 @@
                                 <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="RwM-kX-8d4">
                                     <rect key="frame" x="36" y="161" width="173" height="35"/>
                                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                    <textFieldCell key="cell" lineBreakMode="truncatingTail" allowsUndo="NO" sendsActionOnEndEditing="YES" title="(beat)" allowsEditingTextAttributes="YES" id="IhX-oQ-xOK">
+                                    <textFieldCell key="cell" lineBreakMode="truncatingTail" allowsUndo="NO" sendsActionOnEndEditing="YES" title="Viral" allowsEditingTextAttributes="YES" id="IhX-oQ-xOK">
                                         <font key="font" size="35" name="CourierPrime"/>
                                         <color key="textColor" white="0.62776227679999996" alpha="1" colorSpace="calibratedWhite"/>
                                         <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
@@ -68,7 +68,7 @@
                                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                                     <textFieldCell key="cell" allowsUndo="NO" sendsActionOnEndEditing="YES" id="Vew-4a-6k0">
                                         <font key="font" size="10" name="HelveticaNeue"/>
-                                        <string key="title">© Kaikki on haurasta Oy &amp; Lauri-Matti Parppei 2019–2026. Released under GPL license. No animal products were consumed when creating this app.</string>
+                                        <string key="title">© 2026 Inhouse. Based on Beat © 2019–2026 Kaikki on haurasta Oy &amp; Lauri-Matti Parppei. Released under GPL v3.</string>
                                         <color key="textColor" white="0.28000000000000003" alpha="1" colorSpace="calibratedWhite"/>
                                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                     </textFieldCell>

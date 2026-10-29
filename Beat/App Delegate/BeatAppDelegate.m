@@ -141,7 +141,8 @@
 	[self showLaunchScreen];
 	
 	// Lastly, open patch notes if the app was recently updated
-	[self checkVersion];
+	// Viral: no Beat patch notes / App Store popup on launch
+	// [self checkVersion];
 	
 	// Add to launch count
 	NSInteger timesLaunched = [NSUserDefaults.standardUserDefaults integerForKey:@"LaunchCount"] + 1;
@@ -174,13 +175,9 @@
 
 - (void)setupUpdates
 {
-#ifdef ADHOC
-	[self setupSparkle];
-#else
-	// Remove update/ad hoc related menu items
+	// Viral doesn't use Beat's update feed, so remove update related menu items
 	[_checkForUpdatesItem.menu removeItem:_checkForUpdatesItem];
 	_checkForUpdatesItem = nil;
-#endif
 }
 
 #ifdef ADHOC

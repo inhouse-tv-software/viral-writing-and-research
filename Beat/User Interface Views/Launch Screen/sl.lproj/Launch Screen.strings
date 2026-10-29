@@ -30,7 +30,7 @@
 "Smg-6c-mQH.title" = "Polje";
 
 /* Class = "NSTextFieldCell"; title = "Learn Beat"; ObjectID = "UjG-qn-mj6"; */
-"UjG-qn-mj6.title" = "Spoznajte Beat";
+"UjG-qn-mj6.title" = "Spoznajte Viral";
 
 /* Class = "NSButtonCell"; title = "Button"; ObjectID = "Wvt-te-p5O"; */
 "Wvt-te-p5O.title" = "Gumb";
@@ -39,7 +39,7 @@
 "XSB-VA-eAB.title" = "Predloge";
 
 /* Class = "NSButtonCell"; title = "→ Support Beat"; ObjectID = "ZFK-os-h00"; */
-"ZFK-os-h00.title" = "→ Podprite Beat";
+"ZFK-os-h00.title" = "→ Podprite Viral";
 
 /* Class = "NSTextFieldCell"; title = "No recent screenplays"; ObjectID = "Zf8-Dc-Df3"; */
 "Zf8-Dc-Df3.title" = "Ni nedavnih scenarijev";
@@ -74,5 +74,5 @@
 /* Class = "NSButtonCell"; title = "Browse..."; ObjectID = "w3a-gm-hjm"; */
 "w3a-gm-hjm.title" = "Prebrskaj ...";
 
-"cWD-Ub-2Sa.title" = "→ Spletna stran Beat";
+"cWD-Ub-2Sa.title" = "→ Spletna stran Viral";
 

@@ -98,10 +98,10 @@
                                     <rect key="frame" x="0.0" y="0.0" width="370" height="422"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
-                                        <button verticalHuggingPriority="750" id="6T8-Bj-yWC" customClass="BeatURLButton" customModule="Beat" customModuleProvider="target">
+                                        <button hidden="YES" verticalHuggingPriority="750" id="6T8-Bj-yWC" customClass="BeatURLButton" customModule="Beat" customModuleProvider="target">
                                             <rect key="frame" x="16" y="15" width="184" height="16"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                            <buttonCell key="cell" type="bevel" title="→ Support Beat" bezelStyle="rounded" alignment="left" imageScaling="proportionallyDown" inset="2" id="ZFK-os-h00">
+                                            <buttonCell key="cell" type="bevel" title="→ Support" bezelStyle="rounded" alignment="left" imageScaling="proportionallyDown" inset="2" id="ZFK-os-h00">
                                                 <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                 <font key="font" metaFont="smallSystem"/>
                                             </buttonCell>
@@ -134,7 +134,7 @@
                                         <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="hV1-9C-x1b">
                                             <rect key="frame" x="208" y="28" width="148" height="10"/>
                                             <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                            <textFieldCell key="cell" controlSize="mini" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="right" title="© Kaikki on haurasta Oy 2019–2026" allowsEditingTextAttributes="YES" usesSingleLineMode="YES" id="b0H-0Y-Klb">
+                                            <textFieldCell key="cell" controlSize="mini" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="right" title="© Inhouse 2026 · Based on Beat" allowsEditingTextAttributes="YES" usesSingleLineMode="YES" id="b0H-0Y-Klb">
                                                 <font key="font" metaFont="system" size="8"/>
                                                 <color key="textColor" white="0.28000000000000003" alpha="1" colorSpace="calibratedWhite"/>
                                                 <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
@@ -149,10 +149,10 @@
                                                 <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                             </textFieldCell>
                                         </textField>
-                                        <button verticalHuggingPriority="750" id="sR9-2D-XCB" customClass="BeatURLButton" customModule="Beat" customModuleProvider="target">
+                                        <button hidden="YES" verticalHuggingPriority="750" id="sR9-2D-XCB" customClass="BeatURLButton" customModule="Beat" customModuleProvider="target">
                                             <rect key="frame" x="16" y="35" width="184" height="14"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                            <buttonCell key="cell" type="bevel" title="→ Discord Community" bezelStyle="rounded" alignment="left" imageScaling="proportionallyDown" inset="2" id="osl-e8-t6d">
+                                            <buttonCell key="cell" type="bevel" title="→ Discord" bezelStyle="rounded" alignment="left" imageScaling="proportionallyDown" inset="2" id="osl-e8-t6d">
                                                 <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                 <font key="font" metaFont="smallSystem"/>
                                             </buttonCell>
@@ -167,7 +167,7 @@
                                         <button verticalHuggingPriority="750" id="yGG-aB-tqs">
                                             <rect key="frame" x="65" y="156.5" width="239" height="45"/>
                                             <autoresizingMask key="autoresizingMask" flexibleMinY="YES"/>
-                                            <buttonCell key="cell" type="bevel" title="New Screenplay" bezelStyle="rounded" imagePosition="left" imageScaling="proportionallyDown" inset="2" id="DbX-Gm-m0E" customClass="BeatLaunchScreenButton" customModule="Beat" customModuleProvider="target">
+                                            <buttonCell key="cell" type="bevel" title="New Research" bezelStyle="rounded" imagePosition="left" imageScaling="proportionallyDown" inset="2" id="DbX-Gm-m0E" customClass="BeatLaunchScreenButton" customModule="Beat" customModuleProvider="target">
                                                 <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                 <font key="font" metaFont="system"/>
                                                 <imageReference key="image" image="doc" catalog="system" symbolScale="large"/>
@@ -199,13 +199,13 @@
                                         <button verticalHuggingPriority="750" id="vrq-6c-Dbm" customClass="BeatURLButton" customModule="Beat" customModuleProvider="target">
                                             <rect key="frame" x="16" y="53" width="184" height="14"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                            <buttonCell key="cell" type="bevel" title="→ Beat Website" bezelStyle="rounded" alignment="left" imageScaling="proportionallyDown" inset="2" id="cWD-Ub-2Sa">
+                                            <buttonCell key="cell" type="bevel" title="→ Inhouse" bezelStyle="rounded" alignment="left" imageScaling="proportionallyDown" inset="2" id="cWD-Ub-2Sa">
                                                 <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                 <font key="font" metaFont="smallSystem"/>
                                             </buttonCell>
                                             <color key="contentTintColor" name="systemGrayColor" catalog="System" colorSpace="catalog"/>
                                             <userDefinedRuntimeAttributes>
-                                                <userDefinedRuntimeAttribute type="string" keyPath="website" value="https://www.beat-app.fi/"/>
+                                                <userDefinedRuntimeAttribute type="string" keyPath="website" value="https://inhousetv.us/"/>
                                             </userDefinedRuntimeAttributes>
                                             <connections>
                                                 <action selector="openURLwithButtonWithSender:" target="9uD-mB-xHs" id="rLn-dx-plz"/>
@@ -241,7 +241,7 @@
                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="ieF-S2-ZIH">
                                 <rect key="frame" x="371" y="205" width="330" height="19"/>
                                 <autoresizingMask key="autoresizingMask" widthSizable="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
-                                <textFieldCell key="cell" lineBreakMode="clipping" alignment="center" title="No recent screenplays" id="Zf8-Dc-Df3">
+                                <textFieldCell key="cell" lineBreakMode="clipping" alignment="center" title="No recent files" id="Zf8-Dc-Df3">
                                     <font key="font" metaFont="systemLight" size="16"/>
                                     <color key="textColor" name="tertiaryLabelColor" catalog="System" colorSpace="catalog"/>
                                     <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
@@ -278,7 +278,7 @@
                                         <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" id="n6o-Rr-KmG">
                                             <rect key="frame" x="27" y="263" width="296" height="19"/>
                                             <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                            <textFieldCell key="cell" lineBreakMode="clipping" alignment="left" title="Learn Beat" id="UjG-qn-mj6">
+                                            <textFieldCell key="cell" lineBreakMode="clipping" alignment="left" title="Learn Viral" id="UjG-qn-mj6">
                                                 <font key="font" metaFont="systemLight" size="16"/>
                                                 <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
                                                 <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
@@ -511,7 +511,7 @@
         <scene sceneID="Ugv-Vv-btw">
             <objects>
                 <windowController storyboardIdentifier="LaunchWindow" id="oCP-J8-3wn" sceneMemberID="viewController">
-                    <window key="window" title="(beat)" separatorStyle="none" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" restorable="NO" frameAutosaveName="" animationBehavior="default" titlebarAppearsTransparent="YES" titleVisibility="hidden" id="2Z6-qA-C1I">
+                    <window key="window" title="Viral" separatorStyle="none" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" restorable="NO" frameAutosaveName="" animationBehavior="default" titlebarAppearsTransparent="YES" titleVisibility="hidden" id="2Z6-qA-C1I">
                         <windowStyleMask key="styleMask" titled="YES" fullSizeContentView="YES"/>
                         <rect key="contentRect" x="255" y="242" width="703" height="427"/>
                         <rect key="screenRect" x="0.0" y="0.0" width="1728" height="1079"/>
