@@ -158,7 +158,16 @@
             lastLine.endsTitlePageBlock = true;
     }
     
-    return self.titlePage;
+    // Return a snapshot. `self.titlePage` keeps changing while you type (the line-by-line parser adds to it),
+    // and the preview is built from this array on another thread, which mixed old versions of the title into it.
+    NSMutableArray* snapshot = [NSMutableArray arrayWithCapacity:self.titlePage.count];
+    for (NSDictionary* element in self.titlePage) {
+        NSString* elementKey = element.allKeys.firstObject;
+        if (elementKey == nil) continue;
+        NSArray* items = element[elementKey];
+        [snapshot addObject:@{ elementKey: [items isKindOfClass:NSArray.class] ? items.copy : @[] }];
+    }
+    return snapshot;
 }
 
 /// Returns the lines for given title page key. For example,`Title` would return something like `["My Film"]`.

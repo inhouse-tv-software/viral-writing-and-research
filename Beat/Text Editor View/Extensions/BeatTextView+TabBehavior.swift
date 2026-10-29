@@ -848,7 +848,6 @@ public extension BeatTextView {
 		
 		NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: self, queue: .main) { [weak self] _ in
 			self?.scheduleTableUpdate()
-			self?.scheduleSaveAs()
 		}
 		NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: self, queue: .main) { [weak self] _ in
 			self?.caretMovedIntoTableIfNeeded()
@@ -924,6 +923,7 @@ public extension BeatTextView {
 		
 		tableViews = views
 		updateEmbedViews()
+		updateSaveAsButton()
 		
 		// Focus a newly inserted table
 		if let pending = pendingTableFocus, let view = views.first(where: { $0.tableRange.location == pending[0] }) {
@@ -1151,6 +1151,13 @@ public extension BeatTextView {
 		flags.remove(.function)
 		
 		let selection = self.selectedRange()
+		
+		// Return on the title page `Save As:` line saves under that name (it never saves by itself while typing)
+		if (event.keyCode == 36 || event.keyCode == 76) && flags.isEmpty && selection.length == 0,
+		   let line = saveAsLineRange, selection.location >= line.location && selection.location <= NSMaxRange(line) {
+			performSaveAs()
+			return true
+		}
 		
 		// Return on a `/table` line inserts a table
 		if (event.keyCode == 36 || event.keyCode == 76) && flags.isEmpty && selection.length == 0 {
@@ -3236,16 +3243,15 @@ public extension BeatTextView {
  
  */
 
-fileprivate var ViralSaveTimerKey: UInt8 = 0
+fileprivate var ViralSaveButtonKey: UInt8 = 0
 fileprivate let ViralSaveFolderBookmarkKey = "ViralSaveFolderBookmark"
 fileprivate var ViralSaveFolderAccess: URL? = nil
 fileprivate var ViralSaveFolderAsking = false
-fileprivate var ViralSaveFolderDeclined = false
 
 public extension BeatTextView {
 	
-	/// The `Save As:` value from the title page, cleaned up to be a file name
-	fileprivate var saveAsName: String? {
+	/// Range of the title page `Save As:` line (without its line break)
+	fileprivate var saveAsLineRange: NSRange? {
 		let ns = self.string as NSString
 		var location = 0
 		var count = 0
@@ -3256,28 +3262,67 @@ public extension BeatTextView {
 			if content.length > 0 && ns.character(at: NSMaxRange(content) - 1) == 10 { content.length -= 1 }
 			let line = ns.substring(with: content).trimmingCharacters(in: .whitespaces)
 			if line.isEmpty { break }
-			if line.lowercased().hasPrefix("save as:") {
-				var name = String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces)
-				for bad in ["/", ":", "\\", "?", "*", "\"", "<", ">", "|"] { name = name.replacingOccurrences(of: bad, with: "-") }
-				if name.lowercased().hasSuffix(".fountain") { name = String(name.dropLast(9)) }
-				name = name.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
-				return name.isEmpty ? nil : String(name.prefix(120))
-			}
+			if line.lowercased().hasPrefix("save as:") { return content }
 			location = NSMaxRange(lineRange)
 			count += 1
 		}
 		return nil
 	}
 	
-	fileprivate func scheduleSaveAs() {
-		guard saveAsName != nil else { return }
-		(objc_getAssociatedObject(self, &ViralSaveTimerKey) as? Timer)?.invalidate()
-		// A new document asks for a folder, so give the name more time to be finished first
-		let untitled = (window?.windowController?.document as? NSDocument)?.fileURL == nil
-		let timer = Timer.scheduledTimer(withTimeInterval: untitled ? 4 : 1.5, repeats: false) { [weak self] _ in
-			self?.performSaveAs()
+	/// The `Save As:` value from the title page, cleaned up to be a file name
+	fileprivate var saveAsName: String? {
+		guard let range = saveAsLineRange else { return nil }
+		let line = (self.string as NSString).substring(with: range).trimmingCharacters(in: .whitespaces)
+		var name = String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+		for bad in ["/", ":", "\\", "?", "*", "\"", "<", ">", "|"] { name = name.replacingOccurrences(of: bad, with: "-") }
+		if name.lowercased().hasSuffix(".fountain") { name = String(name.dropLast(9)) }
+		name = name.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+		return name.isEmpty ? nil : String(name.prefix(120))
+	}
+	
+	// MARK: Save / Update button
+	
+	/// A small button at the end of the `Save As:` line. "Save" for a new document, "Update" when the name changed.
+	/// Hidden when the file already has that name.
+	fileprivate func updateSaveAsButton() {
+		let existing = objc_getAssociatedObject(self, &ViralSaveButtonKey) as? NSButton
+		guard let range = saveAsLineRange, let name = saveAsName,
+			  let lm = layoutManager, let tc = textContainer,
+			  let document = window?.windowController?.document as? NSDocument
+		else { existing?.isHidden = true; return }
+		
+		let current = document.fileURL?.deletingPathExtension().lastPathComponent
+		if current == name { existing?.isHidden = true; return }
+		
+		let button: NSButton
+		if let existing { button = existing } else {
+			button = NSButton(title: "Save", target: self, action: #selector(viralSaveAsButtonPressed(_:)))
+			button.bezelStyle = .rounded
+			button.controlSize = .small
+			button.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+			button.toolTip = "Save the document under this name (or press Return on this line)"
+			addSubview(button)
+			objc_setAssociatedObject(self, &ViralSaveButtonKey, button, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 		}
-		objc_setAssociatedObject(self, &ViralSaveTimerKey, timer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+		let title = (document.fileURL == nil) ? "Save" : "Update"
+		if button.title != title { button.title = title }
+		button.sizeToFit()
+		
+		// Right after the end of the line's text
+		let glyphs = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+		var textRect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
+		if textRect.isEmpty { textRect = lm.lineFragmentUsedRect(forGlyphAt: max(glyphs.location, 0), effectiveRange: nil) }
+		let origin = textContainerOrigin
+		let size = button.frame.size
+		var x = origin.x + textRect.maxX + 10
+		x = min(x, origin.x + tc.size.width - size.width)
+		let frame = NSRect(x: x, y: origin.y + textRect.midY - size.height / 2, width: size.width, height: size.height)
+		if button.frame != frame { button.frame = frame }
+		button.isHidden = false
+	}
+	
+	@objc fileprivate func viralSaveAsButtonPressed(_ sender: NSButton) {
+		performSaveAs()
 	}
 	
 	fileprivate func performSaveAs() {
@@ -3297,7 +3342,12 @@ public extension BeatTextView {
 			// Rename next to the current file
 			let target = current.deletingLastPathComponent().appendingPathComponent(fileName)
 			if FileManager.default.fileExists(atPath: target.path) {
-				if document.isDocumentEdited { document.save(nil) }
+				if let window {
+					let alert = NSAlert()
+					alert.messageText = "\u{201C}\(fileName)\u{201D} already exists in this folder"
+					alert.informativeText = "Pick another name in the Save As line."
+					alert.beginSheetModal(for: window)
+				}
 				return
 			}
 			// Save under the new name, then remove the old file (moving an open document can trip NSDocument's file access checks)
@@ -3305,8 +3355,9 @@ public extension BeatTextView {
 				if error != nil {
 					// No access to that folder, save into the Viral folder instead
 					DispatchQueue.main.async { self?.saveIntoViralFolder(document, fileName: fileName, type: type) }
-				} else if document.fileURL == target {
-					try? FileManager.default.removeItem(at: current)
+				} else {
+					if document.fileURL == target { try? FileManager.default.removeItem(at: current) }
+					self?.updateSaveAsButton()
 				}
 			}
 		} else {
@@ -3324,8 +3375,9 @@ public extension BeatTextView {
 				target = folder.appendingPathComponent("\(base) \(n).fountain")
 				n += 1
 			}
-			document.save(to: target, ofType: type, for: .saveAsOperation) { error in
+			document.save(to: target, ofType: type, for: .saveAsOperation) { [weak self] error in
 				if let error { NSLog("Viral: Save As failed: %@", error.localizedDescription) }
+				self?.updateSaveAsButton()
 			}
 		}
 	}
@@ -3348,8 +3400,7 @@ public extension BeatTextView {
 			}
 		}
 		
-		// Asked and cancelled already: don't keep asking, a normal save still works
-		guard !ViralSaveFolderAsking, !ViralSaveFolderDeclined, let window else { completion(nil); return }
+		guard !ViralSaveFolderAsking, let window else { completion(nil); return }
 		ViralSaveFolderAsking = true
 		
 		let panel = NSOpenPanel()
@@ -3362,11 +3413,7 @@ public extension BeatTextView {
 		panel.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
 		panel.beginSheetModal(for: window) { response in
 			ViralSaveFolderAsking = false
-			guard response == .OK, let url = panel.url else {
-				ViralSaveFolderDeclined = true
-				completion(nil)
-				return
-			}
+			guard response == .OK, let url = panel.url else { completion(nil); return }
 			if let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
 				UserDefaults.standard.set(data, forKey: ViralSaveFolderBookmarkKey)
 			}
