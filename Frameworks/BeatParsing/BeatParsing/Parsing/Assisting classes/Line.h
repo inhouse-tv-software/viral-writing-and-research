@@ -470,6 +470,10 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (NSArray<NSString*>*)embedImageIDs;
 /// Width in percent (5...100)
 - (NSInteger)embedWidthPercent;
+/// Carousel height in percent of the text width (`h40`)
+- (NSInteger)embedHeightPercent;
+/// Rounded corners (`r`)
+- (bool)embedRounded;
 /// Set by pagination: the image lines laid out on one row, stored in the first line of the row
 @property (nonatomic) NSArray<Line*>* embedRow;
 /// Set by pagination: this image is drawn by an earlier line on the same row

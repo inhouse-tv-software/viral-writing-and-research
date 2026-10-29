@@ -410,6 +410,8 @@
         // Never split a table row, move it to the next page as a whole
         NSInteger index = [self.lines indexOfObject:spiller];
         if (index == NSNotFound) index = 0;
+        // Taller than a whole page: keep it on this (empty) page instead of pushing it forward forever
+        if (index == 0 && remainingSpace >= self.delegate.maxPageHeight * 0.85) index = self.lines.count;
         BeatPageBreak* pageBreak = [BeatPageBreak.alloc initWithVisibleIndex:0 element:spiller attributedString:nil reason:@"Table row"];
         NSArray* thisPage = [self.lines subarrayWithRange:NSMakeRange(0, index)];
         NSArray* nextPage = [self.lines subarrayWithRange:NSMakeRange(index, self.lines.count - index)];

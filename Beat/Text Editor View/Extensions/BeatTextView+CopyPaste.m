@@ -18,7 +18,17 @@
 {
 	NSMutableArray* types = [NSMutableArray arrayWithArray:[super acceptableDragTypes]];
 	[types insertObject:BeatPasteboardItem.pasteboardType atIndex:0];
+	// Images can be dropped in (see BeatTextView+TabBehavior.swift)
+	for (NSPasteboardType type in @[NSPasteboardTypeFileURL, NSPasteboardTypePNG, NSPasteboardTypeTIFF]) {
+		if (![types containsObject:type]) [types addObject:type];
+	}
 	return types;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender
+{
+	if ([self dropImagesIfNeeded:sender]) return YES;
+	return [super performDragOperation:sender];
 }
 
 -(NSArray<NSPasteboardType>*)writablePasteboardTypes

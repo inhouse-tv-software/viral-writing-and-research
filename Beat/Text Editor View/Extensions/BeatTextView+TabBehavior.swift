@@ -1291,6 +1291,9 @@ fileprivate struct EmbedLine {
 	var kind: EmbedKind
 	var ids: [String]
 	var width: Int
+	/// Carousel height in percent of the text width
+	var height: Int = 40
+	var rounded: Bool = false
 	
 	static let imagePrefix = "![image](viral:"
 	static let carouselPrefix = "![carousel](viral:"
@@ -1311,13 +1314,24 @@ fileprivate struct EmbedLine {
 			.map { $0.trimmingCharacters(in: .whitespaces) }
 			.filter { !$0.isEmpty }
 		var width = 100
-		if let w = parts.dropFirst().compactMap({ Int($0) }).first(where: { $0 > 0 }) { width = w }
-		return EmbedLine(kind: kind, ids: ids, width: min(max(width, 5), 100))
+		var height = 40
+		var rounded = false
+		for part in parts.dropFirst() {
+			if part == "r" { rounded = true }
+			else if part.hasPrefix("h"), let h = Int(part.dropFirst()), h > 0 { height = min(max(h, 10), 150) }
+			else if let w = Int(part), w > 0 { width = w }
+		}
+		return EmbedLine(kind: kind, ids: ids, width: min(max(width, 5), 100), height: height, rounded: rounded)
 	}
 	
 	var text: String {
 		let prefix = (kind == .image) ? EmbedLine.imagePrefix : EmbedLine.carouselPrefix
-		return prefix + ids.joined(separator: ",") + " \(width))"
+		let size = (kind == .image) ? "\(width)" : "h\(height)"
+		return prefix + ids.joined(separator: ",") + " " + size + (rounded ? " r" : "") + ")"
+	}
+	
+	static func cornerRadius(_ rect: NSRect) -> CGFloat {
+		return min(12, min(rect.width, rect.height) * 0.1)
 	}
 }
 
@@ -1582,9 +1596,14 @@ fileprivate final class ViralImageTile: NSView {
 	var isSelected: Bool { return group?.isActive == true && group?.selectedIndex == index }
 	
 	override func draw(_ dirtyRect: NSRect) {
+		let rounded = group.map { index < $0.items.count && $0.items[index].rounded } ?? false
+		let radius = rounded ? EmbedLine.cornerRadius(bounds) : 0
 		if let image {
+			NSGraphicsContext.saveGraphicsState()
+			if radius > 0 { NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).addClip() }
 			image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
 					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+			NSGraphicsContext.restoreGraphicsState()
 		} else {
 			(group?.color ?? .textColor).withAlphaComponent(0.08).setFill()
 			bounds.fill()
@@ -1596,7 +1615,8 @@ fileprivate final class ViralImageTile: NSView {
 		if isSelected || hovering || resizing {
 			let selected = isSelected || resizing
 			(selected ? NSColor.controlAccentColor : (group?.color ?? .textColor).withAlphaComponent(0.3)).setStroke()
-			let path = NSBezierPath(rect: bounds.insetBy(dx: selected ? 1 : 0.5, dy: selected ? 1 : 0.5))
+			let inset = bounds.insetBy(dx: selected ? 1 : 0.5, dy: selected ? 1 : 0.5)
+			let path = NSBezierPath(roundedRect: inset, xRadius: radius, yRadius: radius)
 			path.lineWidth = selected ? 2 : 1
 			path.stroke()
 			group?.drawHandle(in: bounds)
@@ -1753,6 +1773,12 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	
 	@objc func delete(_ sender: Any?) { deleteSelected() }
 	@objc func deleteImageFromMenu(_ sender: Any?) { deleteSelected() }
+	@objc func toggleRounded(_ sender: Any?) {
+		guard selectedIndex < items.count else { return }
+		items[selectedIndex].rounded.toggle()
+		relayout()
+		write(items.map { $0.text })
+	}
 	
 	override func keyDown(with event: NSEvent) {
 		switch event.keyCode {
@@ -1772,6 +1798,11 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		let add = NSMenuItem(title: "Add Images…", action: #selector(chooseAndAddImages(_:)), keyEquivalent: "")
 		add.target = self
 		menu.addItem(add)
+		let round = NSMenuItem(title: "Rounded Corners", action: #selector(toggleRounded(_:)), keyEquivalent: "")
+		round.target = self
+		round.state = (selectedIndex < items.count && items[selectedIndex].rounded) ? .on : .off
+		menu.addItem(round)
+		menu.addItem(NSMenuItem.separator())
 		let delete = NSMenuItem(title: "Delete Image", action: #selector(deleteImageFromMenu(_:)), keyEquivalent: "")
 		delete.target = self
 		menu.addItem(delete)
@@ -1783,37 +1814,39 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 
 // MARK: Carousel
 
+/// A horizontal strip of images at the carousel height. Scroll with the arrows or sideways on the trackpad.
 fileprivate final class ViralCarouselView: ViralEmbedView {
 	var item = EmbedLine(kind: .carousel, ids: [], width: 100)
-	var index = 0
+	var selectedIndex = 0
+	var scrollX: CGFloat = 0
 	var hovering = false
 	var resizing = false
-	var resizeStartX: CGFloat = 0
-	var resizeStartWidth: CGFloat = 0
-	var previewWidth: CGFloat? = nil
+	var resizeStartY: CGFloat = 0
+	var resizeStartHeight: CGFloat = 0
+	var previewHeight: CGFloat? = nil
+	var animation: Timer? = nil
 	
 	let previousButton = NSButton(frame: .zero)
 	let nextButton = NSButton(frame: .zero)
 	let addButton = NSButton(frame: .zero)
-	let counter = NSTextField(labelWithString: "")
 	
-	static let aspect: CGFloat = 0.6
+	static let gap: CGFloat = 8
+	static let padding: CGFloat = 6
+	
+	static func boxHeight(for item: EmbedLine, width: CGFloat) -> CGFloat {
+		return max(60, floor(width * CGFloat(item.height) / 100))
+	}
 	
 	static func height(for item: EmbedLine, width: CGFloat) -> CGFloat {
-		let w = min(width, width * CGFloat(item.width) / 100)
-		return EMetrics.marginTop + floor(w * aspect) + EMetrics.carouselBottom
+		return EMetrics.marginTop + boxHeight(for: item, width: width) + EMetrics.marginBottom
 	}
 	
 	override init(host: BeatTextView) {
 		super.init(host: host)
 		kind = .carousel
-		setup(previousButton, symbol: "chevron.left.circle.fill", fallback: "‹", tip: "Previous image", action: #selector(showPrevious(_:)))
-		setup(nextButton, symbol: "chevron.right.circle.fill", fallback: "›", tip: "Next image", action: #selector(showNext(_:)))
+		setup(previousButton, symbol: "chevron.left.circle.fill", fallback: "‹", tip: "Scroll left", action: #selector(showPrevious(_:)))
+		setup(nextButton, symbol: "chevron.right.circle.fill", fallback: "›", tip: "Scroll right", action: #selector(showNext(_:)))
 		setup(addButton, symbol: "plus.circle.fill", fallback: "+", tip: "Add images", action: #selector(chooseAndAddImages(_:)))
-		counter.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-		counter.textColor = .secondaryLabelColor
-		counter.alignment = .center
-		addSubview(counter)
 	}
 	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 	
@@ -1840,8 +1873,8 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		addSubview(button)
 	}
 	
-	var boxWidth: CGFloat { return floor(min(embedWidth, previewWidth ?? embedWidth * CGFloat(item.width) / 100)) }
-	var boxRect: NSRect { return NSRect(x: 0, y: EMetrics.marginTop, width: boxWidth, height: floor(boxWidth * ViralCarouselView.aspect)) }
+	var boxHeight: CGFloat { return previewHeight ?? ViralCarouselView.boxHeight(for: item, width: embedWidth) }
+	var boxRect: NSRect { return NSRect(x: 0, y: EMetrics.marginTop, width: embedWidth, height: boxHeight) }
 	var handleRect: NSRect {
 		let box = boxRect
 		return NSRect(x: box.maxX - EMetrics.handle, y: box.maxY - EMetrics.handle, width: EMetrics.handle, height: EMetrics.handle)
@@ -1849,29 +1882,43 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	
 	override var totalHeight: CGFloat { return ViralCarouselView.height(for: item, width: embedWidth) }
 	
+	/// Image frames in strip coordinates (before scrolling)
+	var stripFrames: [NSRect] {
+		let h = boxHeight - ViralCarouselView.padding * 2
+		var x = ViralCarouselView.padding
+		var frames: [NSRect] = []
+		for id in item.ids {
+			let aspect = ViralImages.aspect(id, settings: settings)
+			let w = max(20, floor(h / max(aspect, 0.05)))
+			frames.append(NSRect(x: x, y: EMetrics.marginTop + ViralCarouselView.padding, width: w, height: h))
+			x += w + ViralCarouselView.gap
+		}
+		return frames
+	}
+	
+	var contentWidth: CGFloat {
+		guard let last = stripFrames.last else { return 0 }
+		return last.maxX + ViralCarouselView.padding
+	}
+	
+	var maxScroll: CGFloat { return max(0, contentWidth - embedWidth) }
+	
 	override func load(text: String, lines: [String]) {
 		sourceText = text
 		item = EmbedLine.parse(lines.first ?? "") ?? EmbedLine(kind: .carousel, ids: [], width: 100)
-		index = min(index, max(item.ids.count - 1, 0))
+		selectedIndex = min(selectedIndex, max(item.ids.count - 1, 0))
 		relayout()
 	}
 	
-	var currentImage: NSImage? {
-		guard index < item.ids.count else { return nil }
-		return ViralImages.image(item.ids[index], settings: settings)
-	}
-	
 	func relayout() {
+		scrollX = min(max(scrollX, 0), maxScroll)
 		let box = boxRect
 		let size: CGFloat = 30
 		previousButton.frame = NSRect(x: box.minX + 8, y: box.midY - size / 2, width: size, height: size)
 		nextButton.frame = NSRect(x: box.maxX - 8 - size, y: box.midY - size / 2, width: size, height: size)
-		addButton.frame = NSRect(x: box.minX + 8, y: box.minY + 8, width: 24, height: 24)
-		let many = item.ids.count > 1
-		previousButton.isHidden = !many
-		nextButton.isHidden = !many
-		counter.stringValue = item.ids.isEmpty ? "" : "\(index + 1) / \(item.ids.count)"
-		counter.frame = NSRect(x: box.minX, y: box.maxY + 4, width: box.width, height: 16)
+		addButton.frame = NSRect(x: box.minX + 10, y: box.minY + 10, width: 24, height: 24)
+		previousButton.isHidden = scrollX <= 0.5
+		nextButton.isHidden = scrollX >= maxScroll - 0.5
 		window?.invalidateCursorRects(for: self)
 		needsDisplay = true
 	}
@@ -1882,28 +1929,44 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		color.withAlphaComponent(0.05).setFill()
 		path.fill()
 		
-		if let image = currentImage {
-			let size = ViralImages.pixelSize(image)
-			let area = box.insetBy(dx: 4, dy: 4)
-			let scale = min(area.width / max(size.width, 1), area.height / max(size.height, 1))
-			let w = size.width * scale, h = size.height * scale
-			let rect = NSRect(x: area.midX - w / 2, y: area.midY - h / 2, width: w, height: h)
-			NSGraphicsContext.saveGraphicsState()
-			path.addClip()
-			image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
-					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
-			NSGraphicsContext.restoreGraphicsState()
-		} else {
+		if item.ids.isEmpty {
 			let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor]
-			let text = NSAttributedString(string: item.ids.isEmpty ? "Paste images here, or click +" : "Missing image", attributes: attrs)
+			let text = NSAttributedString(string: "Paste or drop images here, or click +", attributes: attrs)
 			let s = text.size()
 			text.draw(at: NSPoint(x: box.midX - s.width / 2, y: box.midY - s.height / 2))
+		} else {
+			NSGraphicsContext.saveGraphicsState()
+			path.addClip()
+			for (i, frame) in stripFrames.enumerated() {
+				let rect = frame.offsetBy(dx: -scrollX, dy: 0)
+				guard rect.maxX > box.minX, rect.minX < box.maxX else { continue }
+				let radius = item.rounded ? EmbedLine.cornerRadius(rect) : 0
+				NSGraphicsContext.saveGraphicsState()
+				let clip = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+				clip.addClip()
+				if let image = ViralImages.image(item.ids[i], settings: settings) {
+					image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+							   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+				} else {
+					color.withAlphaComponent(0.1).setFill()
+					rect.fill()
+				}
+				NSGraphicsContext.restoreGraphicsState()
+				
+				if isActive && i == selectedIndex {
+					NSColor.controlAccentColor.setStroke()
+					let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius)
+					outline.lineWidth = 2
+					outline.stroke()
+				}
+			}
+			NSGraphicsContext.restoreGraphicsState()
 		}
 		
 		if isActive || hovering || resizing {
 			(isActive || resizing ? NSColor.controlAccentColor : color.withAlphaComponent(0.25)).setStroke()
-			let border = NSBezierPath(roundedRect: box.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
-			border.lineWidth = isActive ? 2 : 1
+			let border = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+			border.lineWidth = 1
 			border.stroke()
 			drawHandle(in: box)
 		}
@@ -1916,23 +1979,29 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	}
 	override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
 	override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
-	override func resetCursorRects() { addCursorRect(handleRect, cursor: .resizeLeftRight) }
+	override func resetCursorRects() { addCursorRect(handleRect, cursor: .resizeUpDown) }
 	
 	override func mouseDown(with event: NSEvent) {
 		window?.makeFirstResponder(self)
 		let point = convert(event.locationInWindow, from: nil)
 		if handleRect.insetBy(dx: -3, dy: -3).contains(point) {
 			resizing = true
-			resizeStartX = point.x
-			resizeStartWidth = boxWidth
+			resizeStartY = point.y
+			resizeStartHeight = boxHeight
+			return
 		}
+		if let i = stripFrames.firstIndex(where: { $0.offsetBy(dx: -scrollX, dy: 0).contains(point) }) {
+			selectedIndex = i
+			scrollToSelected()
+		}
+		needsDisplay = true
 	}
 	
 	override func mouseDragged(with event: NSEvent) {
 		guard resizing else { return }
-		let x = convert(event.locationInWindow, from: nil).x
-		previewWidth = max(120, min(embedWidth, resizeStartWidth + x - resizeStartX))
-		let height = EMetrics.marginTop + floor(boxWidth * ViralCarouselView.aspect) + EMetrics.carouselBottom
+		let y = convert(event.locationInWindow, from: nil).y
+		previewHeight = max(60, min(embedWidth * 1.5, resizeStartHeight + y - resizeStartY))
+		let height = EMetrics.marginTop + boxHeight + EMetrics.marginBottom
 		if height > frame.height { setFrameSize(NSSize(width: frame.width, height: height)) }
 		relayout()
 	}
@@ -1940,68 +2009,139 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	override func mouseUp(with event: NSEvent) {
 		guard resizing else { return }
 		resizing = false
-		let width = boxWidth
-		previewWidth = nil
-		item.width = min(max(Int((width / max(embedWidth, 1) * 100).rounded()), 5), 100)
+		let height = boxHeight
+		previewHeight = nil
+		item.height = min(max(Int((height / max(embedWidth, 1) * 100).rounded()), 10), 150)
 		relayout()
 		write([item.text])
 	}
 	
+	/// Sideways trackpad scrolling moves the strip, vertical scrolling scrolls the document
+	override func scrollWheel(with event: NSEvent) {
+		if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) && maxScroll > 0 {
+			animation?.invalidate()
+			let factor: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
+			scrollX = min(max(scrollX - event.scrollingDeltaX * factor, 0), maxScroll)
+			relayout()
+		} else {
+			super.scrollWheel(with: event)
+		}
+	}
+	
+	func animateScroll(to target: CGFloat) {
+		animation?.invalidate()
+		let start = scrollX
+		let end = min(max(target, 0), maxScroll)
+		guard abs(end - start) > 0.5 else { return }
+		let began = Date()
+		let duration = 0.28
+		animation = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
+			guard let self else { timer.invalidate(); return }
+			let t = min(1, Date().timeIntervalSince(began) / duration)
+			let eased = 1 - pow(1 - t, 3)
+			self.scrollX = start + (end - start) * CGFloat(eased)
+			self.relayout()
+			if t >= 1 { timer.invalidate() }
+		}
+	}
+	
+	/// Scrolls so that the selected image is fully visible
+	func scrollToSelected() {
+		let frames = stripFrames
+		guard selectedIndex < frames.count else { return }
+		let frame = frames[selectedIndex]
+		if frame.minX - ViralCarouselView.padding < scrollX {
+			animateScroll(to: frame.minX - ViralCarouselView.padding)
+		} else if frame.maxX + ViralCarouselView.padding > scrollX + embedWidth {
+			animateScroll(to: frame.maxX + ViralCarouselView.padding - embedWidth)
+		}
+	}
+	
 	@objc func showPrevious(_ sender: Any?) {
-		guard !item.ids.isEmpty else { return }
-		index = (index - 1 + item.ids.count) % item.ids.count
-		relayout()
+		// Bring the image cut off on the left fully into view (or scroll a full width)
+		let frames = stripFrames
+		if let i = frames.lastIndex(where: { $0.minX < scrollX - 1 }) {
+			var target = max(frames[i].maxX + ViralCarouselView.padding - embedWidth, scrollX - embedWidth * 0.8)
+			if target >= scrollX - 1 { target = scrollX - embedWidth * 0.8 }
+			animateScroll(to: target)
+			selectedIndex = i
+		} else {
+			animateScroll(to: 0)
+		}
+		needsDisplay = true
 	}
 	
 	@objc func showNext(_ sender: Any?) {
-		guard !item.ids.isEmpty else { return }
-		index = (index + 1) % item.ids.count
-		relayout()
+		// Bring the image cut off on the right fully into view (or scroll a full width)
+		let frames = stripFrames
+		let right = scrollX + embedWidth
+		if let i = frames.firstIndex(where: { $0.maxX > right + 1 }) {
+			var target = min(frames[i].minX - ViralCarouselView.padding, scrollX + embedWidth * 0.8)
+			if target <= scrollX + 1 { target = scrollX + embedWidth * 0.8 }
+			animateScroll(to: target)
+			selectedIndex = i
+		} else {
+			animateScroll(to: maxScroll)
+		}
+		needsDisplay = true
 	}
 	
 	override func addImages(_ images: [NSImage]) {
 		let lines = newImageLines(images)
 		guard !lines.isEmpty else { return }
 		let ids = lines.compactMap { $0.ids.first }
-		let at = item.ids.isEmpty ? 0 : min(index + 1, item.ids.count)
+		let at = item.ids.isEmpty ? 0 : min(selectedIndex + 1, item.ids.count)
 		item.ids.insert(contentsOf: ids, at: at)
-		index = at
+		selectedIndex = at + ids.count - 1
 		relayout()
 		write([item.text])
+		scrollToSelected()
 	}
 	
-	func removeCurrent() {
-		guard index < item.ids.count else {
+	func removeSelected() {
+		guard selectedIndex < item.ids.count else {
 			host?.deleteEmbed(self)
 			return
 		}
-		item.ids.remove(at: index)
-		index = min(index, max(item.ids.count - 1, 0))
+		item.ids.remove(at: selectedIndex)
+		selectedIndex = min(selectedIndex, max(item.ids.count - 1, 0))
 		relayout()
 		write([item.text])
 	}
 	
-	@objc func delete(_ sender: Any?) { removeCurrent() }
-	@objc func removeImageFromMenu(_ sender: Any?) { removeCurrent() }
+	@objc func delete(_ sender: Any?) { removeSelected() }
+	@objc func removeImageFromMenu(_ sender: Any?) { removeSelected() }
 	@objc func deleteCarouselFromMenu(_ sender: Any?) { host?.deleteEmbed(self) }
-	
-	override func setWidthFromMenu(_ sender: NSMenuItem) {
-		item.width = sender.tag
+	@objc func toggleRounded(_ sender: Any?) {
+		item.rounded.toggle()
+		relayout()
+		write([item.text])
+	}
+	@objc func setHeightFromMenu(_ sender: NSMenuItem) {
+		item.height = sender.tag
 		relayout()
 		write([item.text])
 	}
 	
 	override func keyDown(with event: NSEvent) {
 		switch event.keyCode {
-		case 123: showPrevious(nil)
-		case 124: showNext(nil)
-		case 51, 117: removeCurrent()
+		case 123:
+			if selectedIndex > 0 { selectedIndex -= 1; scrollToSelected(); needsDisplay = true }
+		case 124:
+			if selectedIndex < item.ids.count - 1 { selectedIndex += 1; scrollToSelected(); needsDisplay = true }
+		case 51, 117: removeSelected()
 		default: super.keyDown(with: event)
 		}
 	}
 	
 	override func menu(for event: NSEvent) -> NSMenu? {
 		window?.makeFirstResponder(self)
+		let point = convert(event.locationInWindow, from: nil)
+		if let i = stripFrames.firstIndex(where: { $0.offsetBy(dx: -scrollX, dy: 0).contains(point) }) {
+			selectedIndex = i
+			needsDisplay = true
+		}
+		
 		let menu = NSMenu()
 		let add = NSMenuItem(title: "Add Images…", action: #selector(chooseAndAddImages(_:)), keyEquivalent: "")
 		add.target = self
@@ -2012,8 +2152,25 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 			menu.addItem(remove)
 		}
 		menu.addItem(NSMenuItem.separator())
-		widthMenu(into: menu)
+		
+		let heights = NSMenuItem(title: "Height", action: nil, keyEquivalent: "")
+		let sub = NSMenu()
+		for (title, value) in [("Small", 25), ("Medium", 40), ("Large", 60), ("Extra Large", 80)] {
+			let entry = NSMenuItem(title: title, action: #selector(setHeightFromMenu(_:)), keyEquivalent: "")
+			entry.tag = value
+			entry.target = self
+			entry.state = item.height == value ? .on : .off
+			sub.addItem(entry)
+		}
+		heights.submenu = sub
+		menu.addItem(heights)
+		
+		let round = NSMenuItem(title: "Rounded Corners", action: #selector(toggleRounded(_:)), keyEquivalent: "")
+		round.target = self
+		round.state = item.rounded ? .on : .off
+		menu.addItem(round)
 		menu.addItem(NSMenuItem.separator())
+		
 		let delete = NSMenuItem(title: "Delete Carousel", action: #selector(deleteCarouselFromMenu(_:)), keyEquivalent: "")
 		delete.target = self
 		menu.addItem(delete)
@@ -2261,7 +2418,11 @@ public extension BeatTextView {
 	fileprivate func insertEmbedLines(_ lines: [String], focus: Bool = false) {
 		guard let textActions = editorDelegate?.textActions, !lines.isEmpty else { return }
 		let ns = self.string as NSString
-		let location = min(self.selectedRange().location, ns.length)
+		var location = min(self.selectedRange().location, ns.length)
+		// Never insert inside a table, put the images after it
+		for view in tableViews where location >= view.tableRange.location && location <= NSMaxRange(view.tableRange) {
+			location = NSMaxRange(view.tableRange)
+		}
 		var lineOnly = ns.lineRange(for: NSRange(location: location, length: 0))
 		if lineOnly.length > 0 && ns.character(at: NSMaxRange(lineOnly) - 1) == 10 { lineOnly.length -= 1 }
 		let current = ns.substring(with: lineOnly)
@@ -2308,7 +2469,7 @@ public extension BeatTextView {
 	}
 	
 	fileprivate func insertCarousel() {
-		insertEmbedLines([EmbedLine(kind: .carousel, ids: [], width: 100).text], focus: true)
+		insertEmbedLines([EmbedLine(kind: .carousel, ids: [], width: 100, height: 40).text], focus: true)
 	}
 	
 	fileprivate func chooseImages(_ completion: @escaping ([NSImage]) -> Void) {
@@ -2361,6 +2522,24 @@ public extension BeatTextView {
 		}
 		let images = viralImages(from: pasteboard)
 		guard !images.isEmpty else { return false }
+		insertImages(images)
+		return true
+	}
+	
+	/// Called from `performDragOperation:`. Returns `true` if images were dropped.
+	@objc func dropImagesIfNeeded(_ sender: NSDraggingInfo) -> Bool {
+		let images = viralImages(from: sender.draggingPasteboard)
+		guard !images.isEmpty else { return false }
+		
+		let point = convert(sender.draggingLocation, from: nil)
+		if let view = embedViews.first(where: { $0.frame.contains(point) }) {
+			view.addImages(images)
+			return true
+		}
+		
+		let index = characterIndexForInsertion(at: point)
+		window?.makeFirstResponder(self)
+		setSelectedRange(NSRange(location: min(index, (self.string as NSString).length), length: 0))
 		insertImages(images)
 		return true
 	}

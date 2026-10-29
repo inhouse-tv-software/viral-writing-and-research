@@ -993,6 +993,28 @@ static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
     return result;
 }
 
+- (NSInteger)embedHeightPercent
+{
+    NSString* inner = self.embedInner;
+    if (inner == nil) return 40;
+    NSArray<NSString*>* parts = [inner componentsSeparatedByString:@" "];
+    for (NSInteger i = 1; i < parts.count; i++) {
+        NSString* part = parts[i];
+        if (part.length > 1 && [part characterAtIndex:0] == 'h') {
+            NSInteger h = [[part substringFromIndex:1] integerValue];
+            if (h > 0) return MIN(MAX(h, 10), 150);
+        }
+    }
+    return 40;
+}
+
+- (bool)embedRounded
+{
+    NSString* inner = self.embedInner;
+    if (inner == nil) return false;
+    return [[inner componentsSeparatedByString:@" "] containsObject:@"r"];
+}
+
 - (NSInteger)embedWidthPercent
 {
     NSString* inner = self.embedInner;

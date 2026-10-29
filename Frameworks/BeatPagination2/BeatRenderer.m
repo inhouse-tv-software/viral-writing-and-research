@@ -390,6 +390,8 @@
 #pragma mark Images
 
 + (CGFloat)embedSpacing { return 8.0; }
+/// Tallest image block printed on one page
++ (CGFloat)embedMaxHeight { return 560.0; }
 
 /// Returns `@[ image, width, height ]` rows for the given image line row
 + (NSArray<NSArray<NSArray*>*>*)embedLayoutFor:(NSArray<Line*>*)row width:(CGFloat)width settings:(BeatExportSettings*)settings
@@ -400,27 +402,77 @@
     CGFloat gap = floor(width * 0.02);
     
     if (first.isEmbedCarouselLine) {
-        // A carousel can't scroll on paper, so its images are printed in a grid
+        // A carousel can't scroll on paper, so its images are printed left to right at the carousel height, wrapping to new rows.
+        // If that doesn't fit on one page, the images are made smaller.
         NSArray<NSString*>* ids = first.embedImageIDs;
         if (ids.count == 0) return rows;
-        CGFloat total = width * (CGFloat)first.embedWidthPercent / 100.0;
-        NSInteger perRow = MIN((NSInteger)ids.count, 4);
-        CGFloat w = floor((total - gap * (perRow - 1)) / perRow);
-        NSMutableArray* current = NSMutableArray.new;
+        bool rounded = first.embedRounded;
+        NSMutableArray<NSNumber*>* aspects = NSMutableArray.new;
+        NSMutableArray* images = NSMutableArray.new;
         for (NSString* ID in ids) {
-            [current addObject:[self embedItem:[self embedImageWithID:ID settings:settings] width:w]];
-            if (current.count == perRow) { [rows addObject:current]; current = NSMutableArray.new; }
+            BXImage* image = [self embedImageWithID:ID settings:settings];
+            [images addObject:(image != nil) ? image : NSNull.null];
+            [aspects addObject:@([self embedAspect:image])];
         }
-        if (current.count > 0) [rows addObject:current];
+        
+        CGFloat height = floor(width * (CGFloat)first.embedHeightPercent / 100.0);
+        for (NSInteger attempt = 0; attempt < 30; attempt++) {
+            [rows removeAllObjects];
+            NSMutableArray* current = NSMutableArray.new;
+            CGFloat x = 0.0;
+            CGFloat total = 0.0;
+            CGFloat rowHeight = 0.0;
+            for (NSInteger i = 0; i < ids.count; i++) {
+                CGFloat aspect = aspects[i].floatValue;
+                CGFloat h = height;
+                CGFloat w = floor(h / aspect);
+                if (w > width) { w = width; h = floor(width * aspect); }
+                if (current.count > 0 && x + gap + w > width) {
+                    [rows addObject:current];
+                    total += rowHeight + self.embedSpacing;
+                    current = NSMutableArray.new;
+                    x = 0.0;
+                    rowHeight = 0.0;
+                }
+                x += (current.count > 0 ? gap : 0.0) + w;
+                rowHeight = MAX(rowHeight, h);
+                [current addObject:@[ images[i], @(w), @(h), @(rounded) ]];
+            }
+            if (current.count > 0) {
+                [rows addObject:current];
+                total += rowHeight + self.embedSpacing;
+            }
+            if (total <= self.embedMaxHeight || height < 30) break;
+            height = floor(height * 0.85);
+        }
     } else {
         NSMutableArray* current = NSMutableArray.new;
         for (Line* l in row) {
+            BXImage* image = [self embedImageWithID:l.embedImageIDs.firstObject settings:settings];
             CGFloat w = floor(MIN(width, width * (CGFloat)l.embedWidthPercent / 100.0));
-            [current addObject:[self embedItem:[self embedImageWithID:l.embedImageIDs.firstObject settings:settings] width:w]];
+            // Very tall images are made smaller so they fit on a page
+            CGFloat aspect = [self embedAspect:image];
+            if (w * aspect > self.embedMaxHeight) w = floor(self.embedMaxHeight / aspect);
+            NSArray* item = [self embedItem:image width:w];
+            [current addObject:[item arrayByAddingObject:@(l.embedRounded)]];
         }
         if (current.count > 0) [rows addObject:current];
     }
     return rows;
+}
+
++ (CGFloat)embedAspect:(BXImage*)image
+{
+    CGFloat aspect = 0.75;
+#if TARGET_OS_OSX
+    if (image != nil) {
+        NSImageRep* rep = image.representations.firstObject;
+        CGFloat pw = (rep.pixelsWide > 0) ? rep.pixelsWide : image.size.width;
+        CGFloat ph = (rep.pixelsHigh > 0) ? rep.pixelsHigh : image.size.height;
+        if (pw > 0 && ph > 0) aspect = ph / pw;
+    }
+#endif
+    return aspect;
 }
 
 + (NSArray*)embedItem:(BXImage*)image width:(CGFloat)width
@@ -504,15 +556,24 @@
             CGFloat h = [item[2] floatValue];
             NSImage* image = [item[0] isKindOfClass:NSImage.class] ? item[0] : [self embedPlaceholder];
             
-            // Attachments sit on the baseline, so shorter images get empty space below them to align the row at the top
-            if (h < rowHeight) {
+            bool rounded = (item.count > 3) ? [item[3] boolValue] : false;
+            
+            // Attachments sit on the baseline, so shorter images get empty space below them to align the row at the top.
+            // Rounded corners are drawn into the image too.
+            if (h < rowHeight || rounded) {
                 NSImage* original = image;
-                CGFloat padded = rowHeight;
+                CGFloat padded = MAX(rowHeight, h);
+                CGFloat imageHeight = h;
+                CGFloat radius = rounded ? MIN(12.0, MIN(w, h) * 0.1) : 0.0;
                 image = [NSImage imageWithSize:NSMakeSize(w, padded) flipped:false drawingHandler:^BOOL(NSRect rect) {
-                    [original drawInRect:NSMakeRect(0, padded - h, w, h) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+                    NSRect imageRect = NSMakeRect(0, padded - imageHeight, w, imageHeight);
+                    [NSGraphicsContext saveGraphicsState];
+                    if (radius > 0) [[NSBezierPath bezierPathWithRoundedRect:imageRect xRadius:radius yRadius:radius] addClip];
+                    [original drawInRect:imageRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+                    [NSGraphicsContext restoreGraphicsState];
                     return true;
                 }];
-                h = rowHeight;
+                h = padded;
             }
             
             NSTextAttachment* attachment = NSTextAttachment.new;
