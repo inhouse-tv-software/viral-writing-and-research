@@ -20,6 +20,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface ContinuousFountainParser (TitlePage) <ContinuousFountainParserTitlePageExports>
 
+/// Maps everyday key names to the standard ones (`Authored by` → `authors`, `Date` → `draft date`). Lowercased.
++ (NSString*)normalizedTitlePageKey:(NSString*)key;
+
 /// Parses a single line of titlle page at given index and returns the type.
 - (LineType)parseTitlePageLineTypeFor:(Line*)line previousLine:(Line*)previousLine lineIndex:(NSInteger)index;
 

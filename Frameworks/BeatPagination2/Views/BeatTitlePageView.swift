@@ -108,8 +108,15 @@ import UXKit
 		var top:[Line] = []
 		
 		if let title = titlePageElement("title") { top.append(contentsOf: title) }
-		if let credit = titlePageElement("credit") { top.append(contentsOf: credit) }
-		if let authors = titlePageElement("authors") { top.append(contentsOf: authors) }
+		let credit = titlePageElement("credit")
+		let authors = titlePageElement("authors")
+		if let credit {
+			top.append(contentsOf: credit)
+		} else if let key = authors?.first?.titlePageKey(), ["authored by", "written by", "created by", "by"].contains(key) {
+			// Viral: `Authored by: Name` prints "Authored by" above the name, like a credit line
+			top.append(Line(string: key.prefix(1).uppercased() + key.dropFirst(), type: .titlePageCredit))
+		}
+		if let authors { top.append(contentsOf: authors) }
 		if let source = titlePageElement("source") { top.append(contentsOf: source) }
 		
 		// Title, credit, author, source on top

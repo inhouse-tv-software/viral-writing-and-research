@@ -1161,6 +1161,7 @@ public extension BeatTextView {
 		
 		// Return on a `/table` line inserts a table
 		if (event.keyCode == 36 || event.keyCode == 76) && flags.isEmpty && selection.length == 0 {
+			if insertTitlePageFromCommand() { return true }
 			if insertTableFromCommand() { return true }
 			if insertEmbedFromCommand() { return true }
 		}
@@ -1222,6 +1223,29 @@ public extension BeatTextView {
 	/// Called from `keyDown:` after default handling
 	@objc func tableDidProcessKeyDown(_ event: NSEvent) {
 		scheduleTableUpdate()
+	}
+	
+	/// `/title` adds a title page at the top of the document (or jumps to the one that's there)
+	fileprivate func insertTitlePageFromCommand() -> Bool {
+		let ns = self.string as NSString
+		var lineRange = ns.lineRange(for: NSRange(location: self.selectedRange().location, length: 0))
+		let fullLine = lineRange
+		if lineRange.length > 0 && ns.character(at: NSMaxRange(lineRange) - 1) == 10 { lineRange.length -= 1 }
+		let line = ns.substring(with: lineRange).trimmingCharacters(in: .whitespaces).lowercased()
+		guard line == "/title", let textActions = editorDelegate?.textActions else { return false }
+		
+		textActions.replace(fullLine, with: "")
+		
+		if (editorDelegate?.parser.lines.firstObject as? Line)?.isTitlePage() == true {
+			self.setSelectedRange(NSRange(location: 0, length: 0))
+			scrollRangeToVisible(NSRange(location: 0, length: 0))
+			return true
+		}
+		
+		textActions.replace(NSRange(location: 0, length: 0), with: ViralTitlePageTemplate.text())
+		self.setSelectedRange(NSRange(location: 7, length: 0))
+		scrollRangeToVisible(NSRange(location: 0, length: 0))
+		return true
 	}
 	
 	fileprivate func insertTableFromCommand() -> Bool {
@@ -1664,6 +1688,17 @@ fileprivate final class ViralLoginWindow: NSWindowController, NSWindowDelegate {
 	func windowWillClose(_ notification: Notification) {
 		NotificationCenter.default.post(name: ViralVideosReloadNotification, object: nil)
 		DispatchQueue.main.async { ViralLoginWindow.current = nil }
+	}
+}
+
+// MARK: Title page template
+
+@objc final class ViralTitlePageTemplate: NSObject {
+	/// The title page `/title` and Screenplay ▸ Add Title Page insert
+	@objc static func text() -> String {
+		let formatter = DateFormatter()
+		formatter.dateFormat = "d MMM yyyy"
+		return "Title: \nSave As: \nAuthored by: \nDraft date: \(formatter.string(from: Date()))\nContact: \n\n"
 	}
 }
 
@@ -3594,7 +3629,13 @@ public extension BeatTextView {
 		header("Writing")
 		row("INT. EXT. BRAND\nFACT THOUGHT", "Start a line with one of these to make a scene heading")
 		row("Title:", "Title page. Put it on the first line")
-		row("Save As: Name", "In the title page. Saves the document as Name and keeps it saved while you write")
+		row("/title  ↩", "Add a title page at the top")
+		row("Save As: Name", "Saves the document as Name. Press ↩ on the line, or click Save / Update next to it")
+		row("Authored by:", "Prints \u{201C}Authored by\u{201D} and the name under the title. Also: Written by, Created by, Author")
+		row("Credit: Source:", "More lines under the title")
+		row("Draft date: Date:", "Bottom right of the title page")
+		row("Contact: Email:", "Bottom left of the title page")
+		row("Any Key: value", "Anything else (Client, Brand, Version, Notes\u{2026}) prints bottom left")
 		
 		header("Blocks")
 		row("/table  ↩", "Insert a table. /table 4x3 sets columns and rows")

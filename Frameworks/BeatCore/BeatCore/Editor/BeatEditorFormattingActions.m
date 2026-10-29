@@ -67,8 +67,9 @@ static NSString *macroSymbolClose = @"}}";
 - (NSString*)titlePage
 {
 	NSDateFormatter *dateFormatter = NSDateFormatter.new;
-	[dateFormatter setDateFormat:@"dd.MM.yyyy"];
-	return [NSString stringWithFormat:@"Title: \nCredit: \nAuthor: \nDraft date: %@\nContact: \n\n", [dateFormatter stringFromDate:NSDate.date]];
+	[dateFormatter setDateFormat:@"d MMM yyyy"];
+	// Viral: same fields as the /title command
+	return [NSString stringWithFormat:@"Title: \nSave As: \nAuthored by: \nDraft date: %@\nContact: \n\n", [dateFormatter stringFromDate:NSDate.date]];
 }
 
 - (IBAction)addTitlePage:(id)sender

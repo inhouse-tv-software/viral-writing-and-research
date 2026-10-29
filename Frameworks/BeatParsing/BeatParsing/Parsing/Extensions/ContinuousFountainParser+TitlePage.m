@@ -10,12 +10,33 @@
 
 @implementation ContinuousFountainParser (TitlePage)
 
+#pragma mark - Title page key aliases (Viral)
+
+/// Maps everyday key names to the standard ones, so `Authored by:` works like `Author:` and `Date:` like `Draft date:`.
++ (NSString*)normalizedTitlePageKey:(NSString*)key
+{
+    static NSDictionary<NSString*,NSString*>* aliases;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        aliases = @{
+            @"author": @"authors", @"authored by": @"authors", @"written by": @"authors", @"created by": @"authors",
+            @"writer": @"authors", @"writers": @"authors", @"by": @"authors",
+            @"date": @"draft date", @"draft": @"draft date",
+            @"contacts": @"contact", @"contact info": @"contact", @"email": @"contact", @"phone": @"contact",
+        };
+    });
+    NSString* k = [key.lowercaseString stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    NSString* mapped = aliases[k];
+    return mapped != nil ? mapped : k;
+}
+
 #pragma mark - Parses a single line of title page
 
 /// I don't understand any of this.
 - (LineType)parseTitlePageLineTypeFor:(Line*)line previousLine:(Line*)previousLine lineIndex:(NSInteger)index
 {
     NSString *key = line.titlePageKey;
+    if (key.length > 0) key = [ContinuousFountainParser normalizedTitlePageKey:key];
     
     if (key.length > 0) {
         // This is a keyed title page line (Title: Something)
@@ -31,7 +52,7 @@
         
         if ([key isEqualToString:@"title"]) {
             return titlePageTitle;
-        } else if ([key isEqualToString:@"author"] || [key isEqualToString:@"authors"]) {
+        } else if ([key isEqualToString:@"authors"]) {
             return titlePageAuthor;
         } else if ([key isEqualToString:@"credit"]) {
             return titlePageCredit;
@@ -55,7 +76,7 @@
         while (i >= 0) {
             Line *pl = self.lines[i];
             if (pl.titlePageKey.length > 0) {
-                key = pl.titlePageKey;
+                key = [ContinuousFountainParser normalizedTitlePageKey:pl.titlePageKey];
                 break;
             }
             i -= 1;
@@ -123,8 +144,7 @@
         
         // See if there is a key present on the line ("Title: ..." -> "Title")
         if (line.titlePageKey.length > 0) {
-            key = line.titlePageKey.lowercaseString;
-            if ([key isEqualToString:@"author"]) key = @"authors";
+            key = [ContinuousFountainParser normalizedTitlePageKey:line.titlePageKey];
             
             line.beginsTitlePageBlock = true;
             
