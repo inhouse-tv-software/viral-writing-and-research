@@ -94,6 +94,33 @@ private struct BeatFontSetTemplate {
         return self.fonts(type: typeToTypeName[type] ?? "", scale: scale)
     }
     
+    /// Viral: the font the user picked from the fonts on this Mac (PostScript name of the face), or nil for the built-in screenplay fonts
+    @objc public class var customFontName: String? {
+        let name = UserDefaults.standard.string(forKey: "ViralFontName")
+        return (name?.isEmpty ?? true) ? nil : name
+    }
+    
+    /// Viral: a font set from any font on this Mac. The picked face is the regular text; bold and italic come from the same family.
+    @objc public func customFonts(name postScriptName: String, scale: CGFloat) -> BeatFontSet? {
+        #if os(macOS)
+        let key = "custom:" + postScriptName
+        if let font = fonts[scale]?[key] { return font }
+        guard let base = NSFont(name: postScriptName, size: 12.0) else { return nil }
+        let manager = NSFontManager.shared
+        let bold = manager.convert(base, toHaveTrait: .boldFontMask)
+        let italic = manager.convert(base, toHaveTrait: .italicFontMask)
+        let boldItalic = manager.convert(bold, toHaveTrait: .italicFontMask)
+        let set = BeatFontSet.name(postScriptName, size: 12.0, scale: scale,
+                                   regular: base.fontName, bold: bold.fontName, italic: italic.fontName, boldItalic: boldItalic.fontName,
+                                   sectionFont: bold.fontName, synopsisFont: italic.fontName)
+        if fonts[scale] == nil { fonts[scale] = [:] }
+        fonts[scale]?[key] = set
+        return set
+        #else
+        return nil
+        #endif
+    }
+    
     /// Returns a font set, similar to the old `BeatFonts` object.
     @objc public func fonts(type:String, scale:CGFloat = 1.0) -> BeatFontSet? {
         guard let template = fontTemplates[type] else {

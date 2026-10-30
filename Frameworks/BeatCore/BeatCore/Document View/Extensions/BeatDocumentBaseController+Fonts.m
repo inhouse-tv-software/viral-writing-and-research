@@ -43,11 +43,17 @@
 
 - (void)loadFonts
 {
-    self.fonts = [BeatFontManager.shared fontsWith:self.fontType scale:1.0];
+    [self loadFontsWithScale:1.0];
 }
 
 - (void)loadFontsWithScale:(CGFloat)scale
 {
+    // Viral: a font picked from the fonts on this Mac wins over the built-in screenplay fonts
+    NSString* custom = BeatFontManager.customFontName;
+    if (custom != nil) {
+        BeatFontSet* set = [BeatFontManager.shared customFontsWithName:custom scale:scale];
+        if (set != nil) { self.fonts = set; return; }
+    }
     self.fonts = [BeatFontManager.shared fontsWith:self.fontType scale:scale];
 }
 
