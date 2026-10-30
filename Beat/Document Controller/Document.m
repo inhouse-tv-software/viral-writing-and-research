@@ -687,6 +687,14 @@
 }
 
 /// Ensures minimum window size, sets text view insets and forces editor views to be displayed. After that, ensures text view layout.
+/// ⌘S. Viral: uses the title page `Save As:` name when there is one
+- (IBAction)saveDocument:(id)sender
+{
+	// Only for the menu / keyboard (autosave calls this with nil and must never rename the file)
+	if (sender != nil && [self.textView viralSaveWithTitlePageName]) return;
+	[super saveDocument:sender];
+}
+
 - (void)updateLayout
 {
 	[self setMinimumWindowSize];

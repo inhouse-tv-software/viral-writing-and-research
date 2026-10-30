@@ -1772,6 +1772,168 @@ fileprivate final class ViralLoginWindow: NSWindowController, NSWindowDelegate {
 	}
 }
 
+// MARK: Video numbers (views, likes, comments)
+
+fileprivate let ViralMetricsKey = "ViralMetrics"
+fileprivate let ViralMetricsChangedNotification = Notification.Name("ViralMetricsChanged")
+
+/// Public numbers for a video, read from its page once and kept in the document.
+/// Instagram: likes and comments (views when the page shows them). YouTube: views and likes. Saves are never public.
+fileprivate enum ViralMetrics {
+	struct Stats { var views: Int?; var likes: Int?; var comments: Int? }
+	
+	private static var attempted = Set<String>()
+	private static var inFlight = Set<String>()
+	private static var queue: [(url: String, settings: BeatDocumentSettings)] = []
+	private static var running = 0
+	
+	static func stats(_ url: String, settings: BeatDocumentSettings?) -> Stats? {
+		guard let all = settings?.get(ViralMetricsKey) as? NSDictionary, let entry = all[url] as? NSDictionary else { return nil }
+		let stats = Stats(views: (entry["views"] as? NSNumber)?.intValue, likes: (entry["likes"] as? NSNumber)?.intValue, comments: (entry["comments"] as? NSNumber)?.intValue)
+		return (stats.views == nil && stats.likes == nil && stats.comments == nil) ? nil : stats
+	}
+	
+	/// Fetches the numbers once per session (or again with `force`)
+	static func ensure(_ url: String, settings: BeatDocumentSettings?, force: Bool = false) {
+		guard let settings, !inFlight.contains(url) else { return }
+		if !force && (attempted.contains(url) || stats(url, settings: settings) != nil) { return }
+		attempted.insert(url)
+		inFlight.insert(url)
+		queue.append((url, settings))
+		pump()
+	}
+	
+	/// Two at a time, so pasting many links doesn't flood the network
+	private static func pump() {
+		while running < 2, !queue.isEmpty {
+			let job = queue.removeFirst()
+			running += 1
+			fetch(job.url) { stats in
+				DispatchQueue.main.async {
+					running -= 1
+					inFlight.remove(job.url)
+					if let stats { store(stats, url: job.url, settings: job.settings) }
+					pump()
+				}
+			}
+		}
+	}
+	
+	private static func store(_ stats: Stats, url: String, settings: BeatDocumentSettings) {
+		let all = ((settings.get(ViralMetricsKey) as? NSDictionary)?.mutableCopy() as? NSMutableDictionary) ?? NSMutableDictionary()
+		let entry = NSMutableDictionary()
+		if let v = stats.views { entry["views"] = NSNumber(value: v) }
+		if let v = stats.likes { entry["likes"] = NSNumber(value: v) }
+		if let v = stats.comments { entry["comments"] = NSNumber(value: v) }
+		entry["date"] = NSNumber(value: Date().timeIntervalSince1970)
+		all[url] = entry
+		settings.set(ViralMetricsKey, as: all)
+		NotificationCenter.default.post(name: ViralMetricsChangedNotification, object: nil)
+	}
+	
+	/// Loads the page with the sign-ins from the video players (Instagram and Facebook show more when signed in)
+	private static func fetch(_ url: String, completion: @escaping (Stats?) -> Void) {
+		guard let address = URL(string: url), let host = address.host?.lowercased() else { completion(nil); return }
+		WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+			var request = URLRequest(url: address, timeoutInterval: 20)
+			request.setValue(ViralWeb.userAgent, forHTTPHeaderField: "User-Agent")
+			request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+			let relevant = cookies.filter { host.hasSuffix($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()) }
+			for (field, value) in HTTPCookie.requestHeaderFields(with: relevant) { request.setValue(value, forHTTPHeaderField: field) }
+			URLSession.shared.dataTask(with: request) { data, _, _ in
+				guard let data, let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { completion(nil); return }
+				completion(parse(html))
+			}.resume()
+		}
+	}
+	
+	static func parse(_ html: String) -> Stats? {
+		var stats = Stats()
+		stats.views = firstInt(html, [#""viewCount":"(\d+)""#, #""video_view_count":(\d+)"#, #""play_count":(\d+)"#, #""video_play_count":(\d+)"#, #""view_count":(\d+)"#])
+		stats.likes = firstInt(html, [#""like_count":(\d+)"#, #""edge_media_preview_like":\{"count":(\d+)"#, #""likeCount":"?(\d+)"#])
+		stats.comments = firstInt(html, [#""comment_count":(\d+)"#, #""edge_media_to_comment":\{"count":(\d+)"#, #""commentCount":"?(\d+)"#])
+		
+		// Instagram puts "12K likes, 345 comments - …" in the page description
+		let description = match(html, #"<meta[^>]+property="og:description"[^>]+content="([^"]+)""#) ?? match(html, #"<meta[^>]+content="([^"]+)"[^>]+property="og:description""#)
+		if let text = description.map(decodeEntities) {
+			if stats.likes == nil { stats.likes = shortNumber(match(text, #"([\d.,]+\s?[KMB]?)\s+likes?\b"#)) }
+			if stats.comments == nil { stats.comments = shortNumber(match(text, #"([\d.,]+\s?[KMB]?)\s+comments?\b"#)) }
+			if stats.views == nil { stats.views = shortNumber(match(text, #"([\d.,]+\s?[KMB]?)\s+(?:views|plays)\b"#)) }
+		}
+		// YouTube: "like this video along with 1,234 other people"
+		if stats.likes == nil, let likes = match(html, #"along with ([\d,]+) other"#) { stats.likes = Int(likes.replacingOccurrences(of: ",", with: "")) }
+		return (stats.views == nil && stats.likes == nil && stats.comments == nil) ? nil : stats
+	}
+	
+	private static func match(_ text: String, _ pattern: String) -> String? {
+		guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+			  let result = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+			  result.numberOfRanges > 1, let range = Range(result.range(at: 1), in: text) else { return nil }
+		return String(text[range])
+	}
+	
+	private static func firstInt(_ text: String, _ patterns: [String]) -> Int? {
+		for pattern in patterns { if let value = match(text, pattern), let number = Int(value) { return number } }
+		return nil
+	}
+	
+	/// "12.5K" → 12500, "1,234" → 1234
+	private static func shortNumber(_ text: String?) -> Int? {
+		guard var t = text?.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: " ", with: "").uppercased(), !t.isEmpty else { return nil }
+		var factor = 1.0
+		if t.hasSuffix("K") { factor = 1_000; t.removeLast() } else if t.hasSuffix("M") { factor = 1_000_000; t.removeLast() } else if t.hasSuffix("B") { factor = 1_000_000_000; t.removeLast() }
+		guard let value = Double(t) else { return nil }
+		return Int(value * factor)
+	}
+	
+	private static func decodeEntities(_ text: String) -> String {
+		return text.replacingOccurrences(of: "&#x2022;", with: "•").replacingOccurrences(of: "&amp;", with: "&")
+			.replacingOccurrences(of: "&quot;", with: "\"").replacingOccurrences(of: "&#39;", with: "'")
+	}
+	
+	/// 1234 → "1.2K", 3400000 → "3.4M"
+	static func format(_ value: Int) -> String {
+		let v = Double(value)
+		func short(_ x: Double, _ suffix: String) -> String {
+			let text = x < 10 ? String(format: "%.1f", x) : String(format: "%.0f", x)
+			return (text.hasSuffix(".0") ? String(text.dropLast(2)) : text) + suffix
+		}
+		if v >= 1_000_000_000 { return short(v / 1_000_000_000, "B") }
+		if v >= 1_000_000 { return short(v / 1_000_000, "M") }
+		if v >= 1_000 { return short(v / 1_000, "K") }
+		return "\(value)"
+	}
+	
+	/// A strip along the bottom of a video thumbnail: ▶ views  ♥ likes  💬 comments
+	static func draw(_ stats: Stats, in rect: NSRect, flipped: Bool) {
+		var parts: [String] = []
+		if let v = stats.views { parts.append("▶︎ " + format(v)) }
+		if let v = stats.likes { parts.append("♥︎ " + format(v)) }
+		if let v = stats.comments { parts.append("💬 " + format(v)) }
+		guard !parts.isEmpty, rect.width > 40 else { return }
+		
+		let size = min(13, max(9, rect.width / 16))
+		let shadow = NSShadow()
+		shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
+		shadow.shadowBlurRadius = 2
+		let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size, weight: .semibold), .foregroundColor: NSColor.white, .shadow: shadow]
+		// Drop items from the end until the line fits
+		var text = NSAttributedString(string: parts.joined(separator: "   "), attributes: attrs)
+		while text.size().width > rect.width - 12 && parts.count > 1 {
+			parts.removeLast()
+			text = NSAttributedString(string: parts.joined(separator: "   "), attributes: attrs)
+		}
+		
+		let barHeight = text.size().height + 14
+		let bar = flipped ? NSRect(x: rect.minX, y: rect.maxY - barHeight, width: rect.width, height: barHeight)
+						  : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: barHeight)
+		let gradient = NSGradient(starting: NSColor.black.withAlphaComponent(0), ending: NSColor.black.withAlphaComponent(0.65))
+		gradient?.draw(in: bar, angle: flipped ? 90 : -90)
+		let y = flipped ? bar.maxY - text.size().height - 6 : bar.minY + 6
+		text.draw(at: NSPoint(x: rect.minX + 7, y: y))
+	}
+}
+
 // MARK: Title page template
 
 @objc final class ViralTitlePageTemplate: NSObject {
@@ -1910,18 +2072,34 @@ fileprivate func viralVideoLinks(from pasteboard: NSPasteboard) -> [String] {
 // MARK: Image group layout
 
 /// Lays out images in rows. An image fits on a row if the widths (plus 2% gaps) stay within 100%.
+/// Gap between images in a row
+fileprivate func viralGap(_ width: CGFloat) -> CGFloat { return floor(width * 0.02) }
+
+/// Width of an item at `percent`, so that 4 × 25% (or 3 × 33%, 2 × 50%) fill the row exactly, gaps included
+fileprivate func viralItemWidth(_ percent: Int, width: CGFloat) -> CGFloat {
+	let gap = viralGap(width)
+	return max(20, floor(min(width, CGFloat(percent) / 100 * (width + gap) - gap)))
+}
+
+/// The percent for an item `w` wide (the inverse of `viralItemWidth`)
+fileprivate func viralItemPercent(_ w: CGFloat, width: CGFloat) -> Int {
+	let gap = viralGap(width)
+	return Int(((w + gap) / max(width + gap, 1) * 100).rounded())
+}
+
 fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings: BeatDocumentSettings?, override: [Int: CGFloat] = [:]) -> (frames: [NSRect], height: CGFloat) {
-	let gap = floor(width * 0.02)
+	let gap = viralGap(width)
 	var frames = Array(repeating: NSRect.zero, count: items.count)
 	
 	var rows: [[Int]] = []
 	var current: [Int] = []
 	var rowPercent = 0
 	for (i, item) in items.enumerated() {
-		let percent = override[i].map { Int(($0 / max(width, 1) * 100).rounded()) } ?? item.width
-		if !current.isEmpty && rowPercent + 2 + percent <= 100 {
+		let percent = override[i].map { viralItemPercent($0, width: width) } ?? item.width
+		// Percentages add up to the row: 25 + 25 + 25 + 25 fits, the gaps are already part of each width
+		if !current.isEmpty && rowPercent + percent <= 100 {
 			current.append(i)
-			rowPercent += 2 + percent
+			rowPercent += percent
 		} else {
 			if !current.isEmpty { rows.append(current) }
 			current = [i]
@@ -1935,7 +2113,7 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 		var x: CGFloat = 0
 		var rowHeight: CGFloat = 0
 		for i in row {
-			let w = floor(min(width, override[i] ?? width * CGFloat(items[i].width) / 100))
+			let w = floor(min(width, override[i] ?? viralItemWidth(items[i].width, width: width)))
 			let h = floor(w * ViralImages.aspect(items[i].ids.first, settings: settings))
 			frames[i] = NSRect(x: x, y: y, width: w, height: h)
 			x += w + gap
@@ -2122,6 +2300,7 @@ fileprivate final class ViralImageTile: NSView {
 		super.init(frame: frameRect)
 		wantsLayer = true
 		layerContentsRedrawPolicy = .onSetNeedsDisplay
+		NotificationCenter.default.addObserver(self, selector: #selector(metricsChanged(_:)), name: ViralMetricsChangedNotification, object: nil)
 		
 		handle.onBegin = { [weak self] event in self?.beginResize(event) }
 		handle.onDrag = { [weak self] event in self?.dragResize(event) }
@@ -2176,6 +2355,7 @@ fileprivate final class ViralImageTile: NSView {
 			}
 			image = thumbnail.flatMap { ViralImages.image($0, settings: settings) }
 			loader.wantsSnapshot = (thumbnail == nil)
+			ViralMetrics.ensure(url, settings: settings)
 			let tileIndex = index
 			loader.onSnapshot = { [weak self] snapshot in
 				guard let self, let group = self.group else { return }
@@ -2248,10 +2428,12 @@ fileprivate final class ViralImageTile: NSView {
 			image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
 					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
 			if videoURL != nil { ViralImageTile.drawPlayButton(in: bounds) }
+			drawMetrics()
 		} else if videoURL != nil {
 			NSColor.black.setFill()
 			bounds.fill()
 			ViralImageTile.drawPlayButton(in: bounds)
+			drawMetrics()
 		} else {
 			(group?.color ?? .textColor).withAlphaComponent(0.08).setFill()
 			bounds.fill()
@@ -2272,6 +2454,15 @@ fileprivate final class ViralImageTile: NSView {
 	override func mouseDown(with event: NSEvent) {
 		group?.select(index)
 		openPlayer()
+	}
+	
+	private func drawMetrics() {
+		guard let videoURL, let stats = ViralMetrics.stats(videoURL, settings: group?.settings) else { return }
+		ViralMetrics.draw(stats, in: bounds, flipped: isFlipped)
+	}
+	
+	@objc func metricsChanged(_ notification: Notification) {
+		if videoURL != nil && webView == nil { needsDisplay = true }
 	}
 	
 	/// A round play button in the middle of a video thumbnail
@@ -2411,7 +2602,7 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	func commit(index: Int, width: CGFloat) {
 		previewWidths = [:]
 		guard index < items.count else { return }
-		items[index].width = min(max(Int((width / max(embedWidth, 1) * 100).rounded()), 5), 100)
+		items[index].width = min(max(viralItemPercent(width, width: embedWidth), 5), 100)
 		relayout()
 		write(items.map { $0.text })
 	}
@@ -2475,6 +2666,13 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		NSWorkspace.shared.open(url)
 	}
 	
+	@objc func refreshMetrics(_ sender: Any?) {
+		for item in items {
+			guard let entry = item.ids.first, ViralMedia.isVideo(entry) else { continue }
+			ViralMetrics.ensure(ViralMedia.url(entry), settings: settings, force: true)
+		}
+	}
+	
 	override func keyDown(with event: NSEvent) {
 		switch event.keyCode {
 		case 51, 117: deleteSelected()
@@ -2499,6 +2697,9 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 			let open = NSMenuItem(title: "Open in Browser", action: #selector(openInBrowser(_:)), keyEquivalent: "")
 			open.target = self
 			menu.addItem(open)
+			let numbers = NSMenuItem(title: "Refresh Views & Likes", action: #selector(refreshMetrics(_:)), keyEquivalent: "")
+			numbers.target = self
+			menu.addItem(numbers)
 			signInMenu(into: menu)
 			menu.addItem(NSMenuItem.separator())
 		}
@@ -2588,6 +2789,7 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	override init(host: BeatTextView) {
 		super.init(host: host)
 		kind = .carousel
+		NotificationCenter.default.addObserver(self, selector: #selector(metricsChanged(_:)), name: ViralMetricsChangedNotification, object: nil)
 		clip.wantsLayer = true
 		clip.layer?.masksToBounds = true
 		addSubview(clip)
@@ -2774,6 +2976,11 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 				color.withAlphaComponent(0.1).setFill()
 				rect.fill()
 			}
+			if isVideo {
+				let url = ViralMedia.url(entry)
+				ViralMetrics.ensure(url, settings: settings)
+				if let stats = ViralMetrics.stats(url, settings: settings) { ViralMetrics.draw(stats, in: rect, flipped: isFlipped) }
+			}
 			NSGraphicsContext.restoreGraphicsState()
 		}
 		NSGraphicsContext.restoreGraphicsState()
@@ -2802,6 +3009,8 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		}
 		updateChrome()
 	}
+	
+	@objc func metricsChanged(_ notification: Notification) { needsDisplay = true }
 	
 	override func suspendPlayers() {
 		guard !videos.isEmpty else { return }
@@ -3568,6 +3777,15 @@ public extension BeatTextView {
 		performSaveAs()
 	}
 	
+	/// ⌘S: when the title page has a `Save As:` name that the file doesn't have yet, save under that name
+	/// (no save panel for new documents). Returns false when a normal save should happen.
+	@objc func viralSaveWithTitlePageName() -> Bool {
+		guard let name = saveAsName, let document = window?.windowController?.document as? NSDocument else { return false }
+		if document.fileURL?.deletingPathExtension().lastPathComponent == name { return false }
+		performSaveAs()
+		return true
+	}
+	
 	fileprivate func performSaveAs() {
 		guard let name = saveAsName,
 			  let document = window?.windowController?.document as? NSDocument
@@ -3747,8 +3965,8 @@ public extension BeatTextView {
 	static let fonts: [(title: String, style: Int)] = [("Courier Prime", 0), ("Courier Prime Sans", 1), ("Courier New", 2)]
 	static let widthPresets: [(width: Int, name: String)] = [(50, ""), (55, "Narrow"), (60, ""), (67, "Normal"), (75, ""), (80, "Wide"), (90, ""), (95, "Extra Wide"), (100, ""), (110, "")]
 	static let sizePresets = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 44, 48, 56, 64]
-	static let numberMarginPresets = [8, 16, 24, 32, 40, 48, 64]
-	static let textMarginPresets = [24, 32, 48, 64, 80, 96, 120]
+	static let numberMarginPresets = [0, 4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 72, 80, 96, 112, 120]
+	static let textMarginPresets = [0, 4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 72, 80, 96, 112, 120]
 	
 	static var numberMargin: Int { return BeatUserDefaults.shared().getInteger(BeatSettingViralNumberMargin) }
 	static var textMargin: Int { return BeatUserDefaults.shared().getInteger(BeatSettingViralTextMargin) }

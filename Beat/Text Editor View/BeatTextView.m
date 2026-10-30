@@ -208,6 +208,15 @@ static NSTouchBarItemIdentifier ColorPickerItemIdentifier = @"com.TouchBarCatalo
 	[self.textStorage setFont:_editorDelegate.fonts.regular];
 		
 	self.layoutManager.allowsNonContiguousLayout = YES;
+	
+	// Viral: know when the user is scrolling without overriding scrollWheel: (which turns off smooth, threaded scrolling)
+	NSScrollView* scrollView = self.enclosingScrollView;
+	if (scrollView != nil) {
+		__weak typeof(self) weakSelf = self;
+		[NSNotificationCenter.defaultCenter addObserverForName:NSScrollViewWillStartLiveScrollNotification object:scrollView queue:nil usingBlock:^(NSNotification * _Nonnull note) { weakSelf.scrolling = YES; }];
+		[NSNotificationCenter.defaultCenter addObserverForName:NSScrollViewDidEndLiveScrollNotification object:scrollView queue:nil usingBlock:^(NSNotification * _Nonnull note) { weakSelf.scrolling = NO; }];
+
+	}
 	NSSpellChecker.sharedSpellChecker.automaticallyIdentifiesLanguages = true;
 	
 	NSMutableParagraphStyle *paragraphStyle = NSMutableParagraphStyle.new;
@@ -555,8 +564,8 @@ Line *cachedRectLine;
 	CGFloat zoom = MAX(self.zoomLevel, 0.1);
 	CGFloat textWidth = [_editorDelegate.editorStyles.page defaultWidthWithPageSize:_editorDelegate.pageSize];
 	CGFloat available = self.enclosingScrollView.frame.size.width / zoom;
-	// Never closer than the scene numbers plus a little room
-	CGFloat minimum = (CGFloat)[BeatUserDefaults.sharedDefaults getInteger:BeatSettingViralNumberMargin] + 30.0 + 12.0;
+	// Never closer than the scene numbers
+	CGFloat minimum = MIN(BeatTextView.linePadding, (CGFloat)[BeatUserDefaults.sharedDefaults getInteger:BeatSettingViralNumberMargin] + 30.0);
 	CGFloat padding = MIN(BeatTextView.linePadding, MAX(minimum, floor((available - textWidth - 1.0) / 2.0)));
 	if (fabs(self.textContainer.lineFragmentPadding - padding) > 0.5) self.textContainer.lineFragmentPadding = padding;
 	// Still too narrow (zoomed in, or a very wide page): wrap the text to the window instead of cutting it off

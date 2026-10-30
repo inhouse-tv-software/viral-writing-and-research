@@ -445,7 +445,8 @@
         for (Line* l in row) {
             NSString* entry = l.embedImageIDs.firstObject;
             BXImage* image = [self embedImageForEntry:entry settings:settings];
-            CGFloat w = floor(MIN(width, width * (CGFloat)l.embedWidthPercent / 100.0));
+            // Same as the editor: 4 × 25% fill a row exactly, gaps included
+            CGFloat w = floor(MIN(width, (CGFloat)l.embedWidthPercent / 100.0 * (width + gap) - gap));
             // Very tall images are made smaller so they fit on a page
             CGFloat aspect = [self embedAspectForEntry:entry image:image];
             if (w * aspect > self.embedMaxHeight) w = floor(self.embedMaxHeight / aspect);

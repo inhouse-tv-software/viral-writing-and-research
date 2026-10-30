@@ -8,19 +8,56 @@
 
 #import "BeatTextView+MouseEvents.h"
 #import "BeatTextView+Popovers.h"
+#import <QuartzCore/QuartzCore.h>
 
 @implementation BeatTextView (MouseEvents)
 
 
 #pragma mark - Mouse events
 
--(void)scrollWheel:(NSEvent *)event
+// Viral: the scrollWheel: override that used to be here turned off macOS responsive (threaded) scrolling for the
+// whole editor. The `scrolling` flag is now set from the scroll view's live scroll notifications (see BeatTextView setup).
+
+/// Viral: pinching on the trackpad zooms into the page like a picture while your fingers are down, and springs back when
+/// you let go. Nothing is re-laid out: the text, widths and settings don't change. (Use the Aa panel for a bigger text size.)
+- (void)magnifyWithEvent:(NSEvent *)event
 {
-	// If the user scrolls, let's ignore any other scroll behavior
-	if (event.phase == NSEventPhaseBegan || event.phase == NSEventPhaseChanged) self.scrolling = YES;
-	else if (event.phase == NSEventPhaseEnded) self.scrolling = NO;
+	static CGFloat scale = 1.0;
+	static CGPoint anchor;
 	
-	[super scrollWheel:event];
+	NSView* frameView = self.enclosingScrollView.superview;
+	if (frameView == nil) return;
+	frameView.wantsLayer = YES;
+	CALayer* layer = frameView.layer;
+	
+	if (event.phase == NSEventPhaseBegan || scale <= 1.0) {
+		NSPoint p = [frameView convertPoint:event.locationInWindow fromView:nil];
+		// sublayerTransform works around the layer's anchor point
+		anchor = CGPointMake(p.x - layer.bounds.size.width * layer.anchorPoint.x, p.y - layer.bounds.size.height * layer.anchorPoint.y);
+	}
+	
+	if (event.phase == NSEventPhaseEnded || event.phase == NSEventPhaseCancelled) {
+		CABasicAnimation* back = [CABasicAnimation animationWithKeyPath:@"sublayerTransform"];
+		back.fromValue = [NSValue valueWithCATransform3D:layer.sublayerTransform];
+		back.toValue = [NSValue valueWithCATransform3D:CATransform3DIdentity];
+		back.duration = 0.25;
+		back.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+		layer.sublayerTransform = CATransform3DIdentity;
+		[layer addAnimation:back forKey:@"viralZoomBack"];
+		scale = 1.0;
+		return;
+	}
+	
+	scale = MIN(MAX(scale * (1.0 + event.magnification), 1.0), 4.0);
+	CATransform3D t = CATransform3DMakeTranslation(anchor.x, anchor.y, 0);
+	t = CATransform3DScale(t, scale, scale, 1.0);
+	t = CATransform3DTranslate(t, -anchor.x, -anchor.y, 0);
+	
+	[CATransaction begin];
+	[CATransaction setDisableActions:YES];
+	[layer removeAnimationForKey:@"viralZoomBack"];
+	layer.sublayerTransform = t;
+	[CATransaction commit];
 }
 
 

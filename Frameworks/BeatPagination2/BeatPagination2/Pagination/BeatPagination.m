@@ -391,9 +391,9 @@
 			} else if (l.type == action && l.isEmbedImageLine) {
 				NSInteger w = l.embedWidthPercent;
 				bool continues = (row != nil && previous != nil && previous.isEmbedImageLine && !l.beginsNewParagraph);
-				if (continues && rowWidth + 2 + w <= 100) {
+				if (continues && rowWidth + w <= 100) {
 					[row addObject:l];
-					rowWidth += 2 + w;
+					rowWidth += w;
 					l.embedHidden = true;
 				} else {
 					row = [NSMutableArray arrayWithObject:l];
