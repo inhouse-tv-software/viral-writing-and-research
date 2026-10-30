@@ -40,6 +40,8 @@ extern NSString * const BeatSettingShowMarkersInScrollbar;
 extern NSString * const BeatSettingSceneHeadingSpacing;
 /// Viral: width of the editor page in characters
 extern NSString * const BeatSettingViralPageWidth;
+extern NSString * const BeatSettingViralNumberMargin;
+extern NSString * const BeatSettingViralTextMargin;
 extern NSString * const BeatSettingScreenplayItemMore;
 extern NSString * const BeatSettingScreenplayItemContd;
 extern NSString * const BeatSettingShowRevisions;

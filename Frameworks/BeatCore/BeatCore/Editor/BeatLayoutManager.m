@@ -35,7 +35,8 @@
 @end
 
 #if TARGET_OS_OSX
-    #define X_OFFSET 16.0
+    // Viral: space from the page edge to the scene numbers is a setting
+    #define X_OFFSET ((CGFloat)[BeatUserDefaults.sharedDefaults getInteger:BeatSettingViralNumberMargin])
 #else
     #define X_OFFSET 25.0
 #endif
@@ -248,7 +249,7 @@
         
         // Draw page numbers
         if (pageNumber > 0) {
-            [pageNumber drawInRect:CGRectMake(CGRectGetMaxX(r) + inset.width - 60.0, inset.height + r.origin.y, 30.0, (CGFloat)self.editorDelegate.editorLineHeight) withAttributes:@{
+            [pageNumber drawInRect:CGRectMake(CGRectGetMaxX(r) + inset.width - 44.0 - X_OFFSET, inset.height + r.origin.y, 30.0, (CGFloat)self.editorDelegate.editorLineHeight) withAttributes:@{
                 NSFontAttributeName: self.editorDelegate.fonts.regular,
                 NSForegroundColorAttributeName: pageNumberColor,
                 NSParagraphStyleAttributeName: self.pageNumberStyle

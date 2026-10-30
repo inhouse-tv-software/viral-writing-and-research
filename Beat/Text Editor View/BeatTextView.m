@@ -91,8 +91,10 @@ static NSTouchBarItemIdentifier ColorPickerItemIdentifier = @"com.TouchBarCatalo
 @implementation BeatTextView
 
 + (CGFloat)linePadding {
-	// Viral: page margin on each side of the text (the original Beat value was 100)
-	return 125.0;
+	// Viral: page edge → scene numbers → text. Both spaces are settings (Aa panel). The original Beat value was 100.
+	CGFloat numbers = (CGFloat)[BeatUserDefaults.sharedDefaults getInteger:BeatSettingViralNumberMargin];
+	CGFloat text = (CGFloat)[BeatUserDefaults.sharedDefaults getInteger:BeatSettingViralTextMargin];
+	return numbers + 30.0 + text;
 }
 
 -(instancetype)initWithCoder:(NSCoder *)coder
@@ -553,7 +555,9 @@ Line *cachedRectLine;
 	CGFloat zoom = MAX(self.zoomLevel, 0.1);
 	CGFloat textWidth = [_editorDelegate.editorStyles.page defaultWidthWithPageSize:_editorDelegate.pageSize];
 	CGFloat available = self.enclosingScrollView.frame.size.width / zoom;
-	CGFloat padding = MIN(BeatTextView.linePadding, MAX(50.0, floor((available - textWidth - 1.0) / 2.0)));
+	// Never closer than the scene numbers plus a little room
+	CGFloat minimum = (CGFloat)[BeatUserDefaults.sharedDefaults getInteger:BeatSettingViralNumberMargin] + 30.0 + 12.0;
+	CGFloat padding = MIN(BeatTextView.linePadding, MAX(minimum, floor((available - textWidth - 1.0) / 2.0)));
 	if (fabs(self.textContainer.lineFragmentPadding - padding) > 0.5) self.textContainer.lineFragmentPadding = padding;
 	// Still too narrow (zoomed in, or a very wide page): wrap the text to the window instead of cutting it off
 	CGFloat fits = floor(available - padding * 2.0 - 20.0);

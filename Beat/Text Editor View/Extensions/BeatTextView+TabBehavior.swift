@@ -3745,6 +3745,26 @@ public extension BeatTextView {
 /// Page width, font and text size, with a saved default that is used every time Viral starts
 @objc final class ViralPageSettings: NSObject {
 	static let fonts: [(title: String, style: Int)] = [("Courier Prime", 0), ("Courier Prime Sans", 1), ("Courier New", 2)]
+	static let widthPresets: [(width: Int, name: String)] = [(50, ""), (55, "Narrow"), (60, ""), (67, "Normal"), (75, ""), (80, "Wide"), (90, ""), (95, "Extra Wide"), (100, ""), (110, "")]
+	static let sizePresets = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30]
+	static let numberMarginPresets = [8, 16, 24, 32, 40, 48, 64]
+	static let textMarginPresets = [24, 32, 48, 64, 80, 96, 120]
+	
+	static var numberMargin: Int { return BeatUserDefaults.shared().getInteger(BeatSettingViralNumberMargin) }
+	static var textMargin: Int { return BeatUserDefaults.shared().getInteger(BeatSettingViralTextMargin) }
+	
+	/// Page edge → scene numbers, and scene numbers → text
+	static func setMargins(numbers: Int? = nil, text: Int? = nil) {
+		let n = numbers ?? numberMargin
+		let t = text ?? textMargin
+		guard n != numberMargin || t != textMargin else { return }
+		BeatUserDefaults.shared().save(NSNumber(value: n), forKey: BeatSettingViralNumberMargin)
+		BeatUserDefaults.shared().save(NSNumber(value: t), forKey: BeatSettingViralTextMargin)
+		ViralPageWidth.shared.apply()
+		for document in NSDocumentController.shared.documents {
+			(document.value(forKey: "textView") as? BeatTextView)?.needsDisplay = true
+		}
+	}
 	static let minSize = 10
 	static let maxSize = 30
 	/// Text size in points at zoom 1.0
@@ -3754,6 +3774,8 @@ public extension BeatTextView {
 	private static let defaultFontKey = "ViralDefaultFontStyle"
 	private static let defaultSizeKey = "ViralDefaultFontSize"
 	private static let defaultCustomFontKey = "ViralDefaultFontName"
+	private static let defaultNumberMarginKey = "ViralDefaultNumberMargin"
+	private static let defaultTextMarginKey = "ViralDefaultTextMargin"
 	/// PostScript name of a font picked from this Mac ("" = built-in screenplay font). Read by BeatFontManager.
 	static let customFontKey = "ViralFontName"
 	
@@ -3762,13 +3784,15 @@ public extension BeatTextView {
 	static var fontSize: Int { return Int((CGFloat(BeatUserDefaults.shared().getFloat(BeatSettingMagnification)) * baseSize).rounded()) }
 	
 	/// The saved default, or Viral's own default when none was saved
-	static var defaults: (width: Int, font: Int, custom: String, size: Int) {
+	static var defaults: (width: Int, font: Int, custom: String, size: Int, numbers: Int, text: Int) {
 		let d = UserDefaults.standard
 		let width = d.object(forKey: defaultWidthKey) as? Int ?? 67
 		let font = d.object(forKey: defaultFontKey) as? Int ?? 0
 		let custom = d.string(forKey: defaultCustomFontKey) ?? ""
 		let size = d.object(forKey: defaultSizeKey) as? Int ?? 18
-		return (width, font, custom, size)
+		let numbers = d.object(forKey: defaultNumberMarginKey) as? Int ?? 32
+		let text = d.object(forKey: defaultTextMarginKey) as? Int ?? 64
+		return (width, font, custom, size, numbers, text)
 	}
 	
 	/// Called once when the app starts, before documents open
@@ -3787,6 +3811,8 @@ public extension BeatTextView {
 		BeatUserDefaults.shared().save(NSNumber(value: d.width), forKey: BeatSettingViralPageWidth)
 		BeatUserDefaults.shared().save(NSNumber(value: d.font), forKey: BeatSettingFontStyle)
 		UserDefaults.standard.set(d.custom, forKey: customFontKey)
+		BeatUserDefaults.shared().save(NSNumber(value: d.numbers), forKey: BeatSettingViralNumberMargin)
+		BeatUserDefaults.shared().save(NSNumber(value: d.text), forKey: BeatSettingViralTextMargin)
 		BeatUserDefaults.shared().save(NSNumber(value: Double(CGFloat(d.size) / baseSize)), forKey: BeatSettingMagnification)
 	}
 	
@@ -3796,6 +3822,8 @@ public extension BeatTextView {
 		d.set(fontStyle, forKey: defaultFontKey)
 		d.set(customFont ?? "", forKey: defaultCustomFontKey)
 		d.set(fontSize, forKey: defaultSizeKey)
+		d.set(numberMargin, forKey: defaultNumberMarginKey)
+		d.set(textMargin, forKey: defaultTextMarginKey)
 	}
 	
 	static func restoreDefault() {
@@ -3803,6 +3831,7 @@ public extension BeatTextView {
 		ViralPageWidth.shared.set(d.width)
 		if d.custom.isEmpty { setFont(d.font) } else { setCustomFont(d.custom) }
 		setSize(d.size)
+		setMargins(numbers: d.numbers, text: d.text)
 	}
 	
 	/// One of the built-in screenplay fonts
@@ -3846,14 +3875,14 @@ public extension BeatTextView {
 }
 
 @objc final class ViralPageSettingsController: NSViewController {
-	private let widthSlider = NSSlider(value: 67, minValue: Double(ViralPageWidth.minimum), maxValue: Double(ViralPageWidth.maximum), target: nil, action: nil)
-	private let widthLabel = NSTextField(labelWithString: "")
+	private let widthPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 	private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 	private let stylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
 	/// Tag for families from this Mac in the font menu (built-in fonts use their style number)
 	private static let familyTag = 100
-	private let sizeSlider = NSSlider(value: 18, minValue: Double(ViralPageSettings.minSize), maxValue: Double(ViralPageSettings.maxSize), target: nil, action: nil)
-	private let sizeLabel = NSTextField(labelWithString: "")
+	private let sizePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+	private let numberMarginPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+	private let textMarginPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 	private let note = NSTextField(labelWithString: "")
 	
 	@objc static func show(from button: NSView) {
@@ -3864,53 +3893,34 @@ public extension BeatTextView {
 	}
 	
 	override func loadView() {
-		let width: CGFloat = 380
-		let height: CGFloat = 232
+		let width: CGFloat = 400
+		let rowHeight: CGFloat = 32
+		let rows: CGFloat = 6
+		let height: CGFloat = 20 + rows * rowHeight + 76
 		let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 		
-		func label(_ text: String, y: CGFloat) {
-			let l = NSTextField(labelWithString: text)
+		var y = height - 20 - rowHeight
+		func row(_ title: String, _ popup: NSPopUpButton, _ action: Selector, help: String? = nil) {
+			let l = NSTextField(labelWithString: title)
 			l.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-			l.frame = NSRect(x: 16, y: y, width: 80, height: 18)
+			l.frame = NSRect(x: 16, y: y + 6, width: 108, height: 18)
+			l.toolTip = help
 			root.addSubview(l)
-		}
-		func valueLabel(_ l: NSTextField, y: CGFloat) {
-			l.frame = NSRect(x: 286, y: y, width: 82, height: 18)
-			l.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-			l.textColor = .secondaryLabelColor
-			root.addSubview(l)
+			popup.frame = NSRect(x: 126, y: y + 1, width: width - 142, height: 26)
+			popup.target = self
+			popup.action = action
+			popup.toolTip = help
+			root.addSubview(popup)
+			y -= rowHeight
 		}
 		
-		label("Page width", y: height - 36)
-		widthSlider.frame = NSRect(x: 100, y: height - 38, width: 180, height: 22)
-		widthSlider.integerValue = ViralPageWidth.shared.current
-		widthSlider.target = self
-		widthSlider.action = #selector(widthChanged(_:))
-		widthSlider.isContinuous = false
-		root.addSubview(widthSlider)
-		valueLabel(widthLabel, y: height - 36)
-		
-		label("Font", y: height - 72)
+		row("Page width", widthPopup, #selector(widthChanged(_:)), help: "Characters per line")
 		buildFontMenu()
-		fontPopup.frame = NSRect(x: 98, y: height - 77, width: 270, height: 26)
-		fontPopup.target = self
-		fontPopup.action = #selector(fontChanged(_:))
-		root.addSubview(fontPopup)
-		
-		label("Style", y: height - 106)
-		stylePopup.frame = NSRect(x: 98, y: height - 111, width: 270, height: 26)
-		stylePopup.target = self
-		stylePopup.action = #selector(styleChanged(_:))
-		root.addSubview(stylePopup)
-		
-		label("Text size", y: height - 144)
-		sizeSlider.frame = NSRect(x: 100, y: height - 146, width: 180, height: 22)
-		sizeSlider.integerValue = ViralPageSettings.fontSize
-		sizeSlider.target = self
-		sizeSlider.action = #selector(sizeChanged(_:))
-		sizeSlider.isContinuous = false
-		root.addSubview(sizeSlider)
-		valueLabel(sizeLabel, y: height - 144)
+		row("Font", fontPopup, #selector(fontChanged(_:)))
+		row("Style", stylePopup, #selector(styleChanged(_:)))
+		row("Text size", sizePopup, #selector(sizeChanged(_:)))
+		row("Edge margin", numberMarginPopup, #selector(numberMarginChanged(_:)), help: "Space from the edge of the page to the scene numbers")
+		row("Text margin", textMarginPopup, #selector(textMarginChanged(_:)), help: "Space from the scene numbers to the text")
 		
 		let separator = NSBox(frame: NSRect(x: 16, y: 62, width: width - 32, height: 1))
 		separator.boxType = .separator
@@ -3931,10 +3941,23 @@ public extension BeatTextView {
 		note.font = NSFont.systemFont(ofSize: 10)
 		note.textColor = .secondaryLabelColor
 		note.alignment = .center
+		note.lineBreakMode = .byTruncatingTail
 		root.addSubview(note)
 		
 		self.view = root
 		refresh()
+	}
+	
+	/// Fills a number menu. A current value that isn't one of the choices is added, so it always shows.
+	private func fill(_ popup: NSPopUpButton, values: [Int], current: Int, title: (Int) -> String) {
+		popup.removeAllItems()
+		var list = values
+		if !list.contains(current) { list.append(current); list.sort() }
+		for value in list {
+			popup.addItem(withTitle: title(value))
+			popup.lastItem?.tag = value
+		}
+		popup.selectItem(withTag: current)
 	}
 	
 	/// Built-in screenplay fonts first, then every font family on this Mac
@@ -3979,10 +4002,16 @@ public extension BeatTextView {
 	}
 	
 	private func refresh() {
-		let width = ViralPageWidth.shared.current
-		let preset = ViralPageWidth.presets.first(where: { $0.width == width })?.title
-		widthLabel.stringValue = preset.map { "\(width) · \($0)" } ?? "\(width) chars"
-		widthSlider.integerValue = width
+		let defaults = ViralPageSettings.defaults
+		func marked(_ text: String, _ isDefault: Bool) -> String { return isDefault ? text + "  (default)" : text }
+		
+		fill(widthPopup, values: ViralPageSettings.widthPresets.map { $0.width }, current: ViralPageWidth.shared.current) { value in
+			let name = ViralPageSettings.widthPresets.first(where: { $0.width == value })?.name ?? ""
+			return marked(name.isEmpty ? "\(value) characters" : "\(value) characters · \(name)", value == defaults.width)
+		}
+		fill(sizePopup, values: ViralPageSettings.sizePresets, current: ViralPageSettings.fontSize) { marked("\($0) pt", $0 == defaults.size) }
+		fill(numberMarginPopup, values: ViralPageSettings.numberMarginPresets, current: ViralPageSettings.numberMargin) { marked("\($0) pt", $0 == defaults.numbers) }
+		fill(textMarginPopup, values: ViralPageSettings.textMarginPresets, current: ViralPageSettings.textMargin) { marked("\($0) pt", $0 == defaults.text) }
 		
 		stylePopup.removeAllItems()
 		if let custom = ViralPageSettings.customFont, let font = NSFont(name: custom, size: 12), let family = font.familyName {
@@ -4002,14 +4031,13 @@ public extension BeatTextView {
 			stylePopup.isEnabled = false
 		}
 		
-		sizeSlider.integerValue = ViralPageSettings.fontSize
-		sizeLabel.stringValue = "\(ViralPageSettings.fontSize) pt"
-		let d = ViralPageSettings.defaults
-		let fontName = ViralPageSettings.fontTitle(custom: d.custom, builtIn: d.font)
-		note.stringValue = "Default when Viral starts: \(d.width) wide, \(fontName), \(d.size) pt"
+		let fontName = ViralPageSettings.fontTitle(custom: defaults.custom, builtIn: defaults.font)
+		note.stringValue = "Default when Viral starts: \(defaults.width) wide, \(fontName), \(defaults.size) pt"
 	}
 	
-	@objc private func widthChanged(_ sender: NSSlider) { ViralPageWidth.shared.set(sender.integerValue); refresh() }
+	@objc private func widthChanged(_ sender: NSPopUpButton) { ViralPageWidth.shared.set(sender.selectedTag()); refresh() }
+	@objc private func numberMarginChanged(_ sender: NSPopUpButton) { ViralPageSettings.setMargins(numbers: sender.selectedTag()); refresh() }
+	@objc private func textMarginChanged(_ sender: NSPopUpButton) { ViralPageSettings.setMargins(text: sender.selectedTag()); refresh() }
 	
 	@objc private func fontChanged(_ sender: NSPopUpButton) {
 		guard let item = sender.selectedItem else { return }
@@ -4028,7 +4056,7 @@ public extension BeatTextView {
 		if let name = sender.selectedItem?.representedObject as? String { ViralPageSettings.setCustomFont(name) }
 		refresh()
 	}
-	@objc private func sizeChanged(_ sender: NSSlider) { ViralPageSettings.setSize(sender.integerValue); refresh() }
+	@objc private func sizeChanged(_ sender: NSPopUpButton) { ViralPageSettings.setSize(sender.selectedTag()); refresh() }
 	@objc private func useDefault(_ sender: Any?) { ViralPageSettings.restoreDefault(); refresh() }
 	@objc private func makeDefault(_ sender: Any?) { ViralPageSettings.makeCurrentDefault(); refresh() }
 }
@@ -4126,7 +4154,7 @@ public extension BeatTextView {
 		row("Right-click", "Height, rounded corners, add or remove images")
 		
 		header("Page")
-		row("Aa button", "Page width, any font on this Mac and its style (bold, italic\u{2026}), text size. Make Default saves them for every start")
+		row("Aa button", "Page width, any font on this Mac and its style, text size, and the margins around the scene numbers. Make Default saves them for every start")
 		row("⌥⌘]   ⌥⌘[", "Wider / narrower page (View ▸ Page Width)")
 		row("⌘+   ⌘−", "Bigger / smaller text")
 		
