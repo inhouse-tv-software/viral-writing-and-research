@@ -480,14 +480,20 @@
     if (entry.length == 0) return nil;
     if (![self embedEntryIsVideo:entry]) return [self embedImageWithID:entry settings:settings];
 #if TARGET_OS_OSX
-    // Videos print as their thumbnail with a play button
+    // Videos print as their thumbnail with a play button. Made once per video (pagination runs again after every edit).
+    static NSCache<NSString*, NSImage*>* videoImages;
+    static dispatch_once_t onceVideo;
+    dispatch_once(&onceVideo, ^{ videoImages = NSCache.new; videoImages.countLimit = 200; });
+    NSImage* cached = [videoImages objectForKey:entry];
+    if (cached != nil) return cached;
+    
     NSString* thumbID = nil;
     NSRange caret = [entry rangeOfString:@"^" options:NSBackwardsSearch];
     if (caret.location != NSNotFound) thumbID = [entry substringFromIndex:NSMaxRange(caret)];
     NSImage* thumbnail = (thumbID.length > 0) ? [self embedImageWithID:thumbID settings:settings] : nil;
     CGFloat aspect = [self embedVideoAspect:entry];
     CGFloat w = 1200.0, h = floor(1200.0 * aspect);
-    return [NSImage imageWithSize:NSMakeSize(w, h) flipped:false drawingHandler:^BOOL(NSRect rect) {
+    NSImage* image = [NSImage imageWithSize:NSMakeSize(w, h) flipped:false drawingHandler:^BOOL(NSRect rect) {
         [[NSColor colorWithWhite:0.12 alpha:1.0] setFill];
         NSRectFill(rect);
         if (thumbnail != nil) {
@@ -509,6 +515,9 @@
         [triangle fill];
         return true;
     }];
+    // Only cache once the thumbnail exists, so a video gets its picture when the thumbnail arrives
+    if (thumbnail != nil) [videoImages setObject:image forKey:entry];
+    return image;
 #else
     return nil;
 #endif

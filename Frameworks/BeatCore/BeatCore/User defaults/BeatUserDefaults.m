@@ -136,7 +136,7 @@ NSString* const BeatSettingDontHideBars                 = @"dontHideBars";
             BeatSettingShowSceneNumbers: @YES,
             BeatSettingHideFountainMarkup: @NO,
             BeatSettingTypewriterMode: @NO,
-            BeatSettingAutosave: @NO,
+            BeatSettingAutosave: @YES, // Viral: autosave is on by default
             BeatSettingAutocomplete: @YES,
             //BeatSettingUseSansSerif: @[FONT_STYLE_KEY, @NO],
             BeatSettingFontStyle: @0,

@@ -1103,32 +1103,8 @@ public extension BeatTextView {
 	}
 	
 	/// Moves the caret out of the table into the script
-	fileprivate func exitTable(_ view: BeatTableView, below: Bool) {
-		guard let textActions = editorDelegate?.textActions else { return }
-		window?.makeFirstResponder(self)
-		
-		let range = view.tableRange
-		if below {
-			let end = NSMaxRange(range)
-			let length = (self.string as NSString).length
-			if end >= length {
-				// Table is at the end of the document, add room below it
-				textActions.replace(NSRange(location: length, length: 0), with: "\n\n")
-			}
-			let ns = self.string as NSString
-			var target = min(end + 1, ns.length)
-			// Skip a blank line right after the table
-			if target < ns.length && ns.character(at: target) == 10 { target += 1 }
-			self.setSelectedRange(NSRange(location: min(target, ns.length), length: 0))
-		} else {
-			if range.location == 0 {
-				textActions.replace(NSRange(location: 0, length: 0), with: "\n")
-				self.setSelectedRange(NSRange(location: 0, length: 0))
-			} else {
-				self.setSelectedRange(NSRange(location: range.location - 1, length: 0))
-			}
-		}
-		scrollRangeToVisible(self.selectedRange())
+	fileprivate func exitTable(_ view: BeatTableView, below: Bool, newLine: Bool = false) {
+		leaveBlock(view.tableRange, below: below, newLine: newLine)
 	}
 	
 	/// If the caret lands in hidden table text (arrow keys etc.), move into the table view instead
@@ -1191,8 +1167,13 @@ public extension BeatTextView {
 		}
 		
 		// Make sure there's a line after the table
+		// Leave an empty line after the block, so there's always somewhere to keep writing
 		let after = NSMaxRange(range)
-		if after >= ns.length || ns.character(at: after) != 10 { text += "\n" }
+		if after >= ns.length || ns.character(at: after) != 10 {
+			text += "\n\n"
+		} else if after + 1 < ns.length && ns.character(at: after + 1) != 10 {
+			text += "\n"
+		}
 		
 		textActions.replace(range, with: text)
 		
@@ -1215,11 +1196,12 @@ public extension BeatTextView {
 		
 		let selection = self.selectedRange()
 		
-		// Return on the title page `Save As:` line saves under that name (it never saves by itself while typing)
+		// Return on the title page `Save As:` line saves under that name (it never saves by itself while typing).
+		// The Return still goes through, so you get the new line as usual.
 		if (event.keyCode == 36 || event.keyCode == 76) && flags.isEmpty && selection.length == 0,
 		   let line = saveAsLineRange, selection.location >= line.location && selection.location <= NSMaxRange(line) {
-			performSaveAs()
-			return true
+			DispatchQueue.main.async { [weak self] in self?.performSaveAs() }
+			return false
 		}
 		
 		// Return on a `/table` line inserts a table
@@ -2062,7 +2044,10 @@ fileprivate class ViralEmbedView: NSView {
 	
 	override func keyDown(with event: NSEvent) {
 		switch event.keyCode {
-		case 53, 36, 76: host?.exitEmbed(self, below: true)
+		case 36, 76:
+			// Return: a new empty line below. Shift-Return: a new empty line above.
+			host?.exitEmbed(self, below: !event.modifierFlags.contains(.shift), newLine: true)
+		case 53: host?.exitEmbed(self, below: true)
 		case 126: host?.exitEmbed(self, below: false)
 		case 125: host?.exitEmbed(self, below: true)
 		default:
@@ -3292,25 +3277,42 @@ public extension BeatTextView {
 	}
 	
 	/// Moves the caret out of an image block into the script
-	fileprivate func exitEmbed(_ view: ViralEmbedView, below: Bool) {
+	fileprivate func exitEmbed(_ view: ViralEmbedView, below: Bool, newLine: Bool = false) {
+		leaveBlock(view.blockRange, below: below, newLine: newLine)
+	}
+	
+	/// True if the line at this location is a table row, image or carousel (text you can't type into)
+	fileprivate func isBlockLine(at location: Int) -> Bool {
+		let ns = self.string as NSString
+		guard location >= 0 && location < ns.length else { return false }
+		var line = ns.lineRange(for: NSRange(location: location, length: 0))
+		if line.length > 0 && ns.character(at: NSMaxRange(line) - 1) == 10 { line.length -= 1 }
+		guard line.length > 0 else { return false }
+		let text = ns.substring(with: line)
+		return BeatTableModel.isRow(text) || EmbedLine.parse(text) != nil
+	}
+	
+	/// Moves the caret out of a table or image block, onto a line you can write on.
+	/// `newLine` (Return) always makes a fresh empty line. Arrows make one only when there is no text line there.
+	fileprivate func leaveBlock(_ range: NSRange, below: Bool, newLine: Bool) {
 		guard let textActions = editorDelegate?.textActions else { return }
 		window?.makeFirstResponder(self)
+		let length = (self.string as NSString).length
 		
-		let range = view.blockRange
 		if below {
-			let length = (self.string as NSString).length
-			if NSMaxRange(range) >= length {
-				textActions.replace(NSRange(location: length, length: 0), with: "\n")
+			let end = min(NSMaxRange(range), length)
+			let next = end + 1
+			if newLine || next > length || isBlockLine(at: next) {
+				textActions.replace(NSRange(location: end, length: 0), with: "\n")
 			}
-			let ns = self.string as NSString
-			let target = min(NSMaxRange(range) + 1, ns.length)
-			self.setSelectedRange(NSRange(location: target, length: 0))
+			self.setSelectedRange(NSRange(location: min(end + 1, (self.string as NSString).length), length: 0))
 		} else {
-			if range.location == 0 {
-				textActions.replace(NSRange(location: 0, length: 0), with: "\n")
-				self.setSelectedRange(NSRange(location: 0, length: 0))
+			let start = min(range.location, length)
+			if newLine || start == 0 || isBlockLine(at: start - 1) {
+				textActions.replace(NSRange(location: start, length: 0), with: "\n")
+				self.setSelectedRange(NSRange(location: start, length: 0))
 			} else {
-				self.setSelectedRange(NSRange(location: range.location - 1, length: 0))
+				self.setSelectedRange(NSRange(location: start - 1, length: 0))
 			}
 		}
 		scrollRangeToVisible(self.selectedRange())
@@ -3346,8 +3348,13 @@ public extension BeatTextView {
 			offset = 2
 		}
 		
+		// Leave an empty line after the block, so there's always somewhere to keep writing
 		let after = NSMaxRange(range)
-		if after >= ns.length || ns.character(at: after) != 10 { text += "\n" }
+		if after >= ns.length || ns.character(at: after) != 10 {
+			text += "\n\n"
+		} else if after + 1 < ns.length && ns.character(at: after + 1) != 10 {
+			text += "\n"
+		}
 		
 		textActions.replace(range, with: text)
 		
@@ -3766,6 +3773,11 @@ public extension BeatTextView {
 	
 	/// Called once when the app starts, before documents open
 	@objc static func applyLaunchDefaults() {
+		// Autosave is on in Viral. Turn it on once for people who had the old default (off).
+		if !UserDefaults.standard.bool(forKey: "ViralAutosaveOn") {
+			UserDefaults.standard.set(true, forKey: "ViralAutosaveOn")
+			BeatUserDefaults.shared().save(NSNumber(value: true), forKey: BeatSettingAutosave)
+		}
 		// First run with this feature: what you have now becomes the default, so nothing changes
 		if UserDefaults.standard.object(forKey: defaultWidthKey) == nil {
 			makeCurrentDefault()

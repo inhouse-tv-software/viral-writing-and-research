@@ -44,7 +44,7 @@ THE SOFTWARE.
 #import "BeatTextView.h"
 
 #define AUTOSAVE_INTERVAL 10.0
-#define AUTOSAVE_INPLACE_INTERVAL 60.0
+#define AUTOSAVE_INPLACE_INTERVAL 30.0 // Viral: save every 30 seconds when there are changes
 
 
 @class BeatReview;
