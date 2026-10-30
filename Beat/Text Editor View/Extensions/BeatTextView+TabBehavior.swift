@@ -86,6 +86,18 @@ fileprivate var BeatTableWritingKey: UInt8 = 0
 fileprivate var BeatTableObserversKey: UInt8 = 0
 fileprivate var BeatTableHeightCacheKey: UInt8 = 0
 fileprivate var BeatTablePendingFocusKey: UInt8 = 0
+fileprivate var ViralBlockCacheKey: UInt8 = 0
+fileprivate var ViralPlayerCheckKey: UInt8 = 0
+
+/// Remembers where tables and images are, so the whole document is only scanned again after the text changed
+/// (and not on every layout pass while scrolling).
+fileprivate final class ViralBlockCache {
+	var version = 0
+	var tableKey = (version: -1, length: -1)
+	var embedKey = (version: -1, length: -1)
+	var tables: [Any] = []
+	var embeds: [Any] = []
+}
 
 fileprivate enum BTMetrics {
 	static let paddingX: CGFloat = 8
@@ -759,8 +771,26 @@ public extension BeatTextView {
 		var lines: [String]
 	}
 	
-	/// Finds tables from the text itself (the parser can lag behind right after an edit)
+	fileprivate var blockCache: ViralBlockCache {
+		if let cache = objc_getAssociatedObject(self, &ViralBlockCacheKey) as? ViralBlockCache { return cache }
+		let cache = ViralBlockCache()
+		objc_setAssociatedObject(self, &ViralBlockCacheKey, cache, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+		return cache
+	}
+	
+	/// Tables in the document, scanned again only when the text changed
 	fileprivate func tableBlocks() -> [BTBlock] {
+		let cache = blockCache
+		let length = (self.string as NSString).length
+		if cache.tableKey.version == cache.version && cache.tableKey.length == length, let blocks = cache.tables as? [BTBlock] { return blocks }
+		let blocks = scanTableBlocks()
+		cache.tables = blocks
+		cache.tableKey = (cache.version, length)
+		return blocks
+	}
+	
+	/// Finds tables from the text itself (the parser can lag behind right after an edit)
+	fileprivate func scanTableBlocks() -> [BTBlock] {
 		let ns = self.string as NSString
 		var blocks: [BTBlock] = []
 		var start = -1
@@ -852,6 +882,33 @@ public extension BeatTextView {
 		NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: self, queue: .main) { [weak self] _ in
 			self?.caretMovedIntoTableIfNeeded()
 		}
+		if let storage = textStorage {
+			NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: storage, queue: nil) { [weak self] note in
+				guard let storage = note.object as? NSTextStorage, storage.editedMask.contains(.editedCharacters) else { return }
+				self?.blockCache.version += 1
+			}
+		}
+		if let clip = enclosingScrollView?.contentView {
+			clip.postsBoundsChangedNotifications = true
+			NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+				self?.schedulePlayerCheck()
+			}
+		}
+	}
+	
+	/// Video players far outside the visible area are closed (they show their thumbnail instead). Keeps scrolling smooth.
+	fileprivate func schedulePlayerCheck() {
+		if (objc_getAssociatedObject(self, &ViralPlayerCheckKey) as? Bool) == true { return }
+		objc_setAssociatedObject(self, &ViralPlayerCheckKey, true, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+			guard let self else { return }
+			objc_setAssociatedObject(self, &ViralPlayerCheckKey, false, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+			let visible = self.visibleRect
+			let keep = visible.insetBy(dx: 0, dy: -visible.height * 1.5)
+			for view in self.embedViews where !view.frame.intersects(keep) {
+				view.suspendPlayers()
+			}
+		}
 	}
 	
 	// MARK: Placing table views
@@ -898,14 +955,18 @@ public extension BeatTextView {
 			let view = views[i]
 			
 			view.tableRange = block.range
-			view.font = tableFont
-			view.textColor = self.textColor ?? .textColor
+			// Only lay the cells out again when something that affects them changed (this runs on every layout pass)
+			let font = tableFont
+			let color = self.textColor ?? .textColor
+			let styleChanged = view.tableWidth != width || view.font != font || view.textColor != color
+			view.font = font
+			view.textColor = color
 			view.tableWidth = width
 			
 			let text = ns.substring(with: block.range)
 			if text != view.sourceText || view.cells.isEmpty {
 				view.load(text: text, lines: block.lines)
-			} else {
+			} else if styleChanged {
 				view.relayout()
 			}
 			
@@ -968,6 +1029,7 @@ public extension BeatTextView {
 		if window?.firstResponder !== self {
 			self.setSelectedRange(NSRange(location: range.location, length: 0))
 		}
+		let heightBefore = tableHeightAtLocation(range.location)
 		
 		if old.count == new.count {
 			for i in stride(from: old.count - 1 - suffix, through: prefix, by: -1) where old[i] != new[i] {
@@ -1002,8 +1064,9 @@ public extension BeatTextView {
 		let delta = (text as NSString).length - range.length
 		view.tableRange.length = (text as NSString).length
 		
-		// The table height lives on its first line, so lay that line out again when rows grow or shrink
-		if range.location < (self.string as NSString).length {
+		// The table height lives on its first line. Lay it out again only when the height changed:
+		// it also re-lays out everything below the table, which is slow in long documents.
+		if range.location < (self.string as NSString).length && tableHeightAtLocation(range.location) != heightBefore {
 			layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
 		}
 		
@@ -1559,23 +1622,34 @@ fileprivate enum ViralWeb {
 	}
 	
 	/// A page with just the video (or photo), nothing else
-	static func mediaHTML(video: String?, image: String?) -> String {
+	static func mediaHTML(video: String?, image: String?, autoplay: Bool = false) -> String {
 		let style = "<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}video,img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}</style>"
 		var body = ""
 		if let video {
 			let poster = image.map { " poster=\"\(escapeAttribute($0))\"" } ?? ""
-			body = "<video src=\"\(escapeAttribute(video))\"\(poster) controls controlslist=\"nodownload noremoteplayback\" playsinline loop preload=\"metadata\"></video>"
+			body = "<video src=\"\(escapeAttribute(video))\"\(poster) controls controlslist=\"nodownload noremoteplayback\" playsinline loop preload=\"metadata\"\(autoplay ? " autoplay" : "")></video>"
 		} else if let image {
 			body = "<img src=\"\(escapeAttribute(image))\">"
 		}
 		return "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\(style)</head><body>\(body)</body></html>"
 	}
 	
-	static func load(_ view: WKWebView, url: String) {
+	static func autoplayURL(_ info: ViralVideo.Info) -> String {
+		switch info.provider {
+		case "YouTube": return info.embed + "&autoplay=1"
+		case "Vimeo": return info.embed + (info.embed.contains("?") ? "&" : "?") + "autoplay=1"
+		case "Facebook": return info.embed + "&autoplay=true"
+		default: return info.embed
+		}
+	}
+	
+	/// `autoplay` starts the video right away (used when a thumbnail is clicked)
+	static func load(_ view: WKWebView, url: String, autoplay: Bool = false) {
 		// Instagram embeds come with a header, likes and comments. Load the embed page, take the video address from it,
 		// and show only the video in a plain player.
 		if let info = ViralVideo.info(url), info.provider == "Instagram",
 		   let loader = view.navigationDelegate as? ViralVideoLoader, let embed = URL(string: info.embed) {
+			loader.autoplay = autoplay
 			loader.instagramStage = 1
 			view.alphaValue = 0
 			view.load(URLRequest(url: embed))
@@ -1589,7 +1663,7 @@ fileprivate enum ViralWeb {
 		<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 		<style>html,body{margin:0;padding:0;height:100%;background:\(info.provider == "Facebook" ? "#fff" : "#000");overflow:hidden}
 		iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head>
-		<body><iframe src="\(info.embed)" allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>
+		<body><iframe src="\(autoplay ? autoplayURL(info) : info.embed)" allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>
 		"""
 		view.loadHTMLString(html, baseURL: baseURL)
 	}
@@ -1602,6 +1676,7 @@ fileprivate final class ViralVideoLoader: NSObject, WKNavigationDelegate, WKUIDe
 	
 	/// 1 = loading the Instagram embed page, 2 = showing the plain player
 	var instagramStage = 0
+	var autoplay = false
 	
 	func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
 		if instagramStage == 1 {
@@ -1615,7 +1690,7 @@ fileprivate final class ViralVideoLoader: NSObject, WKNavigationDelegate, WKUIDe
 					image = dict["image"] as? String
 				}
 				if video != nil || image != nil {
-					webView.loadHTMLString(ViralWeb.mediaHTML(video: video, image: image), baseURL: ViralWeb.baseURL)
+					webView.loadHTMLString(ViralWeb.mediaHTML(video: video, image: image, autoplay: self.autoplay), baseURL: ViralWeb.baseURL)
 				} else {
 					self.instagramStage = 0
 					webView.evaluateJavaScript(ViralWeb.instagramCleanupScript, completionHandler: nil)
@@ -1710,12 +1785,13 @@ fileprivate enum ViralImages {
 	static var stored: [String: String] = [:]
 	
 	static func image(_ id: String, settings: BeatDocumentSettings?) -> NSImage? {
-		let dict = settings?.get(ViralImagesKey) as? [String: Any] ?? [:]
-		if let encoded = dict[id] as? String {
-			stored[id] = encoded
+		// NSDictionary lookup: this runs while drawing and laying out, so avoid copying the whole image store
+		let dict = settings?.get(ViralImagesKey) as? NSDictionary
+		if let encoded = dict?[id] as? String {
+			if stored[id] == nil { stored[id] = encoded }
 		} else if let settings, let encoded = stored[id] {
 			// The text uses an image this document doesn't hold (undo after a save pruned it, or pasted from another document). Put it back.
-			var updated = dict
+			let updated = (dict?.mutableCopy() as? NSMutableDictionary) ?? NSMutableDictionary()
 			updated[id] = encoded
 			settings.set(ViralImagesKey, as: updated)
 		}
@@ -1901,6 +1977,8 @@ fileprivate class ViralEmbedView: NSView {
 	func addImages(_ images: [NSImage]) {}
 	func addVideos(_ urls: [String]) {}
 	@objc func reloadVideos(_ notification: Notification?) {}
+	/// Close video players and show thumbnails instead (called when far off screen)
+	func suspendPlayers() {}
 	
 	// The window only switches its first responder after these return, so redraw on the next turn
 	override func becomeFirstResponder() -> Bool { DispatchQueue.main.async { [weak self] in self?.redraw() }; return true }
@@ -2017,6 +2095,10 @@ fileprivate final class ViralImageTile: NSView {
 	var image: NSImage?
 	var videoURL: String?
 	var webView: WKWebView?
+	/// The link the web view was loaded with
+	var webViewURL: String?
+	/// Set when the player was opened (click), so it stays until it scrolls far away
+	var playerActive = false
 	let loader = ViralVideoLoader()
 	let handle = ViralHandleView(frame: .zero)
 	let menuButton = NSButton(frame: .zero)
@@ -2064,19 +2146,27 @@ fileprivate final class ViralImageTile: NSView {
 	func configure(entry: String?, settings: BeatDocumentSettings?) {
 		guard let entry else { image = nil; return }
 		if ViralMedia.isVideo(entry) {
-			image = nil
 			let url = ViralMedia.url(entry)
-			if videoURL != url || webView == nil {
-				videoURL = url
-				webView?.removeFromSuperview()
-				let web = ViralWeb.makeView()
-				web.navigationDelegate = loader
-				web.uiDelegate = loader
-				addSubview(web, positioned: .below, relativeTo: handle)
-				webView = web
-				ViralWeb.load(web, url: url)
+			let thumbnail = ViralMedia.thumbnail(entry)
+			if videoURL != url { playerActive = false }
+			videoURL = url
+			// Videos show their thumbnail until clicked. A web player per video makes scrolling slow.
+			// Without a thumbnail yet, the player loads once to take one.
+			let keepPlayer = webView != nil && webViewURL == url
+			if playerActive || thumbnail == nil || keepPlayer {
+				if !keepPlayer {
+					webView?.removeFromSuperview()
+					let web = ViralWeb.makeView()
+					web.navigationDelegate = loader
+					web.uiDelegate = loader
+					addSubview(web, positioned: .below, relativeTo: handle)
+					webView = web
+					webViewURL = url
+					ViralWeb.load(web, url: url, autoplay: playerActive)
+				}
 			}
-			loader.wantsSnapshot = (ViralMedia.thumbnail(entry) == nil)
+			image = thumbnail.flatMap { ViralImages.image($0, settings: settings) }
+			loader.wantsSnapshot = (thumbnail == nil)
 			let tileIndex = index
 			loader.onSnapshot = { [weak self] snapshot in
 				guard let self, let group = self.group else { return }
@@ -2086,6 +2176,8 @@ fileprivate final class ViralImageTile: NSView {
 			videoURL = nil
 			webView?.removeFromSuperview()
 			webView = nil
+			webViewURL = nil
+			playerActive = false
 			loader.wantsSnapshot = false
 			image = ViralImages.image(entry, settings: settings)
 		}
@@ -2097,6 +2189,24 @@ fileprivate final class ViralImageTile: NSView {
 	func reloadVideo() {
 		guard let webView, let videoURL else { return }
 		ViralWeb.load(webView, url: videoURL)
+	}
+	
+	/// Opens the player for a video that shows its thumbnail
+	func openPlayer() {
+		guard videoURL != nil, webView == nil, let entry = item?.ids.first else { return }
+		playerActive = true
+		configure(entry: entry, settings: group?.settings)
+	}
+	
+	/// Closes the player and shows the thumbnail again (only when there is one)
+	func closePlayer() {
+		guard let webView, let entry = item?.ids.first, ViralMedia.thumbnail(entry) != nil else { return }
+		webView.removeFromSuperview()
+		self.webView = nil
+		webViewURL = nil
+		playerActive = false
+		updateChrome()
+		needsDisplay = true
 	}
 	
 	override func setFrameSize(_ newSize: NSSize) {
@@ -2117,7 +2227,7 @@ fileprivate final class ViralImageTile: NSView {
 	func updateChrome() {
 		let selected = isSelected || resizing
 		handle.isHidden = !(selected || hovering)
-		menuButton.isHidden = !(webView != nil && (selected || hovering))
+		menuButton.isHidden = !(videoURL != nil && (selected || hovering))
 		layer?.borderWidth = selected ? 2 : (hovering ? 1 : 0)
 		layer?.borderColor = (selected ? NSColor.controlAccentColor : (group?.color ?? .textColor).withAlphaComponent(0.3)).cgColor
 		layoutChrome()
@@ -2128,6 +2238,11 @@ fileprivate final class ViralImageTile: NSView {
 		if let image {
 			image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
 					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+			if videoURL != nil { ViralImageTile.drawPlayButton(in: bounds) }
+		} else if videoURL != nil {
+			NSColor.black.setFill()
+			bounds.fill()
+			ViralImageTile.drawPlayButton(in: bounds)
 		} else {
 			(group?.color ?? .textColor).withAlphaComponent(0.08).setFill()
 			bounds.fill()
@@ -2147,6 +2262,23 @@ fileprivate final class ViralImageTile: NSView {
 	
 	override func mouseDown(with event: NSEvent) {
 		group?.select(index)
+		openPlayer()
+	}
+	
+	/// A round play button in the middle of a video thumbnail
+	static func drawPlayButton(in rect: NSRect) {
+		let size = min(56, max(28, min(rect.width, rect.height) * 0.22))
+		let circle = NSRect(x: rect.midX - size / 2, y: rect.midY - size / 2, width: size, height: size)
+		NSColor.black.withAlphaComponent(0.45).setFill()
+		NSBezierPath(ovalIn: circle).fill()
+		let t = size * 0.32
+		let path = NSBezierPath()
+		path.move(to: NSPoint(x: circle.midX - t * 0.4, y: circle.midY - t * 0.6))
+		path.line(to: NSPoint(x: circle.midX + t * 0.6, y: circle.midY))
+		path.line(to: NSPoint(x: circle.midX - t * 0.4, y: circle.midY + t * 0.6))
+		path.close()
+		NSColor.white.setFill()
+		path.fill()
 	}
 	
 	func beginResize(_ event: NSEvent) {
@@ -2241,6 +2373,10 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	
 	override func reloadVideos(_ notification: Notification?) {
 		for tile in tiles { tile.reloadVideo() }
+	}
+	
+	override func suspendPlayers() {
+		for tile in tiles { tile.closePlayer() }
 	}
 	
 	override func activate(atEnd: Bool) {
@@ -2418,6 +2554,8 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	var animation: Timer? = nil
 	
 	var videos: [Int: (url: String, view: WKWebView, loader: ViralVideoLoader)] = [:]
+	/// Videos opened with a click. The others show their thumbnail (a web player per video makes scrolling slow).
+	var openVideos = Set<String>()
 	let clip = ViralFlippedView(frame: .zero)
 	let overlay = ViralCarouselOverlay(frame: .zero)
 	let handle = ViralHandleView(frame: .zero)
@@ -2531,6 +2669,9 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		var keep = Set<Int>()
 		for (i, entry) in item.ids.enumerated() where ViralMedia.isVideo(entry) && i < frames.count {
 			let url = ViralMedia.url(entry)
+			let hasThumbnail = ViralMedia.thumbnail(entry) != nil
+			// Thumbnail only, until the video is clicked (a player still loads once to take the thumbnail)
+			guard openVideos.contains(url) || !hasThumbnail || videos[i]?.url == url else { continue }
 			if videos[i]?.url != url {
 				videos[i]?.view.removeFromSuperview()
 				let web = ViralWeb.makeView()
@@ -2538,7 +2679,7 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 				web.navigationDelegate = loader
 				web.uiDelegate = loader
 				clip.addSubview(web)
-				ViralWeb.load(web, url: url)
+				ViralWeb.load(web, url: url, autoplay: openVideos.contains(url))
 				videos[i] = (url, web, loader)
 			}
 			if let video = videos[i] {
@@ -2604,15 +2745,22 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		NSBezierPath(rect: strip).addClip()
 		for (i, frame) in itemFrames.enumerated() {
 			let entry = item.ids[i]
-			if ViralMedia.isVideo(entry) { continue }
+			let isVideo = ViralMedia.isVideo(entry)
+			if isVideo && videos[i] != nil { continue }
 			let rect = frame.offsetBy(dx: -scrollX, dy: 0)
 			guard rect.maxX > strip.minX, rect.minX < strip.maxX else { continue }
 			let radius = item.rounded ? EmbedLine.cornerRadius(rect) : 0
 			NSGraphicsContext.saveGraphicsState()
 			NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).addClip()
-			if let image = ViralImages.image(entry, settings: settings) {
+			let imageID = isVideo ? ViralMedia.thumbnail(entry) : entry
+			if let imageID, let image = ViralImages.image(imageID, settings: settings) {
 				image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
 						   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+				if isVideo { ViralImageTile.drawPlayButton(in: rect) }
+			} else if isVideo {
+				NSColor.black.setFill()
+				rect.fill()
+				ViralImageTile.drawPlayButton(in: rect)
 			} else {
 				color.withAlphaComponent(0.1).setFill()
 				rect.fill()
@@ -2635,9 +2783,27 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		let point = convert(event.locationInWindow, from: nil)
 		if let i = itemFrames.firstIndex(where: { $0.offsetBy(dx: -scrollX, dy: 0).contains(point) }) {
 			selectedIndex = i
+			let entry = item.ids[i]
+			if ViralMedia.isVideo(entry) && videos[i] == nil {
+				openVideos.insert(ViralMedia.url(entry))
+				layoutVideos()
+				needsDisplay = true
+			}
 			scrollToSelected()
 		}
 		updateChrome()
+	}
+	
+	override func suspendPlayers() {
+		guard !videos.isEmpty else { return }
+		openVideos.removeAll()
+		for (i, video) in videos {
+			let entry = i < item.ids.count ? item.ids[i] : ""
+			guard ViralMedia.thumbnail(entry) != nil else { continue }
+			video.view.removeFromSuperview()
+			videos[i] = nil
+		}
+		needsDisplay = true
 	}
 	
 	func beginResize(_ event: NSEvent) {
@@ -2882,8 +3048,19 @@ public extension BeatTextView {
 		var kind: EmbedKind
 	}
 	
-	/// Finds image groups and carousels from the text
+	/// Images and carousels in the document, scanned again only when the text changed
 	fileprivate func embedBlocks() -> [EmbedBlock] {
+		let cache = blockCache
+		let length = (self.string as NSString).length
+		if cache.embedKey.version == cache.version && cache.embedKey.length == length, let blocks = cache.embeds as? [EmbedBlock] { return blocks }
+		let blocks = scanEmbedBlocks()
+		cache.embeds = blocks
+		cache.embedKey = (cache.version, length)
+		return blocks
+	}
+	
+	/// Finds image groups and carousels from the text
+	fileprivate func scanEmbedBlocks() -> [EmbedBlock] {
 		let ns = self.string as NSString
 		var blocks: [EmbedBlock] = []
 		var current: EmbedBlock? = nil

@@ -72,6 +72,9 @@ static NSTouchBarItemIdentifier ColorPickerItemIdentifier = @"com.TouchBarCatalo
 	bool awoken;
 }
 
+/// Viral: text width that fits the window when the window is narrower than the page (0 = use the page width)
+@property (nonatomic) CGFloat fittedTextWidth;
+
 /// Touch bar view
 @property (nonatomic, weak) IBOutlet NSTouchBar *touchBar;
 
@@ -531,6 +534,7 @@ Line *cachedRectLine;
 - (CGFloat)documentWidth
 {
 	CGFloat width = [_editorDelegate.editorStyles.page defaultWidthWithPageSize:_editorDelegate.pageSize];
+	if (self.fittedTextWidth > 0 && self.fittedTextWidth < width) width = self.fittedTextWidth;
 	CGFloat padding = self.textContainer.lineFragmentPadding;
 	return width + padding * 2 + 1.0;
 }
@@ -545,8 +549,18 @@ Line *cachedRectLine;
 		self.textInsetY = TEXT_INSET_TOP;
 	}
 	
+	// Viral: the side margins shrink (down to 50, room for scene numbers) when the window is too narrow for the page, instead of the page being cut off
+	CGFloat zoom = MAX(self.zoomLevel, 0.1);
+	CGFloat textWidth = [_editorDelegate.editorStyles.page defaultWidthWithPageSize:_editorDelegate.pageSize];
+	CGFloat available = self.enclosingScrollView.frame.size.width / zoom;
+	CGFloat padding = MIN(BeatTextView.linePadding, MAX(50.0, floor((available - textWidth - 1.0) / 2.0)));
+	if (fabs(self.textContainer.lineFragmentPadding - padding) > 0.5) self.textContainer.lineFragmentPadding = padding;
+	// Still too narrow (zoomed in, or a very wide page): wrap the text to the window instead of cutting it off
+	CGFloat fits = floor(available - padding * 2.0 - 20.0);
+	self.fittedTextWidth = (fits < textWidth) ? MAX(200.0, fits) : 0.0;
+	
 	// Left/right insets
-	CGFloat width = (self.enclosingScrollView.frame.size.width / 2 - self.documentWidth * self.zoomLevel / 2) / self.zoomLevel;
+	CGFloat width = MAX(0.0, (self.enclosingScrollView.frame.size.width / 2 - self.documentWidth * self.zoomLevel / 2) / self.zoomLevel);
 	
 	self.textContainerInset = NSMakeSize(width, _textInsetY);
 	self.textContainer.size = NSMakeSize(self.documentWidth, self.textContainer.size.height);
