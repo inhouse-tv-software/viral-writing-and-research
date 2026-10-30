@@ -65,7 +65,11 @@ public class BeatStyles:NSObject {
     }
     
     @objc public func reset() {
-        _stylesheets = [:]
+        // Viral fix: this used to set an empty dictionary, so the bundled stylesheets were never found again
+        // and the next lookup crashed on a nil URL (seen when changing page width). nil makes them load again.
+        _stylesLock.lock()
+        defer { _stylesLock.unlock() }
+        _stylesheets = nil
     }
         
     @objc public func styles(name:String? = nil, delegate:BeatDocumentDelegate? = nil, forEditor:Bool = false) -> BeatStylesheet {

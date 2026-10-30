@@ -2446,7 +2446,7 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	}
 	
 	override func addVideos(_ urls: [String]) {
-		insertItems(urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 33) })
+		insertItems(urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 25) })
 	}
 	
 	func deleteSelected() {
@@ -3378,7 +3378,7 @@ public extension BeatTextView {
 	}
 	
 	fileprivate func insertVideos(_ urls: [String]) {
-		let lines = urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 33).text }
+		let lines = urls.map { EmbedLine(kind: .video, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: 25).text }
 		insertEmbedLines(lines)
 	}
 	
@@ -3746,7 +3746,7 @@ public extension BeatTextView {
 @objc final class ViralPageSettings: NSObject {
 	static let fonts: [(title: String, style: Int)] = [("Courier Prime", 0), ("Courier Prime Sans", 1), ("Courier New", 2)]
 	static let widthPresets: [(width: Int, name: String)] = [(50, ""), (55, "Narrow"), (60, ""), (67, "Normal"), (75, ""), (80, "Wide"), (90, ""), (95, "Extra Wide"), (100, ""), (110, "")]
-	static let sizePresets = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30]
+	static let sizePresets = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 44, 48, 56, 64]
 	static let numberMarginPresets = [8, 16, 24, 32, 40, 48, 64]
 	static let textMarginPresets = [24, 32, 48, 64, 80, 96, 120]
 	
@@ -3760,13 +3760,15 @@ public extension BeatTextView {
 		guard n != numberMargin || t != textMargin else { return }
 		BeatUserDefaults.shared().save(NSNumber(value: n), forKey: BeatSettingViralNumberMargin)
 		BeatUserDefaults.shared().save(NSNumber(value: t), forKey: BeatSettingViralTextMargin)
-		ViralPageWidth.shared.apply()
+		// Margins only change the layout, not the styles
 		for document in NSDocumentController.shared.documents {
+			let object = document as NSObject
+			if object.responds(to: NSSelectorFromString("updateLayout")) { object.perform(NSSelectorFromString("updateLayout")) }
 			(document.value(forKey: "textView") as? BeatTextView)?.needsDisplay = true
 		}
 	}
 	static let minSize = 10
-	static let maxSize = 30
+	static let maxSize = 64
 	/// Text size in points at zoom 1.0
 	static let baseSize: CGFloat = 12
 	
