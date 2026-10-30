@@ -1539,8 +1539,32 @@ fileprivate enum ViralVideo {
 	}
 }
 
-/// A web view for players: no download items in its menu
+/// A web view for players: no download items in its menu.
+/// While the video is paused, scrolling over it scrolls the document. While it plays, the player gets the scroll.
 fileprivate final class ViralWebView: WKWebView {
+	private var isPlaying = false
+	private var playbackTimer: Timer?
+	
+	override func viewDidMoveToWindow() {
+		super.viewDidMoveToWindow()
+		playbackTimer?.invalidate()
+		playbackTimer = nil
+		isPlaying = false
+		guard window != nil else { return }
+		playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.refreshPlaybackState() }
+	}
+	
+	private func refreshPlaybackState() {
+		if #available(macOS 12.0, *) {
+			requestMediaPlaybackState { [weak self] state in self?.isPlaying = (state == .playing) }
+		}
+	}
+	
+	override func scrollWheel(with event: NSEvent) {
+		if isPlaying { super.scrollWheel(with: event) }
+		else { nextResponder?.scrollWheel(with: event) }
+	}
+	
 	override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
 		for item in menu.items {
 			let identifier = item.identifier?.rawValue.lowercased() ?? ""
@@ -3709,13 +3733,186 @@ public extension BeatTextView {
 	}
 }
 
+// MARK: - Page settings (width, font, size)
+
+/// Page width, font and text size, with a saved default that is used every time Viral starts
+@objc final class ViralPageSettings: NSObject {
+	static let fonts: [(title: String, style: Int)] = [("Courier Prime", 0), ("Courier Prime Sans", 1), ("Courier New", 2)]
+	static let minSize = 10
+	static let maxSize = 30
+	/// Text size in points at zoom 1.0
+	static let baseSize: CGFloat = 12
+	
+	private static let defaultWidthKey = "ViralDefaultPageWidth"
+	private static let defaultFontKey = "ViralDefaultFontStyle"
+	private static let defaultSizeKey = "ViralDefaultFontSize"
+	
+	static var fontStyle: Int { return BeatUserDefaults.shared().getInteger(BeatSettingFontStyle) }
+	static var fontSize: Int { return Int((CGFloat(BeatUserDefaults.shared().getFloat(BeatSettingMagnification)) * baseSize).rounded()) }
+	
+	/// The saved default, or Viral's own default when none was saved
+	static var defaults: (width: Int, font: Int, size: Int) {
+		let d = UserDefaults.standard
+		let width = d.object(forKey: defaultWidthKey) as? Int ?? 67
+		let font = d.object(forKey: defaultFontKey) as? Int ?? 0
+		let size = d.object(forKey: defaultSizeKey) as? Int ?? 18
+		return (width, font, size)
+	}
+	
+	/// Called once when the app starts, before documents open
+	@objc static func applyLaunchDefaults() {
+		// First run with this feature: what you have now becomes the default, so nothing changes
+		if UserDefaults.standard.object(forKey: defaultWidthKey) == nil {
+			makeCurrentDefault()
+			return
+		}
+		let d = defaults
+		BeatUserDefaults.shared().save(NSNumber(value: d.width), forKey: BeatSettingViralPageWidth)
+		BeatUserDefaults.shared().save(NSNumber(value: d.font), forKey: BeatSettingFontStyle)
+		BeatUserDefaults.shared().save(NSNumber(value: Double(CGFloat(d.size) / baseSize)), forKey: BeatSettingMagnification)
+	}
+	
+	static func makeCurrentDefault() {
+		let d = UserDefaults.standard
+		d.set(ViralPageWidth.shared.current, forKey: defaultWidthKey)
+		d.set(fontStyle, forKey: defaultFontKey)
+		d.set(fontSize, forKey: defaultSizeKey)
+	}
+	
+	static func restoreDefault() {
+		let d = defaults
+		ViralPageWidth.shared.set(d.width)
+		setFont(d.font)
+		setSize(d.size)
+	}
+	
+	static func setFont(_ style: Int) {
+		guard style != fontStyle else { return }
+		BeatUserDefaults.shared().save(NSNumber(value: style), forKey: BeatSettingFontStyle)
+		for document in NSDocumentController.shared.documents {
+			let object = document as NSObject
+			if object.responds(to: NSSelectorFromString("reloadFonts")) { object.perform(NSSelectorFromString("reloadFonts")) }
+		}
+	}
+	
+	static func setSize(_ points: Int) {
+		let size = min(max(points, minSize), maxSize)
+		let zoom = CGFloat(size) / baseSize
+		BeatUserDefaults.shared().save(NSNumber(value: Double(zoom)), forKey: BeatSettingMagnification)
+		for document in NSDocumentController.shared.documents {
+			(document.value(forKey: "textView") as? BeatTextView)?.adjustZoomLevel(zoom)
+		}
+	}
+}
+
+@objc final class ViralPageSettingsController: NSViewController {
+	private let widthSlider = NSSlider(value: 67, minValue: Double(ViralPageWidth.minimum), maxValue: Double(ViralPageWidth.maximum), target: nil, action: nil)
+	private let widthLabel = NSTextField(labelWithString: "")
+	private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+	private let sizeSlider = NSSlider(value: 18, minValue: Double(ViralPageSettings.minSize), maxValue: Double(ViralPageSettings.maxSize), target: nil, action: nil)
+	private let sizeLabel = NSTextField(labelWithString: "")
+	private let note = NSTextField(labelWithString: "")
+	
+	@objc static func show(from button: NSView) {
+		let popover = NSPopover()
+		popover.behavior = .transient
+		popover.contentViewController = ViralPageSettingsController()
+		popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+	}
+	
+	override func loadView() {
+		let width: CGFloat = 380
+		let height: CGFloat = 196
+		let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+		
+		func label(_ text: String, y: CGFloat) {
+			let l = NSTextField(labelWithString: text)
+			l.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+			l.frame = NSRect(x: 16, y: y, width: 80, height: 18)
+			root.addSubview(l)
+		}
+		func valueLabel(_ l: NSTextField, y: CGFloat) {
+			l.frame = NSRect(x: 286, y: y, width: 82, height: 18)
+			l.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+			l.textColor = .secondaryLabelColor
+			root.addSubview(l)
+		}
+		
+		label("Page width", y: height - 36)
+		widthSlider.frame = NSRect(x: 100, y: height - 38, width: 180, height: 22)
+		widthSlider.integerValue = ViralPageWidth.shared.current
+		widthSlider.target = self
+		widthSlider.action = #selector(widthChanged(_:))
+		widthSlider.isContinuous = false
+		root.addSubview(widthSlider)
+		valueLabel(widthLabel, y: height - 36)
+		
+		label("Font", y: height - 72)
+		for font in ViralPageSettings.fonts { fontPopup.addItem(withTitle: font.title); fontPopup.lastItem?.tag = font.style }
+		fontPopup.selectItem(withTag: ViralPageSettings.fontStyle)
+		fontPopup.frame = NSRect(x: 98, y: height - 77, width: 186, height: 26)
+		fontPopup.target = self
+		fontPopup.action = #selector(fontChanged(_:))
+		root.addSubview(fontPopup)
+		
+		label("Text size", y: height - 108)
+		sizeSlider.frame = NSRect(x: 100, y: height - 110, width: 180, height: 22)
+		sizeSlider.integerValue = ViralPageSettings.fontSize
+		sizeSlider.target = self
+		sizeSlider.action = #selector(sizeChanged(_:))
+		sizeSlider.isContinuous = false
+		root.addSubview(sizeSlider)
+		valueLabel(sizeLabel, y: height - 108)
+		
+		let separator = NSBox(frame: NSRect(x: 16, y: 62, width: width - 32, height: 1))
+		separator.boxType = .separator
+		root.addSubview(separator)
+		
+		let reset = NSButton(title: "Use Default", target: self, action: #selector(useDefault(_:)))
+		reset.bezelStyle = .rounded
+		reset.frame = NSRect(x: 12, y: 22, width: 120, height: 30)
+		root.addSubview(reset)
+		
+		let makeDefault = NSButton(title: "Make Default", target: self, action: #selector(makeDefault(_:)))
+		makeDefault.bezelStyle = .rounded
+		makeDefault.keyEquivalent = "\r"
+		makeDefault.frame = NSRect(x: width - 132, y: 22, width: 120, height: 30)
+		root.addSubview(makeDefault)
+		
+		note.frame = NSRect(x: 16, y: 4, width: width - 32, height: 16)
+		note.font = NSFont.systemFont(ofSize: 10)
+		note.textColor = .secondaryLabelColor
+		note.alignment = .center
+		root.addSubview(note)
+		
+		self.view = root
+		refresh()
+	}
+	
+	private func refresh() {
+		let width = ViralPageWidth.shared.current
+		let preset = ViralPageWidth.presets.first(where: { $0.width == width })?.title
+		widthLabel.stringValue = preset.map { "\(width) · \($0)" } ?? "\(width) chars"
+		widthSlider.integerValue = width
+		fontPopup.selectItem(withTag: ViralPageSettings.fontStyle)
+		sizeSlider.integerValue = ViralPageSettings.fontSize
+		sizeLabel.stringValue = "\(ViralPageSettings.fontSize) pt"
+		let d = ViralPageSettings.defaults
+		let fontName = ViralPageSettings.fonts.first(where: { $0.style == d.font })?.title ?? ""
+		note.stringValue = "Default when Viral starts: \(d.width) wide, \(fontName), \(d.size) pt"
+	}
+	
+	@objc private func widthChanged(_ sender: NSSlider) { ViralPageWidth.shared.set(sender.integerValue); refresh() }
+	@objc private func fontChanged(_ sender: NSPopUpButton) { ViralPageSettings.setFont(sender.selectedTag()); refresh() }
+	@objc private func sizeChanged(_ sender: NSSlider) { ViralPageSettings.setSize(sender.integerValue); refresh() }
+	@objc private func useDefault(_ sender: Any?) { ViralPageSettings.restoreDefault(); refresh() }
+	@objc private func makeDefault(_ sender: Any?) { ViralPageSettings.makeCurrentDefault(); refresh() }
+}
+
 // MARK: - Info
 
 /// The Info popover: page width and everything you can do in Viral
 @objc final class ViralInfoController: NSViewController {
-	private let slider = NSSlider(value: 67, minValue: Double(ViralPageWidth.minimum), maxValue: Double(ViralPageWidth.maximum), target: nil, action: nil)
-	private let valueLabel = NSTextField(labelWithString: "")
-	
 	@objc static func show(from button: NSView) {
 		let popover = NSPopover()
 		popover.behavior = .transient
@@ -3725,56 +3922,19 @@ public extension BeatTextView {
 	
 	override func loadView() {
 		let width: CGFloat = 470
-		let height: CGFloat = 560
-		let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-		
-		let title = NSTextField(labelWithString: "Page width")
-		title.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-		title.frame = NSRect(x: 16, y: height - 34, width: 90, height: 18)
-		root.addSubview(title)
-		
-		slider.frame = NSRect(x: 104, y: height - 36, width: 250, height: 22)
-		slider.integerValue = ViralPageWidth.shared.current
-		slider.target = self
-		slider.action = #selector(sliderChanged(_:))
-		slider.isContinuous = false
-		root.addSubview(slider)
-		
-		valueLabel.frame = NSRect(x: 362, y: height - 34, width: 92, height: 18)
-		valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-		valueLabel.textColor = .secondaryLabelColor
-		root.addSubview(valueLabel)
-		updateValueLabel()
-		
-		let separator = NSBox(frame: NSRect(x: 16, y: height - 50, width: width - 32, height: 1))
-		separator.boxType = .separator
-		root.addSubview(separator)
-		
-		let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height - 54))
+		let height: CGFloat = 540
+		let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 		scroll.hasVerticalScroller = true
 		scroll.drawsBackground = false
 		scroll.borderType = .noBorder
-		let text = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: height - 54))
+		let text = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 		text.isEditable = false
 		text.isSelectable = true
 		text.drawsBackground = false
 		text.textContainerInset = NSSize(width: 12, height: 10)
 		text.textStorage?.setAttributedString(ViralInfoController.guide())
 		scroll.documentView = text
-		root.addSubview(scroll)
-		
-		self.view = root
-	}
-	
-	private func updateValueLabel() {
-		let width = ViralPageWidth.shared.current
-		let preset = ViralPageWidth.presets.first(where: { $0.width == width })?.title
-		valueLabel.stringValue = preset.map { "\(width) · \($0)" } ?? "\(width) characters"
-	}
-	
-	@objc private func sliderChanged(_ sender: NSSlider) {
-		ViralPageWidth.shared.set(sender.integerValue)
-		updateValueLabel()
+		self.view = scroll
 	}
 	
 	// MARK: Guide text
@@ -3842,8 +4002,9 @@ public extension BeatTextView {
 		row("Right-click", "Height, rounded corners, add or remove images")
 		
 		header("Page")
+		row("Aa button", "Page width, font and text size. Make Default saves them for every start")
 		row("⌥⌘]   ⌥⌘[", "Wider / narrower page (View ▸ Page Width)")
-		row("⌘+   ⌘−", "Zoom in / out")
+		row("⌘+   ⌘−", "Bigger / smaller text")
 		
 		// Everything else comes from the menus, so it's always up to date
 		for top in NSApp.mainMenu?.items ?? [] {

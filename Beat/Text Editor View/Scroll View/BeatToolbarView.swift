@@ -16,8 +16,10 @@ class BeatToolbarView:NSView {
 	
 	@IBOutlet weak var excludedView:NSView?
 	
-	/// Viral: shows the Info popover with shortcuts and page width
+	/// Viral: shows the Info popover with shortcuts
 	let infoButton = NSButton(frame: .zero)
+	/// Viral: page width, font and text size
+	let pageButton = NSButton(frame: .zero)
 	
 	override func awakeFromNib() {
 		super.awakeFromNib()
@@ -32,28 +34,32 @@ class BeatToolbarView:NSView {
 	func setupInfoButton() {
 		// Copy the look of the existing buttons on the right
 		let template = rightButtons.first
-		infoButton.bezelStyle = template?.bezelStyle ?? .regularSquare
-		infoButton.isBordered = template?.isBordered ?? false
-		infoButton.title = ""
-		infoButton.imagePosition = .imageOnly
-		infoButton.imageScaling = template?.imageScaling ?? .scaleProportionallyDown
-		infoButton.contentTintColor = template?.contentTintColor
-		// A fixed size that matches the other icons. (The template images are large assets, sizing from them made a huge button.)
-		if let image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Info") {
-			infoButton.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)) ?? image
+		func style(_ button: NSButton, symbol: String, label: String, tip: String, action: Selector) {
+			button.bezelStyle = template?.bezelStyle ?? .regularSquare
+			button.isBordered = template?.isBordered ?? false
+			button.title = ""
+			button.imagePosition = .imageOnly
+			button.imageScaling = template?.imageScaling ?? .scaleProportionallyDown
+			button.contentTintColor = template?.contentTintColor
+			// A fixed size that matches the other icons. (The template images are large assets, sizing from them made a huge button.)
+			if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) {
+				button.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)) ?? image
+			}
+			button.setAccessibilityLabel(label)
+			button.toolTip = tip
+			button.target = self
+			button.action = action
+			addSubview(button)
 		}
-		infoButton.setAccessibilityLabel("Info")
-		infoButton.toolTip = "Info and shortcuts"
-		infoButton.target = self
-		infoButton.action = #selector(showInfo(_:))
-		addSubview(infoButton)
+		style(infoButton, symbol: "info.circle", label: "Info", tip: "Info and shortcuts", action: #selector(showInfo(_:)))
+		style(pageButton, symbol: "textformat.size", label: "Page", tip: "Page width, font and text size", action: #selector(showPageSettings(_:)))
 		placeInfoButton()
 	}
 	
 	/// Buttons in the right-hand group, left to right
 	var rightButtons: [NSButton] {
 		return subviews.compactMap { $0 as? NSButton }
-			.filter { $0 !== infoButton && $0 !== excludedView && $0.frame.minX > frame.width / 2 && !$0.isHidden && $0.frame.height > 10 && $0.frame.width > 10 }
+			.filter { $0 !== infoButton && $0 !== pageButton && $0 !== excludedView && $0.frame.minX > frame.width / 2 && !$0.isHidden && $0.frame.height > 10 && $0.frame.width > 10 }
 			.sorted { $0.frame.minX < $1.frame.minX }
 	}
 	
@@ -65,12 +71,19 @@ class BeatToolbarView:NSView {
 		guard let first = buttons.first else { return }
 		let spacing = buttons.count > 1 ? max(2, buttons[1].frame.minX - first.frame.maxX) : 6
 		infoButton.autoresizingMask = first.autoresizingMask
+		pageButton.autoresizingMask = first.autoresizingMask
 		let frame = first.frame.offsetBy(dx: -(first.frame.width + spacing), dy: 0)
 		if infoButton.frame != frame { infoButton.frame = frame }
+		let pageFrame = frame.offsetBy(dx: -(first.frame.width + spacing), dy: 0)
+		if pageButton.frame != pageFrame { pageButton.frame = pageFrame }
 	}
 	
 	@objc func showInfo(_ sender: NSButton) {
 		ViralInfoController.show(from: sender)
+	}
+	
+	@objc func showPageSettings(_ sender: NSButton) {
+		ViralPageSettingsController.show(from: sender)
 	}
 		
 	override func layout() {

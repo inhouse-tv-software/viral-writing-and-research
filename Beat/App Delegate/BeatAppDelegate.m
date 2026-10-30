@@ -111,6 +111,9 @@
 
 - (void)applicationWillFinishLaunching:(NSNotification *)notification
 {
+	// Viral: start with the saved default page width, font and text size
+	[ViralPageSettings applyLaunchDefaults];
+	
 	if (@available(macOS 10.14, *)) {
 		UNUserNotificationCenter *center = UNUserNotificationCenter.currentNotificationCenter;
 		[center requestAuthorizationWithOptions:UNAuthorizationOptionBadge | UNAuthorizationOptionAlert completionHandler:^(BOOL granted, NSError * _Nullable error) {

@@ -35,6 +35,7 @@
 
 #import "BeatTextView+TypewriterMode.h"
 #import "BeatTextView+FocusMode.h"
+#import "BeatTextView+Zooming.h"
 
 #import "BeatModalInput.h"
 
