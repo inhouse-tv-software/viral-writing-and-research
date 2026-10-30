@@ -1777,30 +1777,74 @@ fileprivate final class ViralLoginWindow: NSWindowController, NSWindowDelegate {
 fileprivate let ViralMetricsKey = "ViralMetrics"
 fileprivate let ViralMetricsChangedNotification = Notification.Name("ViralMetricsChanged")
 
-/// Public numbers for a video, read from its page once and kept in the document.
-/// Instagram: likes and comments (views when the page shows them). YouTube: views and likes. Saves are never public.
+/// Views and likes for a video, read once and kept in the document.
+/// Instagram: with your Instagram sign-in (right-click a video ▸ Sign In to Instagram) Viral reads the exact numbers the Instagram app shows,
+/// views included. Without it, only the public like count is available. YouTube: views and likes. Saves are never public.
+/// Tools ▸ Sign In to Instagram… so views are easy to turn on without hunting for the right-click menu
+fileprivate final class ViralAccountsMenu: NSObject {
+	static let shared = ViralAccountsMenu()
+	private static var installed = false
+	
+	static func install() {
+		DispatchQueue.main.async {
+			guard !installed, let menu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Tools" || $0.title == "Tools" })?.submenu else { return }
+			installed = true
+			menu.addItem(NSMenuItem.separator())
+			let instagram = NSMenuItem(title: "Sign In to Instagram (for Views)…", action: #selector(signInToInstagram(_:)), keyEquivalent: "")
+			instagram.target = shared
+			menu.addItem(instagram)
+			let facebook = NSMenuItem(title: "Sign In to Facebook…", action: #selector(signInToFacebook(_:)), keyEquivalent: "")
+			facebook.target = shared
+			menu.addItem(facebook)
+		}
+	}
+	
+	@objc func signInToInstagram(_ sender: Any?) { ViralLoginWindow.show("https://www.instagram.com/accounts/login/", title: "Sign In to Instagram") }
+	@objc func signInToFacebook(_ sender: Any?) { ViralLoginWindow.show("https://www.facebook.com/login/", title: "Sign In to Facebook") }
+}
+
 fileprivate enum ViralMetrics {
-	struct Stats { var views: Int?; var likes: Int?; var comments: Int? }
+	struct Stats { var views: Int?; var likes: Int?; var comments: Int?; var signedIn = false }
+	/// Bump to fetch everything again (older versions stored numbers from a less exact source)
+	private static let version = 2
 	
 	private static var attempted = Set<String>()
 	private static var inFlight = Set<String>()
 	private static var queue: [(url: String, settings: BeatDocumentSettings)] = []
 	private static var running = 0
+	private static var observing = false
 	
 	static func stats(_ url: String, settings: BeatDocumentSettings?) -> Stats? {
-		guard let all = settings?.get(ViralMetricsKey) as? NSDictionary, let entry = all[url] as? NSDictionary else { return nil }
-		let stats = Stats(views: (entry["views"] as? NSNumber)?.intValue, likes: (entry["likes"] as? NSNumber)?.intValue, comments: (entry["comments"] as? NSNumber)?.intValue)
-		return (stats.views == nil && stats.likes == nil && stats.comments == nil) ? nil : stats
+		guard let all = settings?.get(ViralMetricsKey) as? NSDictionary, let entry = all[url] as? NSDictionary,
+			  (entry["v"] as? NSNumber)?.intValue == version else { return nil }
+		var stats = Stats(views: (entry["views"] as? NSNumber)?.intValue, likes: (entry["likes"] as? NSNumber)?.intValue, comments: (entry["comments"] as? NSNumber)?.intValue)
+		stats.signedIn = (entry["signedIn"] as? NSNumber)?.boolValue ?? false
+		return (stats.views == nil && stats.likes == nil) ? nil : stats
 	}
 	
-	/// Fetches the numbers once per session (or again with `force`)
+	/// Fetches the numbers once per session (or again with `force`). Numbers without views are tried again each session,
+	/// in case you signed in to Instagram since.
 	static func ensure(_ url: String, settings: BeatDocumentSettings?, force: Bool = false) {
+		startObserving()
 		guard let settings, !inFlight.contains(url) else { return }
-		if !force && (attempted.contains(url) || stats(url, settings: settings) != nil) { return }
+		if !force {
+			if attempted.contains(url) { return }
+			if let stats = stats(url, settings: settings), stats.views != nil { return }
+		}
 		attempted.insert(url)
 		inFlight.insert(url)
 		queue.append((url, settings))
 		pump()
+	}
+	
+	/// After signing in to Instagram or Facebook, try again for the views
+	private static func startObserving() {
+		guard !observing else { return }
+		observing = true
+		NotificationCenter.default.addObserver(forName: ViralVideosReloadNotification, object: nil, queue: .main) { _ in
+			attempted.removeAll()
+			NotificationCenter.default.post(name: ViralMetricsChangedNotification, object: nil)
+		}
 	}
 	
 	/// Two at a time, so pasting many links doesn't flood the network
@@ -1825,44 +1869,122 @@ fileprivate enum ViralMetrics {
 		if let v = stats.views { entry["views"] = NSNumber(value: v) }
 		if let v = stats.likes { entry["likes"] = NSNumber(value: v) }
 		if let v = stats.comments { entry["comments"] = NSNumber(value: v) }
+		entry["signedIn"] = NSNumber(value: stats.signedIn)
+		entry["v"] = NSNumber(value: version)
 		entry["date"] = NSNumber(value: Date().timeIntervalSince1970)
 		all[url] = entry
 		settings.set(ViralMetricsKey, as: all)
 		NotificationCenter.default.post(name: ViralMetricsChangedNotification, object: nil)
 	}
 	
-	/// Loads the page with the sign-ins from the video players (Instagram and Facebook show more when signed in)
+	// MARK: Fetching
+	
 	private static func fetch(_ url: String, completion: @escaping (Stats?) -> Void) {
 		guard let address = URL(string: url), let host = address.host?.lowercased() else { completion(nil); return }
 		WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
-			var request = URLRequest(url: address, timeoutInterval: 20)
-			request.setValue(ViralWeb.userAgent, forHTTPHeaderField: "User-Agent")
-			request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
 			let relevant = cookies.filter { host.hasSuffix($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()) }
-			for (field, value) in HTTPCookie.requestHeaderFields(with: relevant) { request.setValue(value, forHTTPHeaderField: field) }
-			URLSession.shared.dataTask(with: request) { data, _, _ in
-				guard let data, let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { completion(nil); return }
-				completion(parse(html))
-			}.resume()
+			if host.hasSuffix("instagram.com"), let code = instagramShortcode(address) {
+				fetchInstagram(code: code, cookies: relevant, completion: completion)
+			} else {
+				var request = URLRequest(url: address, timeoutInterval: 20)
+				prepare(&request, cookies: relevant)
+				load(request) { html in completion(html.flatMap(parsePage)) }
+			}
 		}
 	}
 	
-	static func parse(_ html: String) -> Stats? {
-		var stats = Stats()
-		stats.views = firstInt(html, [#""viewCount":"(\d+)""#, #""video_view_count":(\d+)"#, #""play_count":(\d+)"#, #""video_play_count":(\d+)"#, #""view_count":(\d+)"#])
-		stats.likes = firstInt(html, [#""like_count":(\d+)"#, #""edge_media_preview_like":\{"count":(\d+)"#, #""likeCount":"?(\d+)"#])
-		stats.comments = firstInt(html, [#""comment_count":(\d+)"#, #""edge_media_to_comment":\{"count":(\d+)"#, #""commentCount":"?(\d+)"#])
-		
-		// Instagram puts "12K likes, 345 comments - …" in the page description
-		let description = match(html, #"<meta[^>]+property="og:description"[^>]+content="([^"]+)""#) ?? match(html, #"<meta[^>]+content="([^"]+)"[^>]+property="og:description""#)
-		if let text = description.map(decodeEntities) {
-			if stats.likes == nil { stats.likes = shortNumber(match(text, #"([\d.,]+\s?[KMB]?)\s+likes?\b"#)) }
-			if stats.comments == nil { stats.comments = shortNumber(match(text, #"([\d.,]+\s?[KMB]?)\s+comments?\b"#)) }
-			if stats.views == nil { stats.views = shortNumber(match(text, #"([\d.,]+\s?[KMB]?)\s+(?:views|plays)\b"#)) }
+	private static func prepare(_ request: inout URLRequest, cookies: [HTTPCookie]) {
+		request.setValue(ViralWeb.userAgent, forHTTPHeaderField: "User-Agent")
+		request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+		for (field, value) in HTTPCookie.requestHeaderFields(with: cookies) { request.setValue(value, forHTTPHeaderField: field) }
+	}
+	
+	private static func load(_ request: URLRequest, completion: @escaping (String?) -> Void) {
+		URLSession.shared.dataTask(with: request) { data, response, _ in
+			guard let data, (response as? HTTPURLResponse)?.statusCode ?? 200 < 400 else { completion(nil); return }
+			completion(String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1))
+		}.resume()
+	}
+	
+	/// "https://www.instagram.com/reel/DbJFIADS7ZU/" → "DbJFIADS7ZU"
+	static func instagramShortcode(_ url: URL) -> String? {
+		let parts = url.path.split(separator: "/").map(String.init)
+		guard let i = parts.firstIndex(where: { ["reel", "reels", "p", "tv"].contains($0) }), i + 1 < parts.count else { return nil }
+		return parts[i + 1]
+	}
+	
+	/// Instagram shortcodes are the media ID written in base 64
+	static func instagramMediaID(_ code: String) -> UInt64? {
+		let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+		var id: UInt64 = 0
+		for ch in code.prefix(11) {
+			guard let index = alphabet.firstIndex(of: ch) else { return nil }
+			let (shifted, overflow) = id.multipliedReportingOverflow(by: 64)
+			if overflow { return nil }
+			id = shifted + UInt64(index)
 		}
+		return id
+	}
+	
+	/// Signed in: the same numbers the Instagram app shows (views, likes, comments).
+	/// Not signed in: the public like count from the embed page (views aren't public on the web).
+	private static func fetchInstagram(code: String, cookies: [HTTPCookie], completion: @escaping (Stats?) -> Void) {
+		let signedIn = cookies.contains { $0.name == "sessionid" && !$0.value.isEmpty }
+		
+		func publicLikes() {
+			guard let embed = URL(string: "https://www.instagram.com/reel/\(code)/embed/captioned/") else { completion(nil); return }
+			var request = URLRequest(url: embed, timeoutInterval: 20)
+			prepare(&request, cookies: [])
+			load(request) { html in
+				guard let html, let likes = shortNumber(match(html, #"([\d.,]+\s?[KMB]?)\s+likes?\b"#)) else { completion(nil); return }
+				completion(Stats(views: nil, likes: likes, comments: nil, signedIn: false))
+			}
+		}
+		
+		/// Signed in, plan B: the reel page itself carries the counts in its page data
+		func signedInPage() {
+			guard let page = URL(string: "https://www.instagram.com/reel/\(code)/") else { publicLikes(); return }
+			var request = URLRequest(url: page, timeoutInterval: 20)
+			prepare(&request, cookies: cookies)
+			load(request) { html in
+				guard let html else { publicLikes(); return }
+				// Page data is sometimes escaped JSON (\"play_count\":123), so allow a backslash before the colon
+				let views = firstInt(html, [#""play_count\\?":(\d+)"#, #""ig_play_count\\?":(\d+)"#, #""view_count\\?":(\d+)"#, #""video_view_count\\?":(\d+)"#])
+				let likes = firstInt(html, [#""like_count\\?":(\d+)"#])
+				if views == nil && likes == nil { publicLikes(); return }
+				completion(Stats(views: views, likes: likes, comments: firstInt(html, [#""comment_count\\?":(\d+)"#]), signedIn: true))
+			}
+		}
+		
+		guard signedIn, let id = instagramMediaID(code), let api = URL(string: "https://www.instagram.com/api/v1/media/\(id)/info/") else {
+			publicLikes()
+			return
+		}
+		var request = URLRequest(url: api, timeoutInterval: 20)
+		prepare(&request, cookies: cookies)
+		request.setValue("936619743392459", forHTTPHeaderField: "X-IG-App-ID")
+		request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+		request.setValue("https://www.instagram.com/reel/\(code)/", forHTTPHeaderField: "Referer")
+		if let csrf = cookies.first(where: { $0.name == "csrftoken" })?.value { request.setValue(csrf, forHTTPHeaderField: "X-CSRFToken") }
+		URLSession.shared.dataTask(with: request) { data, _, _ in
+			guard let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+				  let item = (json["items"] as? [[String: Any]])?.first else { signedInPage(); return }
+			func int(_ key: String) -> Int? { return (item[key] as? NSNumber)?.intValue }
+			// Reels: the "views" number in the app is play_count. Older video posts use view_count.
+			let views = int("play_count") ?? int("ig_play_count") ?? int("view_count") ?? int("video_view_count")
+			let stats = Stats(views: views, likes: int("like_count"), comments: int("comment_count"), signedIn: true)
+			if stats.views == nil && stats.likes == nil { signedInPage() } else { completion(stats) }
+		}.resume()
+	}
+	
+	/// YouTube and other pages
+	static func parsePage(_ html: String) -> Stats? {
+		var stats = Stats()
+		stats.views = firstInt(html, [#""viewCount":"(\d+)""#, #""video_view_count":(\d+)"#, #""play_count":(\d+)"#])
+		stats.likes = firstInt(html, [#""likeCount":"?(\d+)"#])
 		// YouTube: "like this video along with 1,234 other people"
 		if stats.likes == nil, let likes = match(html, #"along with ([\d,]+) other"#) { stats.likes = Int(likes.replacingOccurrences(of: ",", with: "")) }
-		return (stats.views == nil && stats.likes == nil && stats.comments == nil) ? nil : stats
+		return (stats.views == nil && stats.likes == nil) ? nil : stats
 	}
 	
 	private static func match(_ text: String, _ pattern: String) -> String? {
@@ -1886,11 +2008,6 @@ fileprivate enum ViralMetrics {
 		return Int(value * factor)
 	}
 	
-	private static func decodeEntities(_ text: String) -> String {
-		return text.replacingOccurrences(of: "&#x2022;", with: "•").replacingOccurrences(of: "&amp;", with: "&")
-			.replacingOccurrences(of: "&quot;", with: "\"").replacingOccurrences(of: "&#39;", with: "'")
-	}
-	
 	/// 1234 → "1.2K", 3400000 → "3.4M"
 	static func format(_ value: Int) -> String {
 		let v = Double(value)
@@ -1904,32 +2021,48 @@ fileprivate enum ViralMetrics {
 		return "\(value)"
 	}
 	
-	/// A strip along the bottom of a video thumbnail: ▶ views  ♥ likes  💬 comments
-	static func draw(_ stats: Stats, in rect: NSRect, flipped: Bool) {
-		var parts: [String] = []
-		if let v = stats.views { parts.append("▶︎ " + format(v)) }
-		if let v = stats.likes { parts.append("♥︎ " + format(v)) }
-		if let v = stats.comments { parts.append("💬 " + format(v)) }
-		guard !parts.isEmpty, rect.width > 40 else { return }
-		
-		let size = min(13, max(9, rect.width / 16))
+	/// Along the bottom of a video thumbnail: views (big), then likes
+	static func draw(_ stats: Stats, in rect: NSRect, flipped: Bool, isInstagram: Bool) {
+		guard rect.width > 40 else { return }
+		let base = min(13, max(9, rect.width / 15))
 		let shadow = NSShadow()
 		shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
 		shadow.shadowBlurRadius = 2
-		let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size, weight: .semibold), .foregroundColor: NSColor.white, .shadow: shadow]
-		// Drop items from the end until the line fits
-		var text = NSAttributedString(string: parts.joined(separator: "   "), attributes: attrs)
-		while text.size().width > rect.width - 12 && parts.count > 1 {
-			parts.removeLast()
-			text = NSAttributedString(string: parts.joined(separator: "   "), attributes: attrs)
-		}
+		let big: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: base + 3, weight: .bold), .foregroundColor: NSColor.white, .shadow: shadow]
+		let small: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: base, weight: .semibold), .foregroundColor: NSColor.white.withAlphaComponent(0.9), .shadow: shadow]
+		let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: max(8, base - 2), weight: .medium), .foregroundColor: NSColor.white.withAlphaComponent(0.75), .shadow: shadow]
 		
-		let barHeight = text.size().height + 14
+		let text = NSMutableAttributedString()
+		if let views = stats.views {
+			text.append(NSAttributedString(string: "▶︎ " + format(views), attributes: big))
+		}
+		if let likes = stats.likes {
+			if text.length > 0 { text.append(NSAttributedString(string: "   ", attributes: small)) }
+			text.append(NSAttributedString(string: "♥︎ " + format(likes), attributes: small))
+		}
+		if stats.views == nil && isInstagram {
+			// Views aren't public on Instagram. Say so up front, where the views would be.
+			// On narrow tiles it goes on its own line above the likes, so it always shows.
+			let room = rect.width - 14
+			let long = NSAttributedString(string: "▶︎ sign in for views   ", attributes: hint)
+			if text.size().width + long.size().width <= room {
+				text.insert(long, at: 0)
+			} else {
+				let full = NSAttributedString(string: "▶︎ sign in for views", attributes: hint)
+				let line = full.size().width <= room ? full : NSAttributedString(string: "▶︎ sign in", attributes: hint)
+				if text.length > 0 { text.insert(NSAttributedString(string: "\n", attributes: hint), at: 0) }
+				text.insert(line, at: 0)
+			}
+		}
+		guard text.length > 0 else { return }
+		
+		let size = text.size()
+		let barHeight = size.height + 14
 		let bar = flipped ? NSRect(x: rect.minX, y: rect.maxY - barHeight, width: rect.width, height: barHeight)
 						  : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: barHeight)
-		let gradient = NSGradient(starting: NSColor.black.withAlphaComponent(0), ending: NSColor.black.withAlphaComponent(0.65))
+		let gradient = NSGradient(starting: NSColor.black.withAlphaComponent(0), ending: NSColor.black.withAlphaComponent(0.7))
 		gradient?.draw(in: bar, angle: flipped ? 90 : -90)
-		let y = flipped ? bar.maxY - text.size().height - 6 : bar.minY + 6
+		let y = flipped ? bar.maxY - size.height - 6 : bar.minY + 6
 		text.draw(at: NSPoint(x: rect.minX + 7, y: y))
 	}
 }
@@ -2457,8 +2590,10 @@ fileprivate final class ViralImageTile: NSView {
 	}
 	
 	private func drawMetrics() {
-		guard let videoURL, let stats = ViralMetrics.stats(videoURL, settings: group?.settings) else { return }
-		ViralMetrics.draw(stats, in: bounds, flipped: isFlipped)
+		guard let videoURL else { return }
+		ViralMetrics.ensure(videoURL, settings: group?.settings)
+		guard let stats = ViralMetrics.stats(videoURL, settings: group?.settings) else { return }
+		ViralMetrics.draw(stats, in: bounds, flipped: isFlipped, isInstagram: videoURL.contains("instagram.com"))
 	}
 	
 	@objc func metricsChanged(_ notification: Notification) {
@@ -2979,7 +3114,7 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 			if isVideo {
 				let url = ViralMedia.url(entry)
 				ViralMetrics.ensure(url, settings: settings)
-				if let stats = ViralMetrics.stats(url, settings: settings) { ViralMetrics.draw(stats, in: rect, flipped: isFlipped) }
+				if let stats = ViralMetrics.stats(url, settings: settings) { ViralMetrics.draw(stats, in: rect, flipped: isFlipped, isInstagram: url.contains("instagram.com")) }
 			}
 			NSGraphicsContext.restoreGraphicsState()
 		}
@@ -3931,6 +4066,7 @@ public extension BeatTextView {
 	
 	/// Adds View > Page Width to the main menu
 	@objc func installMenu() {
+		ViralAccountsMenu.install()
 		guard !menuInstalled, let viewMenu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "View" || $0.title == "View" })?.submenu else { return }
 		menuInstalled = true
 		
@@ -4017,6 +4153,7 @@ public extension BeatTextView {
 	
 	/// Called once when the app starts, before documents open
 	@objc static func applyLaunchDefaults() {
+		ViralAccountsMenu.install()
 		// Autosave is on in Viral. Turn it on once for people who had the old default (off).
 		if !UserDefaults.standard.bool(forKey: "ViralAutosaveOn") {
 			UserDefaults.standard.set(true, forKey: "ViralAutosaveOn")
