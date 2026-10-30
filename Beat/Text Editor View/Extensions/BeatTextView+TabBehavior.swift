@@ -1847,20 +1847,56 @@ fileprivate enum ViralMetrics {
 		}
 	}
 	
-	/// Two at a time, so pasting many links doesn't flood the network
+	/// One at a time with a short human-like pause between Instagram requests, so a document full of reels
+	/// reads like someone scrolling, not like a scraper.
 	private static func pump() {
-		while running < 2, !queue.isEmpty {
-			let job = queue.removeFirst()
-			running += 1
-			fetch(job.url) { stats in
-				DispatchQueue.main.async {
-					running -= 1
-					inFlight.remove(job.url)
-					if let stats { store(stats, url: job.url, settings: job.settings) }
+		guard running == 0, !queue.isEmpty else { return }
+		let job = queue.removeFirst()
+		running = 1
+		let isInstagram = job.url.contains("instagram.com")
+		fetch(job.url) { stats in
+			DispatchQueue.main.async {
+				inFlight.remove(job.url)
+				if let stats { store(stats, url: job.url, settings: job.settings) }
+				let pause = isInstagram ? Double.random(in: 2.0...4.0) : 0.3
+				DispatchQueue.main.asyncAfter(deadline: .now() + pause) {
+					running = 0
 					pump()
 				}
 			}
 		}
+	}
+	
+	// MARK: Instagram safety
+	
+	/// Set when Instagram says slow down (429, "please wait", checkpoint). Nothing goes to Instagram until then.
+	private static var instagramPausedUntil = Date.distantPast
+	/// Signed-in API calls in the last hour
+	private static var instagramCalls: [Date] = []
+	/// Well under what the Instagram app itself does in an hour of scrolling
+	private static let instagramHourlyLimit = 60
+	
+	static var instagramPaused: Bool { return Date() < instagramPausedUntil }
+	
+	private static func pauseInstagram(minutes: Double) {
+		instagramPausedUntil = Date().addingTimeInterval(minutes * 60)
+		NSLog("Viral: Instagram asked to slow down. Numbers paused for %.0f minutes.", minutes)
+	}
+	
+	/// Counts a signed-in call. False when the hourly limit is reached.
+	private static func takeInstagramCall() -> Bool {
+		let hourAgo = Date().addingTimeInterval(-3600)
+		instagramCalls.removeAll { $0 < hourAgo }
+		guard instagramCalls.count < instagramHourlyLimit else { return false }
+		instagramCalls.append(Date())
+		return true
+	}
+	
+	/// Instagram's ways of saying "too many requests" or "prove you're human"
+	private static func isSlowDown(status: Int, body: String?) -> Bool {
+		if status == 429 { return true }
+		guard let body = body?.lowercased() else { return false }
+		return body.contains("please wait a few minutes") || body.contains("checkpoint_required") || body.contains("feedback_required") || body.contains("rate limit")
 	}
 	
 	private static func store(_ stats: Stats, url: String, settings: BeatDocumentSettings) {
@@ -1884,6 +1920,7 @@ fileprivate enum ViralMetrics {
 		WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
 			let relevant = cookies.filter { host.hasSuffix($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()) }
 			if host.hasSuffix("instagram.com"), let code = instagramShortcode(address) {
+				guard !instagramPaused else { completion(nil); return }
 				fetchInstagram(code: code, cookies: relevant, completion: completion)
 			} else {
 				var request = URLRequest(url: address, timeoutInterval: 20)
@@ -1901,8 +1938,15 @@ fileprivate enum ViralMetrics {
 	
 	private static func load(_ request: URLRequest, completion: @escaping (String?) -> Void) {
 		URLSession.shared.dataTask(with: request) { data, response, _ in
-			guard let data, (response as? HTTPURLResponse)?.statusCode ?? 200 < 400 else { completion(nil); return }
-			completion(String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1))
+			let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+			let body = data.flatMap { String(data: $0, encoding: .utf8) ?? String(data: $0, encoding: .isoLatin1) }
+			if request.url?.host?.hasSuffix("instagram.com") == true, isSlowDown(status: status, body: body) {
+				DispatchQueue.main.async { pauseInstagram(minutes: 30) }
+				completion(nil)
+				return
+			}
+			guard status < 400 else { completion(nil); return }
+			completion(body)
 		}.resume()
 	}
 	
@@ -1960,13 +2004,26 @@ fileprivate enum ViralMetrics {
 			publicLikes()
 			return
 		}
+		// Hourly limit reached: try again next time (the logged-out likes don't touch your account)
+		guard takeInstagramCall() else {
+			publicLikes()
+			return
+		}
 		var request = URLRequest(url: api, timeoutInterval: 20)
 		prepare(&request, cookies: cookies)
 		request.setValue("936619743392459", forHTTPHeaderField: "X-IG-App-ID")
 		request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
 		request.setValue("https://www.instagram.com/reel/\(code)/", forHTTPHeaderField: "Referer")
 		if let csrf = cookies.first(where: { $0.name == "csrftoken" })?.value { request.setValue(csrf, forHTTPHeaderField: "X-CSRFToken") }
-		URLSession.shared.dataTask(with: request) { data, _, _ in
+		URLSession.shared.dataTask(with: request) { data, response, _ in
+			let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+			if isSlowDown(status: status, body: data.flatMap { String(data: $0, encoding: .utf8) }) {
+				DispatchQueue.main.async { pauseInstagram(minutes: 60) }
+				completion(nil)
+				return
+			}
+			// Signed out on Instagram's side: don't keep knocking with the old cookie
+			if status == 401 || status == 403 { publicLikes(); return }
 			guard let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 				  let item = (json["items"] as? [[String: Any]])?.first else { signedInPage(); return }
 			func int(_ key: String) -> Int? { return (item[key] as? NSNumber)?.intValue }
@@ -2021,49 +2078,58 @@ fileprivate enum ViralMetrics {
 		return "\(value)"
 	}
 	
-	/// Along the bottom of a video thumbnail: views (big), then likes
-	static func draw(_ stats: Stats, in rect: NSRect, flipped: Bool, isInstagram: Bool) {
-		guard rect.width > 40 else { return }
-		let base = min(13, max(9, rect.width / 15))
-		let shadow = NSShadow()
-		shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
-		shadow.shadowBlurRadius = 2
-		let big: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: base + 3, weight: .bold), .foregroundColor: NSColor.white, .shadow: shadow]
-		let small: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: base, weight: .semibold), .foregroundColor: NSColor.white.withAlphaComponent(0.9), .shadow: shadow]
-		let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: max(8, base - 2), weight: .medium), .foregroundColor: NSColor.white.withAlphaComponent(0.75), .shadow: shadow]
+	/// Height of the black bar under every video where the numbers go
+	static let barHeight: CGFloat = 26
+	
+	/// The black bar under a video: views (big), then likes, on one line that always fits
+	static func drawBar(_ url: String, settings: BeatDocumentSettings?, in bar: NSRect, flipped: Bool) {
+		NSColor.black.setFill()
+		bar.fill()
+		let isInstagram = url.contains("instagram.com")
+		let stats = self.stats(url, settings: settings)
+		let room = bar.width - 14
+		guard room > 10 else { return }
 		
-		let text = NSMutableAttributedString()
-		if let views = stats.views {
-			text.append(NSAttributedString(string: "▶︎ " + format(views), attributes: big))
+		func line(_ base: CGFloat, hint: String?) -> NSAttributedString {
+			let big: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: base + 2, weight: .bold), .foregroundColor: NSColor.white]
+			let small: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: base, weight: .semibold), .foregroundColor: NSColor.white.withAlphaComponent(0.85)]
+			let dim: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: base - 1, weight: .medium), .foregroundColor: NSColor.white.withAlphaComponent(0.55)]
+			let text = NSMutableAttributedString()
+			if let views = stats?.views { text.append(NSAttributedString(string: "▶︎ " + format(views), attributes: big)) }
+			if let likes = stats?.likes {
+				if text.length > 0 { text.append(NSAttributedString(string: "   ", attributes: small)) }
+				text.append(NSAttributedString(string: "♥︎ " + format(likes), attributes: small))
+			}
+			if let hint {
+				if text.length > 0 { text.append(NSAttributedString(string: "   ", attributes: dim)) }
+				text.append(NSAttributedString(string: hint, attributes: dim))
+			}
+			return text
 		}
-		if let likes = stats.likes {
-			if text.length > 0 { text.append(NSAttributedString(string: "   ", attributes: small)) }
-			text.append(NSAttributedString(string: "♥︎ " + format(likes), attributes: small))
+		
+		// What to say when there are no views
+		var hints: [String?] = [nil]
+		if stats?.views == nil {
+			if isInstagram && instagramPaused { hints = ["paused", nil] }
+			else if isInstagram { hints = ["sign in for views", "sign in", nil] }
+			else if stats == nil { hints = ["no numbers", nil] }
 		}
-		if stats.views == nil && isInstagram {
-			// Views aren't public on Instagram. Say so up front, where the views would be.
-			// On narrow tiles it goes on its own line above the likes, so it always shows.
-			let room = rect.width - 14
-			let long = NSAttributedString(string: "▶︎ sign in for views   ", attributes: hint)
-			if text.size().width + long.size().width <= room {
-				text.insert(long, at: 0)
-			} else {
-				let full = NSAttributedString(string: "▶︎ sign in for views", attributes: hint)
-				let line = full.size().width <= room ? full : NSAttributedString(string: "▶︎ sign in", attributes: hint)
-				if text.length > 0 { text.insert(NSAttributedString(string: "\n", attributes: hint), at: 0) }
-				text.insert(line, at: 0)
+		
+		// Biggest font and longest hint that fit on one line
+		var chosen: NSAttributedString?
+		search: for base in stride(from: CGFloat(12), through: 8, by: -1) {
+			for hint in hints {
+				let text = line(base, hint: hint)
+				if text.length > 0 && text.size().width <= room { chosen = text; break search }
 			}
 		}
-		guard text.length > 0 else { return }
+		guard let text = chosen ?? Optional(line(8, hint: nil)), text.length > 0 else { return }
 		
+		NSGraphicsContext.saveGraphicsState()
+		NSBezierPath(rect: bar).addClip()
 		let size = text.size()
-		let barHeight = size.height + 14
-		let bar = flipped ? NSRect(x: rect.minX, y: rect.maxY - barHeight, width: rect.width, height: barHeight)
-						  : NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: barHeight)
-		let gradient = NSGradient(starting: NSColor.black.withAlphaComponent(0), ending: NSColor.black.withAlphaComponent(0.7))
-		gradient?.draw(in: bar, angle: flipped ? 90 : -90)
-		let y = flipped ? bar.maxY - size.height - 6 : bar.minY + 6
-		text.draw(at: NSPoint(x: rect.minX + 7, y: y))
+		text.draw(at: NSPoint(x: bar.minX + 7, y: bar.midY - size.height / 2))
+		NSGraphicsContext.restoreGraphicsState()
 	}
 }
 
@@ -2247,7 +2313,8 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 		var rowHeight: CGFloat = 0
 		for i in row {
 			let w = floor(min(width, override[i] ?? viralItemWidth(items[i].width, width: width)))
-			let h = floor(w * ViralImages.aspect(items[i].ids.first, settings: settings))
+			let isVideo = items[i].ids.first.map { ViralMedia.isVideo($0) } ?? false
+			let h = floor(w * ViralImages.aspect(items[i].ids.first, settings: settings)) + (isVideo ? ViralMetrics.barHeight : 0)
 			frames[i] = NSRect(x: x, y: y, width: w, height: h)
 			x += w + gap
 			rowHeight = max(rowHeight, h)
@@ -2536,8 +2603,17 @@ fileprivate final class ViralImageTile: NSView {
 		layoutChrome()
 	}
 	
+	/// The picture or player. Videos keep a black bar under it for the numbers.
+	var mediaRect: NSRect {
+		guard videoURL != nil else { return bounds }
+		return NSRect(x: 0, y: 0, width: bounds.width, height: max(bounds.height - ViralMetrics.barHeight, 1))
+	}
+	var barRect: NSRect {
+		return NSRect(x: 0, y: bounds.maxY - ViralMetrics.barHeight, width: bounds.width, height: ViralMetrics.barHeight)
+	}
+	
 	func layoutChrome() {
-		webView?.frame = bounds
+		webView?.frame = mediaRect
 		if let webView { ViralWeb.fitZoom(webView, url: videoURL) }
 		handle.frame = NSRect(x: bounds.maxX - EMetrics.handle - 2, y: bounds.maxY - EMetrics.handle - 2, width: EMetrics.handle, height: EMetrics.handle)
 		menuButton.frame = NSRect(x: bounds.maxX - 30, y: 6, width: 24, height: 24)
@@ -2556,17 +2632,18 @@ fileprivate final class ViralImageTile: NSView {
 	}
 	
 	override func draw(_ dirtyRect: NSRect) {
+		// The bar stays while the video plays, so the numbers never go away
+		drawMetrics()
 		guard webView == nil else { return }
+		let media = mediaRect
 		if let image {
-			image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+			image.draw(in: media, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
 					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
-			if videoURL != nil { ViralImageTile.drawPlayButton(in: bounds) }
-			drawMetrics()
+			if videoURL != nil { ViralImageTile.drawPlayButton(in: media) }
 		} else if videoURL != nil {
 			NSColor.black.setFill()
-			bounds.fill()
-			ViralImageTile.drawPlayButton(in: bounds)
-			drawMetrics()
+			media.fill()
+			ViralImageTile.drawPlayButton(in: media)
 		} else {
 			(group?.color ?? .textColor).withAlphaComponent(0.08).setFill()
 			bounds.fill()
@@ -2592,12 +2669,11 @@ fileprivate final class ViralImageTile: NSView {
 	private func drawMetrics() {
 		guard let videoURL else { return }
 		ViralMetrics.ensure(videoURL, settings: group?.settings)
-		guard let stats = ViralMetrics.stats(videoURL, settings: group?.settings) else { return }
-		ViralMetrics.draw(stats, in: bounds, flipped: isFlipped, isInstagram: videoURL.contains("instagram.com"))
+		ViralMetrics.drawBar(videoURL, settings: group?.settings, in: barRect, flipped: isFlipped)
 	}
 	
 	@objc func metricsChanged(_ notification: Notification) {
-		if videoURL != nil && webView == nil { needsDisplay = true }
+		if videoURL != nil { setNeedsDisplay(barRect) }
 	}
 	
 	/// A round play button in the middle of a video thumbnail
@@ -2978,7 +3054,9 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		var frames: [NSRect] = []
 		for entry in item.ids {
 			let aspect = ViralImages.aspect(entry, settings: settings)
-			let w = max(20, floor(h / max(aspect, 0.05)))
+			// Videos: the picture is shorter by the numbers bar, so the width follows the picture
+			let pictureHeight = ViralMedia.isVideo(entry) ? max(h - ViralMetrics.barHeight, 20) : h
+			let w = max(20, floor(pictureHeight / max(aspect, 0.05)))
 			frames.append(NSRect(x: x, y: EMetrics.marginTop, width: w, height: h))
 			x += w + ViralCarouselView.gap
 		}
@@ -3031,7 +3109,8 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 			if let video = videos[i] {
 				video.loader.wantsSnapshot = (ViralMedia.thumbnail(entry) == nil)
 				video.loader.onSnapshot = { [weak self] image in self?.setThumbnail(image, at: i) }
-				let frame = frames[i].offsetBy(dx: -scrollX, dy: -EMetrics.marginTop)
+				var frame = frames[i].offsetBy(dx: -scrollX, dy: -EMetrics.marginTop)
+				frame.size.height = max(frame.height - ViralMetrics.barHeight, 1)
 				video.view.frame = frame
 				ViralWeb.fitZoom(video.view, url: url)
 				let radius = item.rounded ? EmbedLine.cornerRadius(frame) : 0
@@ -3092,12 +3171,21 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		for (i, frame) in itemFrames.enumerated() {
 			let entry = item.ids[i]
 			let isVideo = ViralMedia.isVideo(entry)
-			if isVideo && videos[i] != nil { continue }
-			let rect = frame.offsetBy(dx: -scrollX, dy: 0)
-			guard rect.maxX > strip.minX, rect.minX < strip.maxX else { continue }
-			let radius = item.rounded ? EmbedLine.cornerRadius(rect) : 0
+			let full = frame.offsetBy(dx: -scrollX, dy: 0)
+			guard full.maxX > strip.minX, full.minX < strip.maxX else { continue }
+			// Videos: picture on top, black numbers bar under it (stays while the video plays)
+			var rect = full
+			if isVideo { rect.size.height = max(full.height - ViralMetrics.barHeight, 1) }
+			let radius = item.rounded ? EmbedLine.cornerRadius(full) : 0
 			NSGraphicsContext.saveGraphicsState()
-			NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).addClip()
+			NSBezierPath(roundedRect: full, xRadius: radius, yRadius: radius).addClip()
+			if isVideo {
+				let url = ViralMedia.url(entry)
+				ViralMetrics.ensure(url, settings: settings)
+				let bar = NSRect(x: full.minX, y: full.maxY - ViralMetrics.barHeight, width: full.width, height: ViralMetrics.barHeight)
+				ViralMetrics.drawBar(url, settings: settings, in: bar, flipped: isFlipped)
+				if videos[i] != nil { NSGraphicsContext.restoreGraphicsState(); continue }
+			}
 			let imageID = isVideo ? ViralMedia.thumbnail(entry) : entry
 			if let imageID, let image = ViralImages.image(imageID, settings: settings) {
 				image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
@@ -3110,11 +3198,6 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 			} else {
 				color.withAlphaComponent(0.1).setFill()
 				rect.fill()
-			}
-			if isVideo {
-				let url = ViralMedia.url(entry)
-				ViralMetrics.ensure(url, settings: settings)
-				if let stats = ViralMetrics.stats(url, settings: settings) { ViralMetrics.draw(stats, in: rect, flipped: isFlipped, isInstagram: url.contains("instagram.com")) }
 			}
 			NSGraphicsContext.restoreGraphicsState()
 		}

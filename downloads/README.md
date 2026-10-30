@@ -1,6 +1,6 @@
 # Viral downloads
 
-**Latest: [Viral-3.5.dmg](Viral-3.5.dmg)** (macOS 12 or newer)
+**Latest: [Viral-3.6.dmg](Viral-3.6.dmg)** (macOS 12 or newer)
 
 ## Install
 
