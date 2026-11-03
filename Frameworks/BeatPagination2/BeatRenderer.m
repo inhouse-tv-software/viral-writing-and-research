@@ -466,15 +466,31 @@
     }
 #if TARGET_OS_OSX
     else if (first.isEmbedLinkLine) {
-        // A website: a link pill, a card, or a big preview
-        NSString* entry = first.embedImageIDs.firstObject;
+        // Websites: link pills or cards side by side, or one big preview
         NSString* size = first.embedLinkSize;
-        CGFloat w = floor(MIN(width, (CGFloat)first.embedWidthPercent / 100.0 * (width + gap) - gap));
-        if ([size isEqualToString:@"pill"]) w = MAX(w, MIN(width, 160.0));
-        else w = MAX(w, MIN(width, 260.0));
-        CGFloat h = [self linkHeightForSize:size width:w];
-        NSImage* image = [self linkImageFor:entry size:size width:w height:h settings:settings];
-        [rows addObject:@[ @[ image, @(w), @(h), @NO, entry ?: @"" ] ]];
+        bool live = [size isEqualToString:@"live"];
+        CGFloat minimum = [size isEqualToString:@"pill"] ? 130.0 : 220.0;
+        NSMutableArray<NSNumber*>* widths = NSMutableArray.new;
+        CGFloat total = 0.0;
+        for (Line* l in row) {
+            CGFloat w = floor(MIN(width, (CGFloat)l.embedWidthPercent / 100.0 * (width + gap) - gap));
+            if (!live) w = MAX(w, MIN(width, minimum));
+            [widths addObject:@(w)];
+            total += w;
+        }
+        // Too wide together: shrink them to fit the line
+        CGFloat available = width - gap * (CGFloat)(row.count - 1);
+        CGFloat shrink = (total > available && total > 0) ? available / total : 1.0;
+        NSMutableArray* items = NSMutableArray.new;
+        for (NSInteger i = 0; i < row.count; i++) {
+            Line* l = row[i];
+            NSString* entry = l.embedImageIDs.firstObject;
+            CGFloat w = floor(widths[i].floatValue * shrink);
+            CGFloat h = [self linkHeightForSize:size width:w];
+            NSImage* image = [self linkImageFor:entry size:size width:w height:h settings:settings];
+            [items addObject:@[ image, @(w), @(h), @NO, entry ?: @"" ]];
+        }
+        [rows addObject:items];
     } else {
         // Images and videos: every row fills the text width with one shared height (like a photo album),
         // whatever widths were used in the editor. Rows that would get too tall are centered instead.
@@ -677,9 +693,9 @@
 /// Height of a website in the preview
 + (CGFloat)linkHeightForSize:(NSString*)size width:(CGFloat)w
 {
-    if ([size isEqualToString:@"pill"]) return 24.0;
-    if ([size isEqualToString:@"live"]) return floor(w * 0.5625) + 22.0;
-    return 74.0;
+    if ([size isEqualToString:@"pill"]) return 20.0;
+    if ([size isEqualToString:@"live"]) return floor(w * 0.5625) + 20.0;
+    return 62.0;
 }
 
 /// Stored title, description and site name for a website (fetched by the editor)
@@ -754,30 +770,30 @@
             [border setStroke];
             shape.lineWidth = 0.6;
             [shape stroke];
-            CGFloat d = 14.0;
-            [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(6, (h - d) / 2, d, d)];
-            NSFont* bold = [NSFont systemFontOfSize:8.5 weight:NSFontWeightSemibold];
-            NSFont* light = [NSFont systemFontOfSize:7.5];
+            CGFloat d = 11.0;
+            [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(5, (h - d) / 2, d, d)];
+            NSFont* bold = [NSFont systemFontOfSize:7.5 weight:NSFontWeightMedium];
+            NSFont* light = [NSFont systemFontOfSize:6.5];
             NSString* line = ([title isEqualToString:domain]) ? domain : title;
             NSMutableAttributedString* text = [NSMutableAttributedString.alloc initWithString:line attributes:@{ NSFontAttributeName: bold, NSForegroundColorAttributeName: [NSColor colorWithWhite:0.1 alpha:1.0] }];
             if (![line isEqualToString:domain]) [text appendAttributedString:[NSAttributedString.alloc initWithString:[@"  " stringByAppendingString:domain] attributes:@{ NSFontAttributeName: light, NSForegroundColorAttributeName: [NSColor colorWithWhite:0.45 alpha:1.0] }]];
             NSMutableParagraphStyle* style = NSMutableParagraphStyle.new;
             style.lineBreakMode = NSLineBreakByTruncatingTail;
             [text addAttribute:NSParagraphStyleAttributeName value:style range:NSMakeRange(0, text.length)];
-            CGFloat x = 6 + d + 6;
+            CGFloat x = 5 + d + 5;
             CGFloat textHeight = text.size.height;
             [text drawWithRect:NSMakeRect(x, (h - textHeight) / 2, MAX(10, w - x - 10), textHeight) options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
             return true;
         }
         
-        CGFloat radius = 7.0;
+        CGFloat radius = 6.0;
         NSBezierPath* shape = [NSBezierPath bezierPathWithRoundedRect:frame xRadius:radius yRadius:radius];
         [NSColor.whiteColor setFill];
         [shape fill];
         
         if ([size isEqualToString:@"live"]) {
             // Header with the site, then a big picture of the page
-            CGFloat header = 22.0;
+            CGFloat header = 20.0;
             NSRect picture = NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width, frame.size.height - header);
             [NSGraphicsContext saveGraphicsState];
             [shape addClip];
@@ -789,13 +805,13 @@
             [border setFill];
             NSRectFill(NSMakeRect(frame.origin.x, NSMaxY(picture), frame.size.width, 0.5));
             [NSGraphicsContext restoreGraphicsState];
-            CGFloat d = 12.0;
+            CGFloat d = 11.0;
             [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(8, NSMaxY(picture) + (header - d) / 2, d, d)];
-            [BeatRenderer drawText:[NSString stringWithFormat:@"%@  ·  %@", title, domain] font:[NSFont systemFontOfSize:8 weight:NSFontWeightSemibold] color:[NSColor colorWithWhite:0.15 alpha:1.0]
+            [BeatRenderer drawText:[NSString stringWithFormat:@"%@  ·  %@", title, domain] font:[NSFont systemFontOfSize:7.5 weight:NSFontWeightMedium] color:[NSColor colorWithWhite:0.15 alpha:1.0]
                                 inRect:NSMakeRect(8 + d + 6, NSMaxY(picture) + 4, w - 8 - d - 14, header - 7) lines:1];
         } else {
             // Card: picture on the left, title, description and site on the right
-            CGFloat thumbWidth = (thumbnail != nil) ? floor(MIN(h * 1.45, w * 0.36)) : 0.0;
+            CGFloat thumbWidth = (thumbnail != nil) ? floor(MIN(h * 1.4, w * 0.34)) : 0.0;
             if (thumbnail != nil) {
                 NSRect picture = NSMakeRect(frame.origin.x, frame.origin.y, thumbWidth, frame.size.height);
                 [NSGraphicsContext saveGraphicsState];
@@ -803,13 +819,13 @@
                 [BeatRenderer drawImage:thumbnail fillingRect:picture];
                 [NSGraphicsContext restoreGraphicsState];
             }
-            CGFloat x = thumbWidth + 10.0;
-            CGFloat textWidth = MAX(20.0, w - x - 10.0);
-            CGFloat d = 10.0;
-            [BeatRenderer drawText:title font:[NSFont systemFontOfSize:9.5 weight:NSFontWeightSemibold] color:[NSColor colorWithWhite:0.08 alpha:1.0] inRect:NSMakeRect(x, h - 9 - 25, textWidth, 25) lines:2];
-            [BeatRenderer drawText:desc font:[NSFont systemFontOfSize:7.5] color:[NSColor colorWithWhite:0.38 alpha:1.0] inRect:NSMakeRect(x, h - 36 - 19, textWidth, 19) lines:2];
-            [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(x, 8, d, d)];
-            [BeatRenderer drawText:site font:[NSFont systemFontOfSize:7 weight:NSFontWeightMedium] color:[NSColor colorWithWhite:0.45 alpha:1.0] inRect:NSMakeRect(x + d + 4, 7, textWidth - d - 4, 11) lines:1];
+            CGFloat x = thumbWidth + 8.0;
+            CGFloat textWidth = MAX(20.0, w - x - 8.0);
+            CGFloat d = 9.0;
+            [BeatRenderer drawText:title font:[NSFont systemFontOfSize:8.5 weight:NSFontWeightSemibold] color:[NSColor colorWithWhite:0.08 alpha:1.0] inRect:NSMakeRect(x, h - 7 - 22, textWidth, 22) lines:2];
+            [BeatRenderer drawText:desc font:[NSFont systemFontOfSize:6.5] color:[NSColor colorWithWhite:0.38 alpha:1.0] inRect:NSMakeRect(x, h - 30 - 16, textWidth, 16) lines:2];
+            [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(x, 6, d, d)];
+            [BeatRenderer drawText:site font:[NSFont systemFontOfSize:6.5 weight:NSFontWeightMedium] color:[NSColor colorWithWhite:0.45 alpha:1.0] inRect:NSMakeRect(x + d + 4, 5, textWidth - d - 4, 10) lines:1];
         }
         [border setStroke];
         shape.lineWidth = 0.6;
@@ -952,11 +968,11 @@
         CGFloat rowHeight = 0.0;
         for (NSArray* item in items) rowHeight = MAX(rowHeight, [item[2] floatValue]);
         
-        // Rows narrower than the text are centered
+        // Rows narrower than the text are centered (websites line up on the left, like a list of sources)
         CGFloat rowWidth = 0.0;
         for (NSArray* item in items) rowWidth += [item[1] floatValue];
         rowWidth += gap * (CGFloat)(items.count - 1);
-        CGFloat offset = MAX(0.0, floor((width - rowWidth) / 2.0));
+        CGFloat offset = row.firstObject.isEmbedLinkLine ? 0.0 : MAX(0.0, floor((width - rowWidth) / 2.0));
         
         NSMutableParagraphStyle* pStyle = NSMutableParagraphStyle.new;
         pStyle.firstLineHeadIndent = indent + offset;

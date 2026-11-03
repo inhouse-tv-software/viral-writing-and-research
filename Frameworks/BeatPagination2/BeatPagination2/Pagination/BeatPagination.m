@@ -389,8 +389,21 @@
 			// Pages before the start index are reused as they are, so only reset the fit-to-page scale from here on
 			if (li >= index) l.embedScale = 0.0;
 			
-			if (l.type == action && (l.isEmbedCarouselLine || l.isEmbedLinkLine)) {
-				// Carousels and websites always get a row of their own
+			if (l.type == action && l.isEmbedLinkLine && ![l.embedLinkSize isEqualToString:@"live"]) {
+				// Small links and cards sit side by side (only with others of the same size)
+				NSInteger w = l.embedWidthPercent;
+				bool continues = (row != nil && previous != nil && previous.isEmbedLinkLine && [previous.embedLinkSize isEqualToString:l.embedLinkSize] && !l.beginsNewParagraph);
+				if (continues && rowWidth + w <= 100) {
+					[row addObject:l];
+					rowWidth += w;
+					l.embedHidden = true;
+				} else {
+					row = [NSMutableArray arrayWithObject:l];
+					rowWidth = w;
+					l.embedRow = row;
+				}
+			} else if (l.type == action && (l.isEmbedCarouselLine || l.isEmbedLinkLine)) {
+				// Carousels and live pages always get a row of their own
 				l.embedRow = @[l];
 				row = nil;
 			} else if (l.type == action && l.isEmbedImageLine) {

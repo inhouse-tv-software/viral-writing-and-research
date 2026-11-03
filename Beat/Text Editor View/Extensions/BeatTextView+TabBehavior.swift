@@ -89,6 +89,7 @@ fileprivate var BeatTableHeightCacheKey: UInt8 = 0
 fileprivate var BeatTablePendingFocusKey: UInt8 = 0
 fileprivate var ViralBlockCacheKey: UInt8 = 0
 fileprivate var ViralPlayerCheckKey: UInt8 = 0
+fileprivate var ViralReservedTriesKey: UInt8 = 0
 
 /// Remembers where tables and images are, so the whole document is only scanned again after the text changed
 /// (and not on every layout pass while scrolling).
@@ -920,6 +921,51 @@ public extension BeatTextView {
 		return storage.attribute(NSAttributedString.Key("BeatFolded"), at: location, effectiveRange: nil) != nil
 	}
 	
+	/// Blocks whose held space was found stale in this pass
+	fileprivate var staleBlocks: [NSRange] {
+		get { return (objc_getAssociatedObject(self, &ViralReservedTriesKey) as? ViralReservedSpace)?.stale ?? [] }
+		set { reservedSpace.stale = newValue }
+	}
+	fileprivate var reservedSpace: ViralReservedSpace {
+		if let existing = objc_getAssociatedObject(self, &ViralReservedTriesKey) as? ViralReservedSpace { return existing }
+		let created = ViralReservedSpace()
+		objc_setAssociatedObject(self, &ViralReservedTriesKey, created, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+		return created
+	}
+	
+	/// Tables, pictures and videos hold their space on the first line of their block. That line keeps the height it got
+	/// when it was last laid out, so when the block grows later (a thumbnail comes in, a video turns out vertical,
+	/// a line further down the block changes) the text below ends up under the view. This catches that and lays the block out again.
+	fileprivate func checkReservedSpace(_ range: NSRange, held: CGFloat, needed: CGFloat) {
+		let state = reservedSpace
+		if abs(held - needed) <= 0.5 {
+			state.tries[range.location] = nil
+			return
+		}
+		let tries = state.tries[range.location] ?? 0
+		// Never loop: if a block can't be fixed in a few passes, leave it
+		guard tries < 4 else { return }
+		if state.tries.count > 400 { state.tries.removeAll() }
+		state.tries[range.location] = tries + 1
+		state.stale.append(range)
+	}
+	
+	fileprivate func relayoutStaleBlocks() {
+		let stale = staleBlocks
+		guard !stale.isEmpty, let lm = layoutManager else { return }
+		staleBlocks = []
+		let length = (self.string as NSString).length
+		for range in stale where NSMaxRange(range) <= length {
+			lm.invalidateLayout(forCharacterRange: range, actualCharacterRange: nil)
+		}
+		// Lay out again right away (the layout pass calls back here and the views move into place)
+		DispatchQueue.main.async { [weak self] in
+			guard let self, let lm = self.layoutManager, let tc = self.textContainer else { return }
+			lm.ensureLayout(for: tc)
+			self.needsDisplay = true
+		}
+	}
+	
 	fileprivate func updateTableViews() {
 		guard let lm = layoutManager, let tc = textContainer else { return }
 		let blocks = tableBlocks()
@@ -981,6 +1027,7 @@ public extension BeatTextView {
 			if view.frame != frame { view.frame = frame }
 			let folded = isFolded(block.range.location)
 			if view.isHidden != folded { view.isHidden = folded }
+			if !folded { checkReservedSpace(block.range, held: lineRect.height, needed: tableHeightAtLocation(block.range.location)) }
 		}
 		
 		tableViews = views
@@ -1814,16 +1861,63 @@ fileprivate enum ViralLinks {
 	}
 	
 	static let sizes = ["pill", "card", "live"]
-	static let liveHeader: CGFloat = 34
+	static let liveHeader: CGFloat = 26
 	
-	static func defaultWidth(_ size: String) -> Int { return size == "pill" ? 50 : 100 }
+	/// Pills three to a row, cards two, live pages the full width
+	static func defaultWidth(_ size: String) -> Int {
+		switch size {
+		case "pill": return 33
+		case "card": return 50
+		default: return 100
+		}
+	}
 	
 	static func height(_ size: String, width: CGFloat) -> CGFloat {
 		switch size {
-		case "pill": return 40
+		case "pill": return 28
 		case "live": return floor(width * 0.5625) + liveHeader
-		default: return 112
+		default: return 84
 		}
+	}
+	
+	/// Links start small. News stories and blog posts get a card so the picture and headline show.
+	static func defaultSize(_ url: String) -> String {
+		return isArticle(url) ? "card" : "pill"
+	}
+	
+	private static let newsSites: [String] = [
+		"reuters.com", "bbc.com", "bbc.co.uk", "nytimes.com", "theguardian.com", "washingtonpost.com", "wsj.com", "ft.com",
+		"bloomberg.com", "cnbc.com", "cnn.com", "forbes.com", "fortune.com", "businessinsider.com", "insider.com", "axios.com",
+		"theverge.com", "techcrunch.com", "wired.com", "engadget.com", "arstechnica.com", "theatlantic.com", "economist.com",
+		"apnews.com", "npr.org", "nbcnews.com", "cbsnews.com", "abcnews.go.com", "foxnews.com", "time.com", "vox.com",
+		"adage.com", "adweek.com", "campaignlive.com", "campaignlive.co.uk", "marketingweek.com", "thedrum.com", "digiday.com",
+		"socialsamosa.com", "afaqs.com", "exchange4media.com", "bestmediainfo.com", "medianews4u.com",
+		"economictimes.indiatimes.com", "timesofindia.indiatimes.com", "indiatimes.com", "livemint.com", "thehindu.com",
+		"thehindubusinessline.com", "hindustantimes.com", "indianexpress.com", "ndtv.com", "ndtvprofit.com", "business-standard.com",
+		"moneycontrol.com", "financialexpress.com", "news18.com", "indiatoday.in", "firstpost.com", "theprint.in", "scroll.in",
+		"thewire.in", "yourstory.com", "inc42.com", "entrackr.com", "the-ken.com", "thequint.com", "deccanherald.com",
+		"medium.com", "substack.com", "linkedin.com/pulse",
+	]
+	
+	static func isArticle(_ url: String) -> Bool {
+		guard let address = URL(string: url), let host = address.host?.lowercased() else { return false }
+		let path = address.path.lowercased()
+		// A bare home page is just a source, not a story
+		if path.count <= 1 { return false }
+		let full = host + path
+		for site in newsSites {
+			if site.contains("/") { if full.contains(site) { return true } }
+			else if host == site || host.hasSuffix("." + site) { return true }
+		}
+		if host.hasPrefix("news.") || host.hasPrefix("blog.") { return true }
+		let words = ["/news/", "/article", "/story/", "/stories/", "/blog/", "/blogs/", "/post/", "/posts/", "/press/", "/press-release", "/opinion/", "/features/", "/insights/"]
+		if words.contains(where: { path.contains($0) }) { return true }
+		// Dated paths like /2025/03/14/...
+		if path.range(of: #"/20\d\d/(0?[1-9]|1[0-2])/"#, options: .regularExpression) != nil { return true }
+		// Long hyphenated slugs read like headlines
+		let last = address.lastPathComponent
+		if last.split(separator: "-").count >= 6 && !last.contains(".pdf") { return true }
+		return false
 	}
 	
 	/// A pasted link that isn't a video
@@ -2066,22 +2160,22 @@ fileprivate enum ViralLinks {
 			textColor.withAlphaComponent(0.16).setStroke()
 			shape.lineWidth = 1
 			shape.stroke()
-			let d: CGFloat = 20
-			drawIcon(info.icon, domain: domain, in: NSRect(x: rect.minX + 10, y: rect.midY - d / 2, width: d, height: d))
-			let arrow = NSAttributedString(string: "↗", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: secondary])
-			arrow.draw(at: NSPoint(x: rect.maxX - 14 - arrow.size().width / 2, y: rect.midY - arrow.size().height / 2))
-			let text = NSMutableAttributedString(string: info.title == domain ? domain : info.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: textColor])
-			if info.title != domain { text.append(NSAttributedString(string: "   " + domain, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: secondary])) }
+			let d: CGFloat = 14
+			drawIcon(info.icon, domain: domain, in: NSRect(x: rect.minX + 7, y: rect.midY - d / 2, width: d, height: d))
+			let arrow = NSAttributedString(string: "↗", attributes: [.font: NSFont.systemFont(ofSize: 9.5, weight: .semibold), .foregroundColor: secondary])
+			arrow.draw(at: NSPoint(x: rect.maxX - 11 - arrow.size().width / 2, y: rect.midY - arrow.size().height / 2))
+			let text = NSMutableAttributedString(string: info.title == domain ? domain : info.title, attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: textColor])
+			if info.title != domain { text.append(NSAttributedString(string: "  " + domain, attributes: [.font: NSFont.systemFont(ofSize: 9.5), .foregroundColor: secondary])) }
 			let style = NSMutableParagraphStyle()
 			style.lineBreakMode = .byTruncatingTail
 			text.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: text.length))
-			let x = rect.minX + 10 + d + 8
+			let x = rect.minX + 7 + d + 6
 			let h = text.size().height
-			text.draw(with: NSRect(x: x, y: rect.midY - h / 2, width: max(10, rect.maxX - 30 - x), height: h), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+			text.draw(with: NSRect(x: x, y: rect.midY - h / 2, width: max(10, rect.maxX - 20 - x), height: h), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
 			return
 		}
 		
-		let radius: CGFloat = 10
+		let radius: CGFloat = 8
 		let shape = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
 		
 		if size == "live" {
@@ -2097,11 +2191,11 @@ fileprivate enum ViralLinks {
 			textColor.withAlphaComponent(0.06).setFill()
 			header.fill()
 			NSGraphicsContext.restoreGraphicsState()
-			let d: CGFloat = 16
-			drawIcon(info.icon, domain: domain, in: NSRect(x: header.minX + 10, y: header.midY - d / 2, width: d, height: d))
+			let d: CGFloat = 13
+			drawIcon(info.icon, domain: domain, in: NSRect(x: header.minX + 8, y: header.midY - d / 2, width: d, height: d))
 			let title = info.title == domain ? domain : "\(info.title)  ·  \(domain)"
-			drawText(title, font: NSFont.systemFont(ofSize: 12, weight: .semibold), color: textColor,
-					 in: NSRect(x: header.minX + 10 + d + 8, y: header.midY - 8, width: header.width - d - 60, height: 18), lines: 1)
+			drawText(title, font: NSFont.systemFont(ofSize: 10.5, weight: .medium), color: textColor,
+					 in: NSRect(x: header.minX + 8 + d + 6, y: header.midY - 7, width: header.width - d - 50, height: 15), lines: 1)
 			textColor.withAlphaComponent(0.16).setStroke()
 			shape.lineWidth = 1
 			shape.stroke()
@@ -2113,20 +2207,31 @@ fileprivate enum ViralLinks {
 		shape.addClip()
 		textColor.withAlphaComponent(0.035).setFill()
 		rect.fill()
-		let thumbWidth: CGFloat = thumbnail != nil ? floor(min(rect.height * 1.5, rect.width * 0.36)) : 0
+		let thumbWidth: CGFloat = thumbnail != nil ? floor(min(rect.height * 1.4, rect.width * 0.34)) : 0
 		if let thumbnail { drawFilling(thumbnail, in: NSRect(x: rect.minX, y: rect.minY, width: thumbWidth, height: rect.height)) }
 		NSGraphicsContext.restoreGraphicsState()
 		textColor.withAlphaComponent(0.15).setStroke()
 		shape.lineWidth = 1
 		shape.stroke()
 		
-		let x = rect.minX + thumbWidth + 14
-		let width = max(20, rect.maxX - 14 - x)
-		drawText(info.title, font: NSFont.systemFont(ofSize: 14, weight: .semibold), color: textColor, in: NSRect(x: x, y: rect.minY + 12, width: width, height: 38), lines: 2)
-		drawText(info.desc, font: NSFont.systemFont(ofSize: 12), color: secondary, in: NSRect(x: x, y: rect.minY + 50, width: width, height: 32), lines: 2)
-		let d: CGFloat = 14
-		drawIcon(info.icon, domain: domain, in: NSRect(x: x, y: rect.maxY - 12 - d, width: d, height: d))
-		drawText(info.site, font: NSFont.systemFont(ofSize: 11, weight: .medium), color: secondary, in: NSRect(x: x + d + 6, y: rect.maxY - 12 - d, width: width - d - 6, height: 16), lines: 1)
+		let x = rect.minX + thumbWidth + 10
+		let width = max(20, rect.maxX - 10 - x)
+		// Title takes one or two lines, the description fills what's left above the site name
+		let titleFont = NSFont.systemFont(ofSize: 11.5, weight: .semibold)
+		let descFont = NSFont.systemFont(ofSize: 10)
+		let titleLine = ceil(titleFont.ascender - titleFont.descender + titleFont.leading)
+		let descLine = ceil(descFont.ascender - descFont.descender + descFont.leading)
+		let measured = (info.title as NSString).boundingRect(with: NSSize(width: width, height: 1000), options: [.usesLineFragmentOrigin], attributes: [.font: titleFont])
+		let titleLines = measured.height > titleLine * 1.5 ? 2 : 1
+		let top = rect.minY + 8
+		drawText(info.title, font: titleFont, color: textColor, in: NSRect(x: x, y: top, width: width, height: titleLine * CGFloat(titleLines) + 1), lines: titleLines)
+		let d: CGFloat = 12
+		let siteY = rect.maxY - 8 - d
+		let descTop = top + titleLine * CGFloat(titleLines) + 2
+		let descLines = max(0, Int((siteY - 3 - descTop) / descLine))
+		if descLines > 0 { drawText(info.desc, font: descFont, color: secondary, in: NSRect(x: x, y: descTop, width: width, height: descLine * CGFloat(descLines) + 1), lines: descLines) }
+		drawIcon(info.icon, domain: domain, in: NSRect(x: x, y: siteY, width: d, height: d))
+		drawText(info.site, font: NSFont.systemFont(ofSize: 9.5, weight: .medium), color: secondary, in: NSRect(x: x + d + 5, y: siteY - 1, width: width - d - 5, height: 14), lines: 1)
 	}
 	
 	static func drawFilling(_ image: NSImage, in rect: NSRect) {
@@ -2196,6 +2301,11 @@ fileprivate enum ViralYouTube {
 		}
 		var changed = false
 		let lines = body.components(separatedBy: "\n").map { line -> String in
+			// Pills made by 3.7.7 were half the width. They're a third now.
+			if line.hasPrefix("![link](viral:") && line.hasSuffix(" 50 pill)") {
+				changed = true
+				return String(line.dropLast(" 50 pill)".count)) + " 33 pill)"
+			}
 			guard let url = linkOnly(line) else { return line }
 			if ViralVideo.info(url) != nil {
 				changed = true
@@ -2204,9 +2314,10 @@ fileprivate enum ViralYouTube {
 				return EmbedLine(kind: .video, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: width).text
 			}
 			if ViralLinks.isWebsite(url) {
-				// Other links (sources, articles) become small link pills, two to a row
+				// Other links become small pills, three to a row. News stories become cards.
 				changed = true
-				return EmbedLine(kind: .link, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: 50, linkSize: "pill").text
+				let size = ViralLinks.defaultSize(url)
+				return EmbedLine(kind: .link, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: ViralLinks.defaultWidth(size), linkSize: size).text
 			}
 			return line
 		}
@@ -2825,10 +2936,20 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 	var rows: [[Int]] = []
 	var current: [Int] = []
 	var rowPercent = 0
+	/// Websites never share a row with pictures or videos, and live pages stand alone, so rows stay tidy
+	func family(_ item: EmbedLine) -> Int {
+		guard item.kind == .link else { return 0 }
+		switch item.linkSize {
+		case "live": return 2
+		case "card": return 3
+		default: return 1
+		}
+	}
 	for (i, item) in items.enumerated() {
 		let percent = override[i].map { viralItemPercent($0, width: width) } ?? item.width
+		let sameFamily = current.last.map { family(items[$0]) == family(item) && family(item) != 2 } ?? false
 		// Percentages add up to the row: 25 + 25 + 25 + 25 fits, the gaps are already part of each width
-		if !current.isEmpty && rowPercent + percent <= 100 {
+		if !current.isEmpty && sameFamily && rowPercent + percent <= 100 {
 			current.append(i)
 			rowPercent += percent
 		} else {
@@ -3083,7 +3204,7 @@ fileprivate final class ViralImageTile: NSView {
 	}
 	var isSelected: Bool { return group?.isActive == true && group?.selectedIndex == index }
 	
-	var linkSize: String { return item?.linkSize ?? "card" }
+	var linkSize: String { return item?.linkSize ?? "pill" }
 	
 	func configure(entry: String?, settings: BeatDocumentSettings?) {
 		guard let entry else { image = nil; return }
@@ -3258,7 +3379,12 @@ fileprivate final class ViralImageTile: NSView {
 		webView?.frame = mediaRect.insetBy(dx: linkURL != nil ? 1 : 0, dy: 0)
 		if let webView, linkURL == nil { ViralWeb.fitZoom(webView, url: videoURL) }
 		handle.frame = NSRect(x: bounds.maxX - EMetrics.handle - 2, y: bounds.maxY - EMetrics.handle - 2, width: EMetrics.handle, height: EMetrics.handle)
-		menuButton.frame = NSRect(x: bounds.maxX - 30, y: 6, width: 24, height: 24)
+		if linkURL != nil && linkSize == "pill" {
+			// Small pills: the menu button sits over the arrow
+			menuButton.frame = NSRect(x: bounds.maxX - 24, y: bounds.midY - 10, width: 20, height: 20)
+		} else {
+			menuButton.frame = NSRect(x: bounds.maxX - 30, y: 6, width: 24, height: 24)
+		}
 		var radius = (item?.rounded ?? false) ? EmbedLine.cornerRadius(bounds) : 0
 		if linkURL != nil { radius = linkSize == "pill" ? bounds.height / 2 : 10 }
 		layer?.cornerRadius = radius
@@ -3406,7 +3532,10 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	}
 	
 	func addLinks(_ urls: [String]) {
-		insertItems(urls.map { EmbedLine(kind: .link, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: ViralLinks.defaultWidth("card"), linkSize: "card") })
+		insertItems(urls.map { url in
+			let size = ViralLinks.defaultSize(url)
+			return EmbedLine(kind: .link, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: ViralLinks.defaultWidth(size), linkSize: size)
+		})
 	}
 	
 	@objc func setLinkSize(_ sender: NSMenuItem) {
@@ -4177,6 +4306,11 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	}
 }
 
+fileprivate final class ViralReservedSpace: NSObject {
+	var tries: [Int: Int] = [:]
+	var stale: [NSRange] = []
+}
+
 fileprivate final class ViralFlippedView: NSView {
 	override var isFlipped: Bool { return true }
 }
@@ -4339,9 +4473,11 @@ public extension BeatTextView {
 			if view.frame != frame { view.frame = frame }
 			let folded = isFolded(block.range.location)
 			if view.isHidden != folded { view.isHidden = folded }
+			if !folded { checkReservedSpace(block.range, held: lineRect.height, needed: embedHeightAtLocation(block.range.location) ?? view.totalHeight) }
 		}
 		
 		embedViews = ordered
+		relayoutStaleBlocks()
 		
 		if let pending = pendingEmbedFocus, let view = ordered.first(where: { $0.blockRange.location == pending }) {
 			pendingEmbedFocus = nil
@@ -4557,8 +4693,11 @@ public extension BeatTextView {
 		insertEmbedLines(lines)
 	}
 	
-	fileprivate func insertLinks(_ urls: [String], size: String = "card") {
-		let lines = urls.map { EmbedLine(kind: .link, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: ViralLinks.defaultWidth(size), linkSize: size).text }
+	fileprivate func insertLinks(_ urls: [String], size: String? = nil) {
+		let lines = urls.map { url -> String in
+			let linkSize = size ?? ViralLinks.defaultSize(url)
+			return EmbedLine(kind: .link, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: ViralLinks.defaultWidth(linkSize), linkSize: linkSize).text
+		}
 		insertEmbedLines(lines)
 	}
 	
@@ -4583,7 +4722,7 @@ public extension BeatTextView {
 		if let clip = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), ViralLinks.isWebsite(clip) { field.stringValue = clip }
 		let sizes = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26), pullsDown: false)
 		sizes.addItems(withTitles: ["Small: Just the Link", "Medium: Picture and Title", "Large: Live Page"])
-		sizes.selectItem(at: 1)
+		sizes.selectItem(at: 0)
 		let box = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 56))
 		box.addSubview(field)
 		box.addSubview(sizes)
