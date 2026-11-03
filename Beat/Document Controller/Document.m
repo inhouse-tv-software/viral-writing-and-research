@@ -368,6 +368,9 @@
 		return NO;
 	}
 	
+	// Viral: video links on lines of their own become videos (research written elsewhere lists them as plain links)
+	text = [ViralAutoEmbed convertVideoLinks:text];
+	
 	self.contentBuffer = text;
 	
 	//text = [self readBeatDocumentString:text];

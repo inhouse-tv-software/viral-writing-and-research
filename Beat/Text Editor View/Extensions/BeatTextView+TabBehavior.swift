@@ -2141,6 +2141,88 @@ fileprivate enum ViralLinks {
 	}
 }
 
+/// YouTube thumbnails, straight from YouTube's image server
+fileprivate enum ViralYouTube {
+	private static var pending: [String: [(NSImage?) -> Void]] = [:]
+	
+	static func videoID(_ url: String) -> String? {
+		guard let info = ViralVideo.info(url), info.provider == "YouTube",
+			  let range = info.embed.range(of: "/embed/") else { return nil }
+		let rest = info.embed[range.upperBound...]
+		let id = rest.split(separator: "?").first.map(String.init) ?? ""
+		return id.isEmpty ? nil : id
+	}
+	
+	/// The biggest thumbnail YouTube has for the video (shorts come letterboxed, which crops right in a vertical tile)
+	static func thumbnail(_ id: String, completion: @escaping (NSImage?) -> Void) {
+		if pending[id] != nil { pending[id]?.append(completion); return }
+		pending[id] = [completion]
+		// 640 px is plenty for a tile and keeps documents with many videos small
+		let names = ["sddefault.jpg", "hqdefault.jpg"]
+		func attempt(_ index: Int) {
+			guard index < names.count, let address = URL(string: "https://i.ytimg.com/vi/\(id)/\(names[index])") else { finish(nil); return }
+			URLSession.shared.dataTask(with: address) { data, response, _ in
+				// YouTube answers missing sizes with a tiny grey placeholder
+				if let data, (response as? HTTPURLResponse)?.statusCode == 200, let image = NSImage(data: data), image.size.width > 200 {
+					finish(image)
+				} else {
+					attempt(index + 1)
+				}
+			}.resume()
+		}
+		func finish(_ image: NSImage?) {
+			DispatchQueue.main.async {
+				let callbacks = pending[id] ?? []
+				pending[id] = nil
+				for callback in callbacks { callback(image) }
+			}
+		}
+		attempt(0)
+	}
+}
+
+/// Video links on a line of their own become video embeds. Research written elsewhere (by Claude, in notes apps)
+/// lists videos as plain links, and they should show up as videos when the document is opened or pasted in.
+@objc final class ViralAutoEmbed: NSObject {
+	/// Video links become videos, other links on their own line become link pills
+	@objc static func convertVideoLinks(_ text: String) -> String {
+		guard text.contains("http") else { return text }
+		// Never touch the settings block at the end of the file
+		var body = text
+		var tail = ""
+		if let marker = text.range(of: "/* If you're seeing this, you can remove the following stuff - BEAT:", options: .backwards) {
+			body = String(text[..<marker.lowerBound])
+			tail = String(text[marker.lowerBound...])
+		}
+		var changed = false
+		let lines = body.components(separatedBy: "\n").map { line -> String in
+			guard let url = linkOnly(line) else { return line }
+			if ViralVideo.info(url) != nil {
+				changed = true
+				// Vertical videos four to a row, wide ones two
+				let width = ViralVideo.aspect(url) > 1 ? 25 : 50
+				return EmbedLine(kind: .video, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: width).text
+			}
+			if ViralLinks.isWebsite(url) {
+				// Other links (sources, articles) become small link pills, two to a row
+				changed = true
+				return EmbedLine(kind: .link, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: 50, linkSize: "pill").text
+			}
+			return line
+		}
+		return changed ? lines.joined(separator: "\n") + tail : text
+	}
+	
+	/// The address when the line is nothing but a link (also `- link`, `* link` and `<link>`)
+	static func linkOnly(_ line: String) -> String? {
+		var t = line.trimmingCharacters(in: .whitespaces)
+		if t.hasPrefix("- ") || t.hasPrefix("* ") || t.hasPrefix("• ") { t = String(t.dropFirst(2)).trimmingCharacters(in: .whitespaces) }
+		if t.hasPrefix("<") && t.hasSuffix(">") { t = String(t.dropFirst().dropLast()) }
+		guard t.lowercased().hasPrefix("http"), !t.contains(" ") else { return nil }
+		return t
+	}
+}
+
 /// Tools ▸ Sign In to Instagram… so views are easy to turn on without hunting for the right-click menu
 fileprivate final class ViralAccountsMenu: NSObject {
 	static let shared = ViralAccountsMenu()
@@ -2837,9 +2919,13 @@ fileprivate class ViralEmbedView: NSView {
 	func write(_ lines: [String]) {
 		guard let host else { return }
 		let text = lines.joined(separator: "\n")
+		// Another block above may have just changed (thumbnails arrive several at a time), which moves this one.
+		// Find where this block's text is now, and never write over text that isn't this block.
+		guard let range = host.currentRange(of: self) else { return }
 		let wasActive = isActive
 		sourceText = text
-		host.replaceBlockText(blockRange, with: text)
+		blockRange = range
+		host.replaceBlockText(range, with: text)
 		blockRange.length = (text as NSString).length
 		if wasActive && window?.firstResponder !== self { window?.makeFirstResponder(self) }
 		host.scheduleTableUpdate()
@@ -3014,7 +3100,9 @@ fileprivate final class ViralImageTile: NSView {
 			// Videos show their thumbnail until clicked. A web player per video makes scrolling slow.
 			// Without a thumbnail yet, the player loads once to take one.
 			let keepPlayer = webView != nil && webViewURL == url
-			if playerActive || thumbnail == nil || keepPlayer {
+			// YouTube has ready-made thumbnails, so no player has to load just to take a picture
+			let youTubeID = (thumbnail == nil) ? ViralYouTube.videoID(url) : nil
+			if playerActive || (thumbnail == nil && youTubeID == nil) || keepPlayer {
 				if !keepPlayer {
 					webView?.removeFromSuperview()
 					let web = ViralWeb.makeView()
@@ -3034,6 +3122,13 @@ fileprivate final class ViralImageTile: NSView {
 			loader.onSnapshot = { [weak self] snapshot in
 				guard let self, let group = self.group else { return }
 				group.setThumbnail(snapshot, at: tileIndex)
+			}
+			if let youTubeID {
+				loader.wantsSnapshot = false
+				ViralYouTube.thumbnail(youTubeID) { [weak self] picture in
+					guard let self, let picture, let group = self.group, self.videoURL == url else { return }
+					group.setThumbnail(picture, at: tileIndex)
+				}
 			}
 		} else {
 			videoURL = nil
@@ -3415,6 +3510,8 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		else { return }
 		items[index].ids[0] = ViralMedia.make(url: ViralMedia.url(entry), thumbnail: id)
 		write(items.map { $0.text })
+		// Show the new picture right away (the text was written by this view, so it isn't loaded again)
+		if index < tiles.count { tiles[index].configure(entry: items[index].ids.first, settings: settings) }
 	}
 	
 	override func setWidthFromMenu(_ sender: NSMenuItem) {
@@ -4253,6 +4350,33 @@ public extension BeatTextView {
 	}
 	
 	/// Replaces block text in the document. Only changed lines are replaced, which keeps the parser happy.
+	/// Where an embed's text is in the document right now: its last known range if the text is still there,
+	/// otherwise the nearest place the same text appears. Nil if it can't be found (then nothing is written).
+	fileprivate func currentRange(of view: ViralEmbedView) -> NSRange? {
+		let ns = self.string as NSString
+		let source = view.sourceText
+		guard !source.isEmpty else { return nil }
+		let known = view.blockRange
+		if NSMaxRange(known) <= ns.length, known.length == (source as NSString).length, ns.substring(with: known) == source {
+			return known
+		}
+		var best: NSRange? = nil
+		var search = NSRange(location: 0, length: ns.length)
+		while search.length > 0 {
+			let found = ns.range(of: source, options: [], range: search)
+			if found.location == NSNotFound { break }
+			// Only whole lines count
+			let startsLine = found.location == 0 || ns.character(at: found.location - 1) == 10
+			let endsLine = NSMaxRange(found) == ns.length || ns.character(at: NSMaxRange(found)) == 10
+			if startsLine && endsLine {
+				if best == nil || abs(found.location - known.location) < abs(best!.location - known.location) { best = found }
+			}
+			let next = found.location + 1
+			search = NSRange(location: next, length: ns.length - next)
+		}
+		return best
+	}
+	
 	fileprivate func replaceBlockText(_ range: NSRange, with text: String) {
 		guard let textActions = editorDelegate?.textActions else { return }
 		let ns = self.string as NSString
@@ -4548,6 +4672,14 @@ public extension BeatTextView {
 		if !sites.isEmpty && caretLineIsEmpty {
 			insertLinks(sites)
 			return true
+		}
+		// Pasted text with video links on lines of their own: those lines become videos
+		if let string = pasteboard.string(forType: .string), string.contains("\n") {
+			let converted = ViralAutoEmbed.convertVideoLinks(string.replacingOccurrences(of: "\r\n", with: "\n"))
+			if converted != string.replacingOccurrences(of: "\r\n", with: "\n") {
+				self.insertText(converted, replacementRange: self.selectedRange())
+				return true
+			}
 		}
 		let images = viralImages(from: pasteboard)
 		guard !images.isEmpty else { return false }
