@@ -373,6 +373,11 @@
 			l.tableFirstRow = isTable && !prevTable;
 			l.tableHeaderRow = isTable && !l.isTableSeparator && next != nil && next.type == action && next.isTableSeparator && ![next.string containsString:@":"];
 			l.followsTable = !isTable && prevTable && l.string.length > 0;
+			// Text after a blank line after a table gets the extra room too
+			if (!isTable && !prevTable && l.string.length > 0 && prev != nil && prev.string.length == 0 && i >= 2) {
+				Line* before = all[i-2];
+				if (before.type == action && (before.isTableRow || before.isTableSeparator)) l.followsTable = true;
+			}
 		}
 	}
 	
@@ -449,6 +454,25 @@
 				row = nil;
 			}
 			previous = l;
+		}
+		
+		// Rows that follow each other in one block sit as close as the items within a row
+		Line* lastRow = nil;
+		for (NSInteger li = 0; li < allLines.count; li++) {
+			Line* l = allLines[li];
+			l.embedJoinsPrevious = false;
+			l.embedJoinsNext = false;
+			if (l.embedHidden) continue;
+			if (l.embedRow != nil && l.type == action) {
+				if (lastRow != nil) {
+					lastRow.embedRow.lastObject.embedJoinsNext = true;
+					lastRow.embedJoinsNext = true;
+					l.embedJoinsPrevious = true;
+				}
+				lastRow = l;
+			} else {
+				lastRow = nil;
+			}
 		}
 	}
 	

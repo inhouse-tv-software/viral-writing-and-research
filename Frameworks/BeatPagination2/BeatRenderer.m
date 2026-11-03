@@ -374,7 +374,7 @@
     if (line.type != heading && line.followsTable && attributedString.length > 0) {
         NSParagraphStyle* original = [attributedString attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil];
         NSMutableParagraphStyle* pStyle = (original != nil) ? original.mutableCopy : NSMutableParagraphStyle.new;
-        pStyle.paragraphSpacingBefore = BeatRenderer.tableBottomSpacing;
+        pStyle.paragraphSpacingBefore = (original != nil ? original.paragraphSpacingBefore : 0.0) + BeatRenderer.tableBottomSpacing;
         [attributedString addAttribute:NSParagraphStyleAttributeName value:pStyle range:NSMakeRange(0, attributedString.length)];
     }
 #endif
@@ -874,8 +874,23 @@
             CGFloat x = thumbWidth + 8.0;
             CGFloat textWidth = MAX(20.0, w - x - 8.0);
             CGFloat d = 9.0;
-            [BeatRenderer drawText:title font:[NSFont systemFontOfSize:8.5 weight:NSFontWeightSemibold] color:[NSColor colorWithWhite:0.08 alpha:1.0] inRect:NSMakeRect(x, h - 7 - 22, textWidth, 22) lines:2];
-            [BeatRenderer drawText:desc font:[NSFont systemFontOfSize:6.5] color:[NSColor colorWithWhite:0.38 alpha:1.0] inRect:NSMakeRect(x, h - 30 - 16, textWidth, 16) lines:2];
+            // The description starts right under the title, whether the title takes one line or two
+            NSFont* titleFont = [NSFont systemFontOfSize:8.5 weight:NSFontWeightSemibold];
+            NSFont* descFont = [NSFont systemFontOfSize:6.5];
+            CGFloat titleLine = ceil(titleFont.ascender - titleFont.descender + titleFont.leading);
+            CGFloat descLine = ceil(descFont.ascender - descFont.descender + descFont.leading);
+            CGRect measured = [title boundingRectWithSize:NSMakeSize(textWidth, 1000) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{ NSFontAttributeName: titleFont }];
+            NSInteger titleLines = (measured.size.height > titleLine * 1.5) ? 2 : 1;
+            CGFloat titleHeight = titleLine * titleLines + 1;
+            CGFloat top = h - 7;
+            [BeatRenderer drawText:title font:titleFont color:[NSColor colorWithWhite:0.08 alpha:1.0] inRect:NSMakeRect(x, top - titleHeight, textWidth, titleHeight) lines:titleLines];
+            CGFloat descTop = top - titleHeight - 2;
+            CGFloat siteTop = 6 + d + 3;
+            NSInteger descLines = MIN(3, (NSInteger)floor((descTop - siteTop) / descLine));
+            if (descLines > 0) {
+                CGFloat descHeight = descLine * descLines + 1;
+                [BeatRenderer drawText:desc font:descFont color:[NSColor colorWithWhite:0.38 alpha:1.0] inRect:NSMakeRect(x, descTop - descHeight, textWidth, descHeight) lines:descLines];
+            }
             [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(x, 6, d, d)];
             [BeatRenderer drawText:site font:[NSFont systemFontOfSize:6.5 weight:NSFontWeightMedium] color:[NSColor colorWithWhite:0.45 alpha:1.0] inRect:NSMakeRect(x + d + 4, 5, textWidth - d - 4, 10) lines:1];
         }
@@ -998,12 +1013,15 @@
 {
     CGFloat height = 0.0;
     NSArray* rows = [self embedLayoutFor:row width:width settings:settings];
-    for (NSArray<NSArray*>* items in rows) {
+    CGFloat gap = floor(width * 0.02);
+    for (NSInteger r = 0; r < rows.count; r++) {
+        NSArray<NSArray*>* items = rows[r];
         CGFloat rowHeight = 0.0;
         for (NSArray* item in items) rowHeight = MAX(rowHeight, [item[2] floatValue]);
-        height += rowHeight + self.embedSpacing;
+        CGFloat before = (r == 0 && row.firstObject.embedJoinsPrevious) ? gap : self.embedSpacing;
+        height += rowHeight + before;
     }
-    if (rows.count > 0) height += self.embedSpacingAfter;
+    if (rows.count > 0 && !row.lastObject.embedJoinsNext) height += self.embedSpacingAfter;
     return ceil(height);
 }
 
@@ -1031,8 +1049,11 @@
         pStyle.headIndent = indent + offset;
         pStyle.minimumLineHeight = rowHeight;
         pStyle.maximumLineHeight = rowHeight;
-        pStyle.paragraphSpacingBefore = (r == 0 && firstOnPage) ? 0.0 : self.embedSpacing;
-        pStyle.paragraphSpacing = (r == rows.count - 1) ? self.embedSpacingAfter : 0.0;
+        // Rows of the same block are as far apart as the items in a row
+        Line* firstLine = row.firstObject;
+        CGFloat before = (r == 0) ? (firstOnPage ? 0.0 : (firstLine.embedJoinsPrevious ? gap : self.embedSpacing)) : self.embedSpacing;
+        pStyle.paragraphSpacingBefore = before;
+        pStyle.paragraphSpacing = (r == rows.count - 1 && !row.lastObject.embedJoinsNext) ? self.embedSpacingAfter : 0.0;
         pStyle.lineBreakMode = NSLineBreakByClipping;
         
         NSMutableAttributedString* rowString = NSMutableAttributedString.new;
@@ -1124,6 +1145,17 @@
     table.layoutAlgorithm = NSTextTableFixedLayoutAlgorithm;
     
     NSMutableAttributedString* result = NSMutableAttributedString.new;
+    
+    // A little room above the table, so it doesn't stick to a heading or the text before it
+    if (line.tableFirstRow) {
+        NSMutableParagraphStyle* gapStyle = NSMutableParagraphStyle.new;
+        gapStyle.minimumLineHeight = 8.0;
+        gapStyle.maximumLineHeight = 8.0;
+        [result appendAttributedString:[NSAttributedString.alloc initWithString:@" \n" attributes:@{
+            NSFontAttributeName: [BXFont systemFontOfSize:1.0],
+            NSParagraphStyleAttributeName: gapStyle
+        }]];
+    }
     
     CGFloat lineHeight = ceil(font.pointSize * 1.4);
     

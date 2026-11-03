@@ -490,6 +490,9 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 @property (nonatomic) bool tableFirstRow;
 /// Set by pagination: this line comes right after a table
 @property (nonatomic) bool followsTable;
+/// Set by pagination: the row of pictures or links right above/below belongs to the same block (so the gap is the same as between items)
+@property (nonatomic) bool embedJoinsPrevious;
+@property (nonatomic) bool embedJoinsNext;
 
 #pragma mark - Debugging
 
