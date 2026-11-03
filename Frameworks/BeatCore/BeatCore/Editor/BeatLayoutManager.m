@@ -912,6 +912,9 @@ static NSColor* BeatStatusMarkColor(NSInteger kind)
         if (ci >= string.length) continue;
         NSInteger kind = BeatStatusMarkKind([string characterAtIndex:ci]);
         if (kind == 0) continue;
+        // Hidden text (tables, pictures, folded sections) draws nothing
+        NSGlyphProperty property = [self propertyForGlyphAtIndex:g];
+        if ((property & NSGlyphPropertyNull) || (property & NSGlyphPropertyControlCharacter)) continue;
         any = true;
         if (g > start) [super drawGlyphsForGlyphRange:NSMakeRange(start, g - start) atPoint:origin];
         start = g + 1;

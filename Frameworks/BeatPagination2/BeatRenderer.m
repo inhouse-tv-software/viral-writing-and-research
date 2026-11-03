@@ -312,6 +312,10 @@
         [attributedString addAttribute:NSLinkAttributeName value:line range:lineRange];
         [attributedString addAttribute:@"LineType" value:@(line.type) range:lineRange];
     }
+#if TARGET_OS_OSX
+    // Web addresses open in the browser
+    [BeatRenderer linkWebAddresses:attributedString];
+#endif
     
     if (line.isAnyDialogue) {
         [attributedString addAttribute:@"DialogueNumber" value:@(line.dialogueNumber) range:NSMakeRange(0, attributedString.length - 1)];
@@ -568,8 +572,9 @@
             CGFloat aspect = aspects[i].floatValue;
             CGFloat bar = bars[i].floatValue;
             CGFloat w = floor((rowHeight - bar) / aspect);
-            NSImage* image = (bar > 0.0) ? [self videoImageFor:entry width:w height:rowHeight bar:bar settings:settings] : [self embedImageWithID:entry settings:settings];
-            [current addObject:@[ (image != nil) ? image : NSNull.null, @(w), @(rowHeight), @(l.embedRounded), entry ?: @"" ]];
+            NSString* status = l.embedStatus ?: @"";
+            NSImage* image = (bar > 0.0) ? [self videoImageFor:entry width:w height:rowHeight bar:bar status:status settings:settings] : [self embedImageWithID:entry settings:settings];
+            [current addObject:@[ (image != nil) ? image : NSNull.null, @(w), @(rowHeight), @(l.embedRounded), entry ?: @"", status ]];
         }
         if (current.count > 0) [rows addObject:current];
     }
@@ -587,7 +592,8 @@
                 NSString* entry = (item.count > 4) ? item[4] : @"";
                 // Videos are redrawn at the new size so the numbers bar keeps its height
                 if ([image isKindOfClass:NSImage.class] && [self embedEntryIsVideo:entry] && !first.isEmbedLinkLine && !first.isEmbedCarouselLine) {
-                    image = [self videoImageFor:entry width:w height:h bar:self.embedVideoBarHeight * scale settings:settings];
+                    NSString* status = (item.count > 5) ? item[5] : @"";
+                    image = [self videoImageFor:entry width:w height:h bar:self.embedVideoBarHeight * scale status:status settings:settings];
                 }
                 NSMutableArray* copy = item.mutableCopy;
                 copy[0] = image;
@@ -684,6 +690,12 @@
 /// A video for the preview: its thumbnail with a play button, and a black bar with views and likes under it
 + (NSImage*)videoImageFor:(NSString*)entry width:(CGFloat)w height:(CGFloat)h bar:(CGFloat)bar settings:(BeatExportSettings*)settings
 {
+    return [self videoImageFor:entry width:w height:h bar:bar status:@"" settings:settings];
+}
+
+/// `status`: "good" or "bad" adds a green or red dot at the end of the numbers bar
++ (NSImage*)videoImageFor:(NSString*)entry width:(CGFloat)w height:(CGFloat)h bar:(CGFloat)bar status:(NSString*)status settings:(BeatExportSettings*)settings
+{
     NSString* url = [self embedURLFor:entry];
     NSString* thumbID = [self embedThumbnailIDFor:entry];
     NSImage* thumbnail = (thumbID != nil) ? [self embedImageWithID:thumbID settings:settings] : nil;
@@ -736,6 +748,12 @@
         [[NSBezierPath bezierPathWithRect:barRect] addClip];
         [text drawAtPoint:NSMakePoint(4.0, NSMidY(barRect) - size.height / 2)];
         [NSGraphicsContext restoreGraphicsState];
+        if (status.length > 0) {
+            CGFloat d = MAX(3.0, round(bar * 0.4));
+            NSColor* color = [status isEqualToString:@"good"] ? [NSColor colorWithCalibratedRed:0.27 green:0.80 blue:0.47 alpha:1.0] : [NSColor colorWithCalibratedRed:0.95 green:0.36 blue:0.33 alpha:1.0];
+            [color setFill];
+            [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(w - 5.0 - d, NSMidY(barRect) - d / 2, d, d)] fill];
+        }
         return true;
     }];
 }
@@ -748,11 +766,36 @@
     return 62.0;
 }
 
+/// @[platform, handle] for a YouTube channel or an Instagram / TikTok profile, nil otherwise
++ (NSArray<NSString*>*)linkChannel:(NSString*)url
+{
+    NSURL* address = [NSURL URLWithString:url];
+    NSString* host = address.host.lowercaseString;
+    if (host == nil) return nil;
+    NSMutableArray<NSString*>* parts = NSMutableArray.new;
+    for (NSString* p in address.pathComponents) if (![p isEqualToString:@"/"]) [parts addObject:p];
+    if (parts.count == 0) return nil;
+    NSString* first = parts.firstObject;
+    if ([host hasSuffix:@"youtube.com"]) {
+        if ([first hasPrefix:@"@"]) return @[@"YouTube", first];
+        if (([first isEqualToString:@"channel"] || [first isEqualToString:@"c"] || [first isEqualToString:@"user"]) && parts.count >= 2) return @[@"YouTube", parts[1]];
+        return nil;
+    }
+    if ([host hasSuffix:@"instagram.com"]) {
+        NSArray* reserved = @[@"p", @"reel", @"reels", @"tv", @"stories", @"explore", @"accounts", @"direct", @"about", @"legal"];
+        if (parts.count > 2 || [reserved containsObject:first.lowercaseString] || [first containsString:@"."]) return nil;
+        return @[@"Instagram", [@"@" stringByAppendingString:first]];
+    }
+    if ([host hasSuffix:@"tiktok.com"] && [first hasPrefix:@"@"] && parts.count == 1) return @[@"TikTok", first];
+    return nil;
+}
+
 /// True when a card has a picture or a description to show
 + (bool)linkHasCardContent:(NSString*)entry settings:(BeatExportSettings*)settings
 {
     if (entry == nil) return false;
     if ([self embedThumbnailIDFor:entry] != nil) return true;
+    if ([self linkChannel:[self embedURLFor:entry]] != nil) return true;
     NSDictionary* info = [self linkInfoFor:[self embedURLFor:entry] settings:settings];
     NSString* desc = info[@"desc"];
     return [desc isKindOfClass:NSString.class] && [desc stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length > 0;
@@ -896,6 +939,40 @@
             [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(8, NSMaxY(picture) + (header - d) / 2, d, d)];
             [BeatRenderer drawText:[NSString stringWithFormat:@"%@  ·  %@", title, domain] font:[NSFont systemFontOfSize:7.5 weight:NSFontWeightMedium] color:[NSColor colorWithWhite:0.15 alpha:1.0]
                                 inRect:NSMakeRect(8 + d + 6, NSMaxY(picture) + 4, w - 8 - d - 14, header - 7) lines:1];
+        } else if ([self linkChannel:url] != nil) {
+            // Channels and profiles: round picture, name, handle and followers, platform badge
+            NSArray* channel = [self linkChannel:url];
+            NSString* platform = channel[0];
+            NSString* handle = channel[1];
+            NSString* followers = [info[@"followers"] isKindOfClass:NSString.class] ? info[@"followers"] : @"";
+            NSColor* platformColor = [platform isEqualToString:@"YouTube"] ? [NSColor colorWithCalibratedRed:0.93 green:0.11 blue:0.14 alpha:1.0]
+                : ([platform isEqualToString:@"Instagram"] ? [NSColor colorWithCalibratedRed:0.85 green:0.18 blue:0.48 alpha:1.0] : [NSColor colorWithWhite:0.1 alpha:1.0]);
+            CGFloat d = MIN(h - 14.0, 44.0);
+            NSRect avatar = NSMakeRect(9.0, (h - d) / 2, d, d);
+            [NSGraphicsContext saveGraphicsState];
+            [[NSBezierPath bezierPathWithOvalInRect:avatar] addClip];
+            if (thumbnail != nil) [BeatRenderer drawImage:thumbnail fillingRect:avatar];
+            else { [platformColor setFill]; NSRectFill(avatar); }
+            [NSGraphicsContext restoreGraphicsState];
+            CGFloat x = NSMaxX(avatar) + 9.0;
+            CGFloat textWidth = MAX(20.0, w - x - 8.0);
+            NSString* name = [title isEqualToString:domain] ? handle : title;
+            NSFont* nameFont = [NSFont systemFontOfSize:9 weight:NSFontWeightSemibold];
+            NSFont* lineFont = [NSFont systemFontOfSize:7.5];
+            CGFloat nameHeight = ceil(nameFont.ascender - nameFont.descender);
+            CGFloat lineHeight = ceil(lineFont.ascender - lineFont.descender);
+            CGFloat badgeHeight = 10.0;
+            CGFloat block = nameHeight + lineHeight + badgeHeight + 4.0;
+            CGFloat top = (h + block) / 2;
+            [BeatRenderer drawText:name font:nameFont color:[NSColor colorWithWhite:0.08 alpha:1.0] inRect:NSMakeRect(x, top - nameHeight, textWidth, nameHeight) lines:1];
+            NSString* handleLine = (followers.length > 0) ? [NSString stringWithFormat:@"%@  ·  %@", handle, followers] : handle;
+            [BeatRenderer drawText:handleLine font:lineFont color:[NSColor colorWithWhite:0.4 alpha:1.0] inRect:NSMakeRect(x, top - nameHeight - 2 - lineHeight, textWidth, lineHeight) lines:1];
+            NSAttributedString* badge = [NSAttributedString.alloc initWithString:platform attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:6.5 weight:NSFontWeightBold], NSForegroundColorAttributeName: NSColor.whiteColor }];
+            NSSize badgeSize = badge.size;
+            NSRect badgeRect = NSMakeRect(x, top - nameHeight - lineHeight - 4 - badgeHeight, badgeSize.width + 8, badgeHeight);
+            [platformColor setFill];
+            [[NSBezierPath bezierPathWithRoundedRect:badgeRect xRadius:badgeHeight / 2 yRadius:badgeHeight / 2] fill];
+            [badge drawAtPoint:NSMakePoint(badgeRect.origin.x + 4, NSMidY(badgeRect) - badgeSize.height / 2)];
         } else {
             // Card: picture on the left, title, description and site on the right
             CGFloat thumbWidth = (thumbnail != nil) ? floor(MIN(h * 1.4, w * 0.34)) : 0.0;
@@ -1077,7 +1154,8 @@
         CGFloat rowWidth = 0.0;
         for (NSArray* item in items) rowWidth += [item[1] floatValue];
         rowWidth += gap * (CGFloat)(items.count - 1);
-        CGFloat offset = row.firstObject.isEmbedLinkLine ? 0.0 : MAX(0.0, floor((width - rowWidth) / 2.0));
+        // Everything lines up on the left with the text
+        CGFloat offset = 0.0;
         
         NSMutableParagraphStyle* pStyle = NSMutableParagraphStyle.new;
         pStyle.firstLineHeadIndent = indent + offset;
@@ -1265,9 +1343,50 @@
     return result;
 }
 
+/// Web addresses in text become clickable links (blue, opening in the browser)
++ (void)linkWebAddresses:(NSMutableAttributedString*)string
+{
+    if ([string.string rangeOfString:@"http" options:NSCaseInsensitiveSearch].location == NSNotFound && [string.string rangeOfString:@"www." options:NSCaseInsensitiveSearch].location == NSNotFound) return;
+    // A plain regular expression (thread safe; pagination runs on several threads, and data detectors crash there)
+    static NSRegularExpression* regex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"(https?://|www\\.)[^\\s<>\"'\\]\\)]+" options:NSRegularExpressionCaseInsensitive error:nil];
+    });
+    if (regex == nil) return;
+    NSColor* blue = [NSColor colorWithCalibratedRed:0.10 green:0.36 blue:0.78 alpha:1.0];
+    NSString* text = string.string;
+    for (NSTextCheckingResult* m in [regex matchesInString:text options:0 range:NSMakeRange(0, text.length)]) {
+        NSRange range = m.range;
+        // Leave trailing punctuation out of the link
+        while (range.length > 0) {
+            unichar last = [text characterAtIndex:NSMaxRange(range) - 1];
+            if (last == '.' || last == ',' || last == ';' || last == ':' || last == '!' || last == '?') range.length -= 1;
+            else break;
+        }
+        if (range.length < 8) continue;
+        NSString* address = [text substringWithRange:range];
+        if (![address.lowercaseString hasPrefix:@"http"]) address = [@"https://" stringByAppendingString:address];
+        NSURL* url = [NSURL URLWithString:address];
+        if (url == nil) continue;
+        [string addAttribute:NSLinkAttributeName value:url range:range];
+        [string addAttribute:NSForegroundColorAttributeName value:blue range:range];
+    }
+}
+
 /// Cell text with **bold** and *italic* turned into real bold and italic (the markers are removed)
 + (NSMutableAttributedString*)tableCellText:(NSString*)text font:(BXFont*)font color:(BXColor*)color
 {
+    // A cell that is just a web address shows the site name, and opens the page
+    NSString* trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if (([trimmed hasPrefix:@"http://"] || [trimmed hasPrefix:@"https://"]) && [trimmed rangeOfString:@" "].location == NSNotFound) {
+        NSURL* address = [NSURL URLWithString:trimmed];
+        if (address != nil) {
+            NSString* label = [[self embedDomainFor:trimmed] stringByAppendingString:@" \u2197"];
+            NSColor* blue = [NSColor colorWithCalibratedRed:0.10 green:0.36 blue:0.78 alpha:1.0];
+            return [NSMutableAttributedString.alloc initWithString:label attributes:@{ NSFontAttributeName: font, NSForegroundColorAttributeName: blue, NSLinkAttributeName: address }];
+        }
+    }
     NSMutableAttributedString* result = NSMutableAttributedString.new;
     NSDictionary* plain = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color };
     BXFont* bold = [NSFontManager.sharedFontManager convertFont:font toHaveTrait:NSBoldFontMask] ?: font;
@@ -1285,6 +1404,7 @@
     if (last < text.length) [result appendAttributedString:[NSAttributedString.alloc initWithString:[text substringFromIndex:last] attributes:plain]];
     if (result.length == 0) [result appendAttributedString:[NSAttributedString.alloc initWithString:@" " attributes:plain]];
     [self styleStatusMarks:result];
+    [self linkWebAddresses:result];
     return result;
 }
 

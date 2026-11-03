@@ -969,6 +969,16 @@ static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
     return @"card";
 }
 
+- (NSString*)embedStatus
+{
+    NSString* inner = self.embedInner;
+    if (inner == nil) return nil;
+    for (NSString* part in [inner componentsSeparatedByString:@" "]) {
+        if ([part isEqualToString:@"good"] || [part isEqualToString:@"bad"]) return part;
+    }
+    return nil;
+}
+
 - (NSArray<NSString*>*)embedImageIDs
 {
     NSString* inner = self.embedInner;

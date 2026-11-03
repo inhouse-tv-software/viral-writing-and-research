@@ -32,6 +32,28 @@ import AppKit
 		previewController.closeAndJumpToRange(line.textRange())
 	}
 	
+	/// Videos and websites are pictures in the text: clicking one opens its address
+	override public func mouseDown(with event: NSEvent) {
+		if let lm = layoutManager, let tc = textContainer, let storage = textStorage {
+			var point = convert(event.locationInWindow, from: nil)
+			point.x -= textContainerOrigin.x
+			point.y -= textContainerOrigin.y
+			var fraction: CGFloat = 0
+			let glyph = lm.glyphIndex(for: point, in: tc, fractionOfDistanceThroughGlyph: &fraction)
+			if glyph < lm.numberOfGlyphs {
+				let rect = lm.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: tc)
+				let index = lm.characterIndexForGlyph(at: glyph)
+				if rect.contains(point), index < storage.length,
+				   storage.attribute(.attachment, at: index, effectiveRange: nil) != nil,
+				   let url = storage.attribute(.link, at: index, effectiveRange: nil) as? URL {
+					NSWorkspace.shared.open(url)
+					return
+				}
+			}
+		}
+		super.mouseDown(with: event)
+	}
+	
 	override public func cancelOperation(_ sender: Any?) {
 		superview?.cancelOperation(sender)
 	}

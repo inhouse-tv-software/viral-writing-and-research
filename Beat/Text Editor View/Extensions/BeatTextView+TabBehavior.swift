@@ -1492,6 +1492,8 @@ fileprivate struct EmbedLine {
 	var rounded: Bool = false
 	/// Websites: `pill` (just the link), `card` (picture, title, description) or `live` (the page itself)
 	var linkSize: String = "card"
+	/// `good` or `bad` (from ✅ / ❌ in front of the link): a green or red dot on the video
+	var status: String? = nil
 	
 	static let imagePrefix = "![image](viral:"
 	static let linkPrefix = "![link](viral:"
@@ -1519,13 +1521,15 @@ fileprivate struct EmbedLine {
 		var height = 40
 		var rounded = false
 		var linkSize = "card"
+		var status: String? = nil
 		for part in parts.dropFirst() {
 			if part == "r" { rounded = true }
+			else if part == "good" || part == "bad" { status = part }
 			else if ViralLinks.sizes.contains(part) { linkSize = part }
 			else if part.hasPrefix("h"), let h = Int(part.dropFirst()), h > 0 { height = min(max(h, 10), 150) }
 			else if let w = Int(part), w > 0 { width = w }
 		}
-		return EmbedLine(kind: kind, ids: ids, width: min(max(width, 5), 100), height: height, rounded: rounded, linkSize: linkSize)
+		return EmbedLine(kind: kind, ids: ids, width: min(max(width, 5), 100), height: height, rounded: rounded, linkSize: linkSize, status: status)
 	}
 	
 	var text: String {
@@ -1536,9 +1540,10 @@ fileprivate struct EmbedLine {
 		case .carousel: prefix = EmbedLine.carouselPrefix
 		case .link: prefix = EmbedLine.linkPrefix
 		}
-		if kind == .link { return prefix + ids.joined(separator: ",") + " \(width) \(linkSize))" }
+		let mark = status.map { " " + $0 } ?? ""
+		if kind == .link { return prefix + ids.joined(separator: ",") + " \(width) \(linkSize)" + mark + ")" }
 		let size = (kind == .carousel) ? "h\(height)" : "\(width)"
-		return prefix + ids.joined(separator: ",") + " " + size + (rounded ? " r" : "") + ")"
+		return prefix + ids.joined(separator: ",") + " " + size + (rounded ? " r" : "") + mark + ")"
 	}
 	
 	static func cornerRadius(_ rect: NSRect) -> CGFloat {
@@ -1909,6 +1914,8 @@ fileprivate enum ViralLinks {
 		var desc: String
 		var site: String
 		var icon: NSImage?
+		/// Channels and profiles: "11.2K subscribers", "12K followers"
+		var followers: String = ""
 	}
 	
 	static let sizes = ["pill", "card", "live"]
@@ -1951,16 +1958,44 @@ fileprivate enum ViralLinks {
 		return text.prefix(1).uppercased() + text.dropFirst()
 	}
 	
+	/// A YouTube channel or an Instagram / TikTok profile: (platform, handle)
+	static func channel(_ url: String) -> (platform: String, handle: String)? {
+		guard let address = URL(string: url), let host = address.host?.lowercased() else { return nil }
+		let parts = address.pathComponents.filter { $0 != "/" }
+		guard let first = parts.first else { return nil }
+		if host.hasSuffix("youtube.com") {
+			if first.hasPrefix("@") { return ("YouTube", first) }
+			if ["channel", "c", "user"].contains(first), parts.count >= 2 { return ("YouTube", parts[1]) }
+			return nil
+		}
+		if host.hasSuffix("instagram.com") {
+			let reserved = ["p", "reel", "reels", "tv", "stories", "explore", "accounts", "direct", "about", "legal"]
+			guard parts.count <= 2, !reserved.contains(first.lowercased()), !first.contains(".") else { return nil }
+			return ("Instagram", "@" + first)
+		}
+		if host.hasSuffix("tiktok.com"), first.hasPrefix("@"), parts.count == 1 { return ("TikTok", first) }
+		return nil
+	}
+	
+	static func platformColor(_ platform: String) -> NSColor {
+		switch platform {
+		case "YouTube": return NSColor(calibratedRed: 0.93, green: 0.11, blue: 0.14, alpha: 1)
+		case "Instagram": return NSColor(calibratedRed: 0.85, green: 0.18, blue: 0.48, alpha: 1)
+		default: return NSColor(calibratedWhite: 0.1, alpha: 1)
+		}
+	}
+	
 	/// The size a link is shown at. A card with nothing to show (no picture, no description) is shown as a small link.
 	static func effectiveSize(_ item: EmbedLine, settings: BeatDocumentSettings?) -> String {
 		guard item.linkSize == "card", let entry = item.ids.first else { return item.linkSize }
+		if channel(ViralMedia.url(entry)) != nil { return "card" }
 		if ViralMedia.thumbnail(entry) != nil { return "card" }
 		return info(ViralMedia.url(entry), settings: settings).desc.isEmpty ? "pill" : "card"
 	}
 	
 	/// Links start small. News stories and blog posts get a card so the picture and headline show.
 	static func defaultSize(_ url: String) -> String {
-		return isArticle(url) ? "card" : "pill"
+		return (isArticle(url) || channel(url) != nil) ? "card" : "pill"
 	}
 	
 	private static let newsSites: [String] = [
@@ -2030,7 +2065,7 @@ fileprivate enum ViralLinks {
 			icon = image
 			iconCache[url] = image
 		}
-		return Info(title: text("title") ?? slugTitle(url) ?? domain, desc: text("desc") ?? "", site: text("site") ?? domain, icon: icon)
+		return Info(title: text("title") ?? slugTitle(url) ?? domain, desc: text("desc") ?? "", site: text("site") ?? domain, icon: icon, followers: text("followers") ?? "")
 	}
 	
 	/// Reads the page once per session. `needsImage`: the line has no picture yet.
@@ -2050,9 +2085,21 @@ fileprivate enum ViralLinks {
 		URLSession.shared.dataTask(with: request) { data, response, _ in
 			let base = response?.url ?? address
 			guard let data else { return }
-			let html = String(decoding: data.prefix(600_000), as: UTF8.self)
-			let title = meta(html, ["og:title", "twitter:title"]) ?? tagText(html, "title")
-			let desc = meta(html, ["og:description", "twitter:description", "description"])
+			let html = String(decoding: data.prefix(1_500_000), as: UTF8.self)
+			var title = meta(html, ["og:title", "twitter:title"]) ?? tagText(html, "title")
+			var desc = meta(html, ["og:description", "twitter:description", "description"])
+			// Channels and profiles: the follower count, and a clean name
+			var followers: String? = nil
+			if let found = channel(url) {
+				followers = followerCount(html, platform: found.platform, description: desc)
+				if found.platform == "Instagram" {
+					if let t = title, let cut = t.range(of: " • Instagram") { title = String(t[..<cut.lowerBound]) }
+					if let t = title, let cut = t.range(of: " (@") { title = String(t[..<cut.lowerBound]) }
+					// "12K Followers, 300 Following, 1,234 Posts - See Instagram photos…" says nothing else
+					if let d = desc, d.contains("Followers") { desc = "" }
+				}
+				if found.platform == "YouTube", let t = title, t.hasSuffix(" - YouTube") { title = String(t.dropLast(10)) }
+			}
 			let site = meta(html, ["og:site_name", "application-name"])
 			let imageURL = meta(html, ["og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src"]).flatMap { URL(string: $0, relativeTo: base)?.absoluteURL }
 			let iconURL = iconHref(html).flatMap { URL(string: $0, relativeTo: base)?.absoluteURL }
@@ -2076,7 +2123,7 @@ fileprivate enum ViralLinks {
 				}
 			}
 			group.notify(queue: .main) {
-				store(url, title: title, desc: desc, site: site, icon: iconData, settings: settings)
+				store(url, title: title, desc: desc, site: site, icon: iconData, followers: followers, settings: settings)
 				if let picture {
 					NotificationCenter.default.post(name: ViralLinkImageNotification, object: nil, userInfo: ["url": url, "image": picture])
 				}
@@ -2106,13 +2153,28 @@ fileprivate enum ViralLinks {
 		return rep.representation(using: .png, properties: [:])
 	}
 	
-	private static func store(_ url: String, title: String?, desc: String?, site: String?, icon: String?, settings: BeatDocumentSettings) {
+	/// "11.2K subscribers" / "12K followers" from the page
+	static func followerCount(_ html: String, platform: String, description: String?) -> String? {
+		if platform == "YouTube" {
+			if let n = firstMatch(html, #"\"([0-9][0-9.,]*\s?[KMBkmb]?) subscribers\""#) ?? firstMatch(html, #"([0-9][0-9.,]*\s?[KMB]?) subscribers"#) {
+				return n.trimmingCharacters(in: .whitespaces) + " subscribers"
+			}
+			return nil
+		}
+		let text = description ?? ""
+		if let n = firstMatch(text, #"([0-9][0-9.,]*\s?[KMBkmb]?)\s+Followers"#) { return n.trimmingCharacters(in: .whitespaces) + " followers" }
+		if let n = firstMatch(html, #"([0-9][0-9.,]*\s?[KMBkmb]?)\s+Followers"#) { return n.trimmingCharacters(in: .whitespaces) + " followers" }
+		return nil
+	}
+	
+	private static func store(_ url: String, title: String?, desc: String?, site: String?, icon: String?, followers: String? = nil, settings: BeatDocumentSettings) {
 		let all = ((settings.get(ViralLinksKey) as? NSDictionary)?.mutableCopy() as? NSMutableDictionary) ?? NSMutableDictionary()
 		let entry = ((all[url] as? NSDictionary)?.mutableCopy() as? NSMutableDictionary) ?? NSMutableDictionary()
 		if let title { entry["title"] = String(title.prefix(300)) }
 		if let desc { entry["desc"] = String(desc.prefix(400)) }
 		if let site { entry["site"] = String(site.prefix(100)) }
 		if let icon { entry["icon"] = icon }
+		if let followers { entry["followers"] = followers }
 		all[url] = entry
 		settings.set(ViralLinksKey, as: all)
 		iconCache[url] = nil
@@ -2283,6 +2345,59 @@ fileprivate enum ViralLinks {
 			return
 		}
 		
+		// Channels and profiles: round picture, name, handle and followers
+		if let found = channel(url) {
+			NSGraphicsContext.saveGraphicsState()
+			shape.addClip()
+			textColor.withAlphaComponent(0.035).setFill()
+			rect.fill()
+			NSGraphicsContext.restoreGraphicsState()
+			textColor.withAlphaComponent(0.15).setStroke()
+			shape.lineWidth = 1
+			shape.stroke()
+			let d = min(rect.height - 20, 60)
+			let avatar = NSRect(x: rect.minX + 12, y: rect.midY - d / 2, width: d, height: d)
+			NSGraphicsContext.saveGraphicsState()
+			NSBezierPath(ovalIn: avatar).addClip()
+			if let thumbnail { drawFilling(thumbnail, in: avatar) }
+			else {
+				platformColor(found.platform).withAlphaComponent(0.85).setFill()
+				avatar.fill()
+				let letter = (info.title.first.map { String($0).uppercased() }) ?? "•"
+				let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: d * 0.45, weight: .bold), .foregroundColor: NSColor.white]
+				let size = (letter as NSString).size(withAttributes: attrs)
+				(letter as NSString).draw(at: NSPoint(x: avatar.midX - size.width / 2, y: avatar.midY - size.height / 2), withAttributes: attrs)
+			}
+			NSGraphicsContext.restoreGraphicsState()
+			textColor.withAlphaComponent(0.12).setStroke()
+			let ring = NSBezierPath(ovalIn: avatar)
+			ring.lineWidth = 0.5
+			ring.stroke()
+			
+			let x = avatar.maxX + 12
+			let width = max(20, rect.maxX - 12 - x)
+			let name = info.title == domain ? found.handle : info.title
+			let nameFont = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
+			let lineFont = NSFont.systemFont(ofSize: 10.5)
+			let nameHeight = ceil(nameFont.ascender - nameFont.descender)
+			let lineHeight = ceil(lineFont.ascender - lineFont.descender)
+			let blockHeight = nameHeight + lineHeight + 16 + 6
+			var y = rect.midY - blockHeight / 2
+			drawText(name, font: nameFont, color: textColor, in: NSRect(x: x, y: y, width: width, height: nameHeight + 1), lines: 1)
+			y += nameHeight + 2
+			let handleLine = info.followers.isEmpty ? found.handle : "\(found.handle)  ·  \(info.followers)"
+			drawText(handleLine, font: lineFont, color: secondary, in: NSRect(x: x, y: y, width: width, height: lineHeight + 1), lines: 1)
+			y += lineHeight + 4
+			// Platform badge
+			let badge = NSAttributedString(string: found.platform, attributes: [.font: NSFont.systemFont(ofSize: 9, weight: .bold), .foregroundColor: NSColor.white])
+			let badgeSize = badge.size()
+			let badgeRect = NSRect(x: x, y: y, width: badgeSize.width + 10, height: badgeSize.height + 3)
+			platformColor(found.platform).setFill()
+			NSBezierPath(roundedRect: badgeRect, xRadius: badgeRect.height / 2, yRadius: badgeRect.height / 2).fill()
+			badge.draw(at: NSPoint(x: badgeRect.minX + 5, y: badgeRect.minY + 1.5))
+			return
+		}
+		
 		// Card
 		NSGraphicsContext.saveGraphicsState()
 		shape.addClip()
@@ -2387,12 +2502,23 @@ fileprivate enum ViralYouTube {
 				changed = true
 				return String(line.dropLast(" 50 pill)".count)) + " 33 pill)"
 			}
-			guard let url = linkOnly(line) else { return line }
+			// Channels and profiles made as small links earlier get the profile card
+			if line.hasPrefix("![link](viral:"), line.hasSuffix(" pill)"), var embed = EmbedLine.parse(line),
+			   let entry = embed.ids.first, ViralLinks.channel(ViralMedia.url(entry)) != nil {
+				changed = true
+				embed.linkSize = "card"
+				embed.width = ViralLinks.defaultWidth("card")
+				return embed.text
+			}
+			guard let found = linkWithStatus(line) else { return line }
+			let url = found.url
 			if ViralVideo.info(url) != nil {
 				changed = true
 				// Vertical videos four to a row, wide ones two
 				let width = ViralVideo.aspect(url) > 1 ? 25 : 50
-				return EmbedLine(kind: .video, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: width).text
+				var embed = EmbedLine(kind: .video, ids: [ViralMedia.make(url: url, thumbnail: nil)], width: width)
+				embed.status = found.status
+				return embed.text
 			}
 			if ViralLinks.isWebsite(url) {
 				// Other links become small pills, three to a row. News stories become cards.
@@ -2407,7 +2533,26 @@ fileprivate enum ViralYouTube {
 	
 	/// The address when the line is nothing but a link (also `- link`, `* link` and `<link>`)
 	static func linkOnly(_ line: String) -> String? {
+		return linkWithStatus(line)?.url
+	}
+	
+	/// Like `linkOnly`, and a ✅ / ❌ in front of the link becomes `good` / `bad`
+	static func linkWithStatus(_ line: String) -> (url: String, status: String?)? {
 		var t = line.trimmingCharacters(in: .whitespaces)
+		var status: String? = nil
+		let marks: [(String, String)] = [("✅", "good"), ("☑️", "good"), ("✔️", "good"), ("✔", "good"), ("❌", "bad"), ("✖️", "bad"), ("✗", "bad"), ("❎", "bad")]
+		for (mark, value) in marks where t.hasPrefix(mark) {
+			status = value
+			t = String(t.dropFirst(mark.count)).trimmingCharacters(in: .whitespaces)
+			if t.hasPrefix("\u{FE0F}") { t = String(t.dropFirst()).trimmingCharacters(in: .whitespaces) }
+			break
+		}
+		guard let url = plainLink(t) else { return nil }
+		return (url, status)
+	}
+	
+	private static func plainLink(_ line: String) -> String? {
+		var t = line
 		if t.hasPrefix("- ") || t.hasPrefix("* ") || t.hasPrefix("• ") { t = String(t.dropFirst(2)).trimmingCharacters(in: .whitespaces) }
 		if t.hasPrefix("<") && t.hasSuffix(">") { t = String(t.dropFirst().dropLast()) }
 		guard t.lowercased().hasPrefix("http"), !t.contains(" ") else { return nil }
@@ -2717,9 +2862,18 @@ fileprivate enum ViralMetrics {
 	static let barHeight: CGFloat = 26
 	
 	/// The black bar under a video: views (big), then likes, on one line that always fits
-	static func drawBar(_ url: String, settings: BeatDocumentSettings?, in bar: NSRect, flipped: Bool) {
+	static func drawBar(_ url: String, settings: BeatDocumentSettings?, in bar: NSRect, flipped: Bool, status: String? = nil) {
 		NSColor.black.setFill()
 		bar.fill()
+		// Works / doesn't work, from ✅ / ❌ in the research
+		var bar = bar
+		if let status {
+			let d: CGFloat = 8
+			let dot = NSRect(x: bar.maxX - 8 - d, y: bar.midY - d / 2, width: d, height: d)
+			(status == "good" ? NSColor(calibratedRed: 0.27, green: 0.80, blue: 0.47, alpha: 1) : NSColor(calibratedRed: 0.95, green: 0.36, blue: 0.33, alpha: 1)).setFill()
+			NSBezierPath(ovalIn: dot).fill()
+			bar.size.width -= d + 10
+		}
 		let isInstagram = url.contains("instagram.com")
 		let stats = self.stats(url, settings: settings)
 		let room = bar.width - 14
@@ -3583,7 +3737,7 @@ fileprivate final class ViralImageTile: NSView {
 	private func drawMetrics() {
 		guard let videoURL else { return }
 		ViralMetrics.ensure(videoURL, settings: group?.settings)
-		ViralMetrics.drawBar(videoURL, settings: group?.settings, in: barRect, flipped: isFlipped)
+		ViralMetrics.drawBar(videoURL, settings: group?.settings, in: barRect, flipped: isFlipped, status: item?.status)
 	}
 	
 	@objc func metricsChanged(_ notification: Notification) {
