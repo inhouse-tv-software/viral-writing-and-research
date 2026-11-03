@@ -113,6 +113,9 @@ import UXKit
 		self.canDrawConcurrently = true
 		self.wantsLayer = true
 		self.layer?.backgroundColor = .white
+		// Viral: nothing draws outside the paper. A row of images at the very bottom of a page could make the
+		// page's text view a few points taller than the page, and its white background covered the gap between pages.
+		self.layer?.masksToBounds = true
 		
 		// Force light appearance to get highlights show up correctly
 		self.appearance = NSAppearance(named: .aqua)
