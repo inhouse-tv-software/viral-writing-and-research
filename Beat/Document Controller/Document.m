@@ -304,6 +304,42 @@
 	return dataRepresentation;
 }
 
+/// Returns an error when the text isn't something the editor can open (a web page, or a line too long to lay out)
+- (NSError*)viralUnreadableReasonFor:(NSString*)text
+{
+	if (text == nil) {
+		return [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadCorruptFileError userInfo:@{
+			NSLocalizedDescriptionKey: @"This file isn't a Viral document.",
+			NSLocalizedRecoverySuggestionErrorKey: @"It isn't plain text, so Viral can't open it."
+		}];
+	}
+	
+	// The document settings block at the end is one long line by design, so only the text before it counts
+	NSString* body = text;
+	NSRange settings = [text rangeOfString:@"/* If you're seeing this, you can remove the following stuff - BEAT:" options:NSBackwardsSearch];
+	if (settings.location != NSNotFound) body = [text substringToIndex:settings.location];
+	
+	NSString* start = [[body substringToIndex:MIN((NSUInteger)400, body.length)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
+	if ([start hasPrefix:@"<!doctype html"] || [start hasPrefix:@"<html"]) {
+		return [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadCorruptFileError userInfo:@{
+			NSLocalizedDescriptionKey: @"This file is a web page, not a Viral document.",
+			NSLocalizedRecoverySuggestionErrorKey: @"It's HTML saved with a .fountain name. Rename it to .html and open it in a browser."
+		}];
+	}
+	
+	__block NSUInteger longest = 0;
+	[body enumerateSubstringsInRange:NSMakeRange(0, body.length) options:NSStringEnumerationByLines | NSStringEnumerationSubstringNotRequired usingBlock:^(NSString * _Nullable substring, NSRange substringRange, NSRange enclosingRange, BOOL * _Nonnull stop) {
+		if (substringRange.length > longest) longest = substringRange.length;
+	}];
+	if (longest > 100000) {
+		return [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadCorruptFileError userInfo:@{
+			NSLocalizedDescriptionKey: @"This file has a line that's too long to open.",
+			NSLocalizedRecoverySuggestionErrorKey: [NSString stringWithFormat:@"One line is %lu characters long. It's probably not a Viral document (it could be a web page or exported data).", (unsigned long)longest]
+		}];
+	}
+	return nil;
+}
+
 - (BOOL)readFromURL:(NSURL *)url ofType:(NSString *)typeName error:(NSError *__autoreleasing  _Nullable *)outError
 {
 	if (![url checkResourceIsReachableAndReturnError:outError]) return NO;
@@ -322,6 +358,16 @@
 	self.documentIsLoading = true;
 
 	NSString* text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].stringByCleaningUpWindowsLineBreaks.stringByCleaningUpBadControlCharacters;
+	
+	// Viral: refuse files the editor can't handle, instead of freezing on them (and again on every launch, when macOS reopens them).
+	// A web page saved as .fountain, or any file with a gigantic single line, makes text layout run for minutes.
+	NSError* unreadable = [self viralUnreadableReasonFor:text];
+	if (unreadable != nil) {
+		if (outError != NULL) *outError = unreadable;
+		self.documentIsLoading = false;
+		return NO;
+	}
+	
 	self.contentBuffer = text;
 	
 	//text = [self readBeatDocumentString:text];
