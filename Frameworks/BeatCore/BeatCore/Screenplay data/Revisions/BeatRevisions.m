@@ -132,6 +132,23 @@
 /// Bakes the revised ranges from editor into corresponding lines in the parser. When needed, you can specify which revisions to include.
 + (void)bakeRevisionsIntoLines:(NSArray<Line*>*)lines text:(NSAttributedString*)string includeRevisions:(nonnull NSIndexSet*)includedRevisions
 {
+	// Viral: most documents never use revisions. Baking used to replace every line's revision storage each time
+	// the preview updated, which raced with the preview copying the same lines in the background and could crash.
+	// If the text has no revisions (and none were baked before), there's nothing to do and no line is touched.
+	static bool bakedRevisionsBefore = false;
+	__block bool anyRevision = false;
+	if (string.length > 0) {
+		[string enumerateAttribute:BeatRevisions.attributeKey inRange:NSMakeRange(0, string.length) options:0 usingBlock:^(id _Nullable value, NSRange range, BOOL * _Nonnull stop) {
+			BeatRevisionItem* revision = value;
+			if ([revision isKindOfClass:BeatRevisionItem.class] && revision.type != RevisionNone) {
+				anyRevision = true;
+				*stop = true;
+			}
+		}];
+	}
+	if (!anyRevision && !bakedRevisionsBefore) return;
+	if (anyRevision) bakedRevisionsBefore = true;
+	
 	// This is a new implementation of the old code, which enumerates line ranges instead of the whole attributed string and then iterating over lines.
 	// Slower with short documents, 90 times faster on longer ones.
 	for (Line* line in lines) {
