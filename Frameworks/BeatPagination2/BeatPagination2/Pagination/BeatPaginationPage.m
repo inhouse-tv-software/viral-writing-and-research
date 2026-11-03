@@ -338,8 +338,9 @@
 	
 	NSAttributedString* attrStr = self.attributedString;
 	[attrStr enumerateAttribute:NSLinkAttributeName inRange:NSMakeRange(0, attrStr.length) options:0 usingBlock:^(id  _Nullable value, NSRange range, BOOL * _Nonnull stop) {
+		// Viral: videos and websites link to their web address (an NSURL), not to a line
+		if (![value isKindOfClass:Line.class]) return;
 		Line* line = (Line*)value;
-		if (line == nil) return;
 		
 		if (NSLocationInRange(location, line.textRange)) {
 			result = range;

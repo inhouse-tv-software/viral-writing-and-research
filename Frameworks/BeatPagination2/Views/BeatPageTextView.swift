@@ -6,6 +6,9 @@
 //
 
 import UXKit
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - Custom text view for rendered pages.
 
@@ -16,6 +19,11 @@ import UXKit
 #if os(macOS)
 	/// The user clicked on a link, which direct to `Line` objects
 	override public func clicked(onLink link: Any, at charIndex: Int) {
+		// Viral: videos and websites open in the browser
+		if let url = link as? URL {
+			NSWorkspace.shared.open(url)
+			return
+		}
 		guard
 			let line = link as? Line,
 			let previewController = self.previewController
