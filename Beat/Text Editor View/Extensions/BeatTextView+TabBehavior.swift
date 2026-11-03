@@ -10,6 +10,7 @@ import Foundation
 import AppKit
 import UniformTypeIdentifiers
 import WebKit
+import ImageIO
 import BeatCore
 
 public extension BeatTextView {
@@ -2532,6 +2533,12 @@ fileprivate enum ViralImages {
 		return image
 	}
 	
+	/// The stored (base64) data for an image, without decoding it
+	static func encoded(_ id: String, settings: BeatDocumentSettings?) -> String? {
+		if let encoded = (settings?.get(ViralImagesKey) as? NSDictionary)?[id] as? String { return encoded }
+		return stored[id]
+	}
+	
 	static func pixelSize(_ image: NSImage) -> NSSize {
 		if let rep = image.representations.first, rep.pixelsWide > 0, rep.pixelsHigh > 0 {
 			return NSSize(width: rep.pixelsWide, height: rep.pixelsHigh)
@@ -2593,6 +2600,76 @@ fileprivate enum ViralImages {
 		stored[id] = encoded
 		cache[id] = NSImage(data: data) ?? image
 		return id
+	}
+}
+
+/// Small, ready-to-draw copies of document images, made in the background at the size they're shown.
+/// Drawing a full-size photo (up to 2000 px) into a small tile on the main thread is what made scrolling past images stutter.
+fileprivate enum ViralThumbs {
+	static let readyNotification = Notification.Name("ViralThumbReady")
+	private static let cache: NSCache<NSString, CGImage> = {
+		let cache = NSCache<NSString, CGImage>()
+		cache.totalCostLimit = 400 * 1024 * 1024
+		return cache
+	}()
+	private static var pending = Set<String>()
+	private static let queue: OperationQueue = {
+		let queue = OperationQueue()
+		queue.maxConcurrentOperationCount = 3
+		queue.qualityOfService = .userInitiated
+		return queue
+	}()
+	
+	/// Sizes are rounded up in steps, so resizing a little reuses the same picture
+	private static func bucket(_ pixels: CGFloat) -> Int { return max(128, Int(ceil(pixels / 160)) * 160) }
+	
+	/// The picture at about `size` (points). Returns nil while it's being made; `readyNotification` (object: the ID) follows.
+	static func image(_ id: String, size: NSSize, scale: CGFloat, settings: BeatDocumentSettings?) -> CGImage? {
+		let px = bucket(max(size.width, size.height) * max(scale, 1))
+		let key = "\(id)@\(px)"
+		if let image = cache.object(forKey: key as NSString) { return image }
+		if pending.contains(key) { return nil }
+		guard let encoded = ViralImages.encoded(id, settings: settings) else { return nil }
+		pending.insert(key)
+		queue.addOperation {
+			var result: CGImage? = nil
+			if let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters),
+			   let source = CGImageSourceCreateWithData(data as CFData, nil) {
+				let options: [CFString: Any] = [
+					kCGImageSourceCreateThumbnailFromImageAlways: true,
+					kCGImageSourceCreateThumbnailWithTransform: true,
+					kCGImageSourceShouldCacheImmediately: true,
+					kCGImageSourceThumbnailMaxPixelSize: px
+				]
+				result = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+			}
+			DispatchQueue.main.async {
+				pending.remove(key)
+				// Formats ImageIO can't read: fall back to the full image
+				if result == nil { result = ViralImages.image(id, settings: settings)?.cgImage(forProposedRect: nil, context: nil, hints: nil) }
+				if let result { cache.setObject(result, forKey: key as NSString, cost: result.bytesPerRow * result.height) }
+				NotificationCenter.default.post(name: readyNotification, object: id)
+			}
+		}
+		return nil
+	}
+	
+	/// Draws the picture filling `rect` in a flipped view. Draws `placeholder` until it's ready.
+	@discardableResult
+	static func draw(_ id: String, in rect: NSRect, scale: CGFloat, settings: BeatDocumentSettings?, placeholder: NSColor) -> Bool {
+		guard let image = image(id, size: rect.size, scale: scale, settings: settings), let context = NSGraphicsContext.current?.cgContext else {
+			placeholder.setFill()
+			rect.fill()
+			return false
+		}
+		context.saveGState()
+		context.interpolationQuality = .high
+		// Flipped view: flip back for CoreGraphics
+		context.translateBy(x: rect.minX, y: rect.maxY)
+		context.scaleBy(x: 1, y: -1)
+		context.draw(image, in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height))
+		context.restoreGState()
+		return true
 	}
 }
 
@@ -2711,6 +2788,9 @@ fileprivate class ViralEmbedView: NSView {
 	var blockRange = NSRange(location: 0, length: 0)
 	var sourceText = ""
 	var embedWidth: CGFloat = 400
+	/// Text version (`ViralBlockCache.version`) and position the view was last checked at
+	var loadedVersion = -1
+	var loadedLocation = -1
 	
 	init(host: BeatTextView) {
 		self.host = host
@@ -2859,6 +2939,8 @@ fileprivate final class ViralImageTile: NSView {
 	var index = 0
 	var image: NSImage?
 	var videoURL: String?
+	/// The document image shown (the picture, or a video's thumbnail)
+	var imageID: String?
 	/// Set when this tile is a website
 	var linkURL: String?
 	var webView: WKWebView?
@@ -2882,6 +2964,9 @@ fileprivate final class ViralImageTile: NSView {
 		layerContentsRedrawPolicy = .onSetNeedsDisplay
 		NotificationCenter.default.addObserver(self, selector: #selector(metricsChanged(_:)), name: ViralMetricsChangedNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(linksChanged(_:)), name: ViralLinksChangedNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(thumbReady(_:)), name: ViralThumbs.readyNotification, object: nil)
+		// Let CoreAnimation do the drawing off the main thread where it can
+		layer?.drawsAsynchronously = true
 		
 		handle.onBegin = { [weak self] event in self?.beginResize(event) }
 		handle.onDrag = { [weak self] event in self?.dragResize(event) }
@@ -2942,6 +3027,7 @@ fileprivate final class ViralImageTile: NSView {
 				}
 			}
 			image = thumbnail.flatMap { ViralImages.image($0, settings: settings) }
+			imageID = (image != nil) ? thumbnail : nil
 			loader.wantsSnapshot = (thumbnail == nil)
 			ViralMetrics.ensure(url, settings: settings)
 			let tileIndex = index
@@ -2957,6 +3043,7 @@ fileprivate final class ViralImageTile: NSView {
 			playerActive = false
 			loader.wantsSnapshot = false
 			image = ViralImages.image(entry, settings: settings)
+			imageID = (image != nil) ? entry : nil
 		}
 		layoutChrome()
 		updateChrome()
@@ -2971,6 +3058,7 @@ fileprivate final class ViralImageTile: NSView {
 		playerActive = false
 		linkURL = url
 		image = thumbnail.flatMap { ViralImages.image($0, settings: settings) }
+		imageID = nil
 		ViralLinks.ensure(url, settings: settings, needsImage: thumbnail == nil)
 		
 		if linkSize == "live" {
@@ -3012,6 +3100,16 @@ fileprivate final class ViralImageTile: NSView {
 	
 	@objc func linksChanged(_ notification: Notification) {
 		if linkURL != nil { needsDisplay = true }
+	}
+	
+	@objc func thumbReady(_ notification: Notification) {
+		if let id = notification.object as? String, id == imageID { needsDisplay = true }
+	}
+	
+	/// Starts making the picture before the tile scrolls into view
+	func prefetch() {
+		guard let imageID, bounds.width > 1 else { return }
+		_ = ViralThumbs.image(imageID, size: mediaRect.size, scale: window?.backingScaleFactor ?? 2, settings: group?.settings)
 	}
 	
 	func openLinkInBrowser() {
@@ -3090,9 +3188,9 @@ fileprivate final class ViralImageTile: NSView {
 		drawMetrics()
 		guard webView == nil else { return }
 		let media = mediaRect
-		if let image {
-			image.draw(in: media, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
-					   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+		if let imageID {
+			let placeholder = videoURL != nil ? NSColor.black : (group?.color ?? .textColor).withAlphaComponent(0.06)
+			ViralThumbs.draw(imageID, in: media, scale: window?.backingScaleFactor ?? 2, settings: group?.settings, placeholder: placeholder)
 			if videoURL != nil { ViralImageTile.drawPlayButton(in: media) }
 		} else if videoURL != nil {
 			NSColor.black.setFill()
@@ -3265,6 +3363,7 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 			if tile.frame != frames[i] { tile.frame = frames[i] }
 			tile.updateChrome()
 			tile.needsDisplay = true
+			tile.prefetch()
 		}
 		window?.invalidateCursorRects(for: self)
 	}
@@ -3516,6 +3615,7 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 		super.init(host: host)
 		kind = .carousel
 		NotificationCenter.default.addObserver(self, selector: #selector(metricsChanged(_:)), name: ViralMetricsChangedNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(thumbReady(_:)), name: ViralThumbs.readyNotification, object: nil)
 		clip.wantsLayer = true
 		clip.layer?.masksToBounds = true
 		addSubview(clip)
@@ -3702,9 +3802,8 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 				if videos[i] != nil { NSGraphicsContext.restoreGraphicsState(); continue }
 			}
 			let imageID = isVideo ? ViralMedia.thumbnail(entry) : entry
-			if let imageID, let image = ViralImages.image(imageID, settings: settings) {
-				image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
-						   hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+			if let imageID, ViralImages.encoded(imageID, settings: settings) != nil {
+				ViralThumbs.draw(imageID, in: rect, scale: window?.backingScaleFactor ?? 2, settings: settings, placeholder: isVideo ? .black : color.withAlphaComponent(0.06))
 				if isVideo { ViralImageTile.drawPlayButton(in: rect) }
 			} else if isVideo {
 				NSColor.black.setFill()
@@ -3744,6 +3843,11 @@ fileprivate final class ViralCarouselView: ViralEmbedView {
 	}
 	
 	@objc func metricsChanged(_ notification: Notification) { needsDisplay = true }
+	
+	@objc func thumbReady(_ notification: Notification) {
+		guard let id = notification.object as? String, item.ids.contains(where: { $0 == id || $0.hasSuffix("^" + id) }) else { return }
+		needsDisplay = true
+	}
 	
 	override func suspendPlayers() {
 		guard !videos.isEmpty else { return }
@@ -4119,9 +4223,14 @@ public extension BeatTextView {
 				widthChanged = true
 			}
 			
-			let text = ns.substring(with: block.range)
-			if text != view.sourceText || widthChanged {
-				view.load(text: text, lines: block.lines)
+			// Only compare the text when the document text changed since this view was loaded (this runs on every layout pass)
+			if view.loadedVersion != blockCache.version || view.blockRange.location != view.loadedLocation || widthChanged {
+				let text = ns.substring(with: block.range)
+				if text != view.sourceText || widthChanged {
+					view.load(text: text, lines: block.lines)
+				}
+				view.loadedVersion = blockCache.version
+				view.loadedLocation = view.blockRange.location
 			}
 			
 			let glyph = lm.glyphIndexForCharacter(at: block.range.location)

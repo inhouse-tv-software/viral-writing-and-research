@@ -70,6 +70,10 @@
 	
 	_paper.frame = CGRectMake(x, -50, documentWidth, self.frame.size.height + 100);
 	_paper.bounds = CGRectMake(0, 0, _paper.frame.size.width, _paper.frame.size.height);
+	// Viral: a shadow without a path is worked out again from the layer's pixels on every frame. With a path it's drawn once.
+	CGPathRef shadowPath = CGPathCreateWithRect(_paper.bounds, NULL);
+	_paper.shadowPath = shadowPath;
+	CGPathRelease(shadowPath);
 	
 	// CALayer doesn't read the effective color, we need to do it manually
 	NSColor* marginColor = _editor.isDark ? ThemeManager.sharedManager.marginColor.darkColor : ThemeManager.sharedManager.marginColor.lightColor;
