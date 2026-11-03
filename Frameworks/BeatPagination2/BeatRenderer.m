@@ -481,6 +481,13 @@
         // Too wide together: shrink them to fit the line
         CGFloat available = width - gap * (CGFloat)(row.count - 1);
         CGFloat shrink = (total > available && total > 0) ? available / total : 1.0;
+        // Small links always fill the line, shared evenly
+        if ([size isEqualToString:@"pill"]) {
+            CGFloat shared = floor(available / (CGFloat)MAX(row.count, 1));
+            [widths removeAllObjects];
+            for (NSInteger i = 0; i < row.count; i++) [widths addObject:@(shared)];
+            shrink = 1.0;
+        }
         NSMutableArray* items = NSMutableArray.new;
         for (NSInteger i = 0; i < row.count; i++) {
             Line* l = row[i];

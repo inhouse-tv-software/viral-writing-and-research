@@ -2147,7 +2147,7 @@ fileprivate enum ViralLinks {
 	}
 	
 	/// Draws a website in a flipped view
-	static func draw(_ url: String, size: String, in bounds: NSRect, thumbnail: NSImage?, settings: BeatDocumentSettings?, textColor: NSColor) {
+	static func draw(_ url: String, size: String, in bounds: NSRect, thumbnail: NSImage?, settings: BeatDocumentSettings?, textColor: NSColor, showArrow: Bool = true) {
 		let info = self.info(url, settings: settings)
 		let domain = self.domain(url)
 		let secondary = textColor.withAlphaComponent(0.55)
@@ -2162,8 +2162,11 @@ fileprivate enum ViralLinks {
 			shape.stroke()
 			let d: CGFloat = 14
 			drawIcon(info.icon, domain: domain, in: NSRect(x: rect.minX + 7, y: rect.midY - d / 2, width: d, height: d))
-			let arrow = NSAttributedString(string: "↗", attributes: [.font: NSFont.systemFont(ofSize: 9.5, weight: .semibold), .foregroundColor: secondary])
-			arrow.draw(at: NSPoint(x: rect.maxX - 11 - arrow.size().width / 2, y: rect.midY - arrow.size().height / 2))
+			// The options button takes the arrow's place while the pointer is over the pill
+			if showArrow {
+				let arrow = NSAttributedString(string: "↗", attributes: [.font: NSFont.systemFont(ofSize: 9.5, weight: .semibold), .foregroundColor: secondary])
+				arrow.draw(at: NSPoint(x: rect.maxX - 11 - arrow.size().width / 2, y: rect.midY - arrow.size().height / 2))
+			}
 			let text = NSMutableAttributedString(string: info.title == domain ? domain : info.title, attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: textColor])
 			if info.title != domain { text.append(NSAttributedString(string: "  " + domain, attributes: [.font: NSFont.systemFont(ofSize: 9.5), .foregroundColor: secondary])) }
 			let style = NSMutableParagraphStyle()
@@ -2929,6 +2932,20 @@ fileprivate func viralItemPercent(_ w: CGFloat, width: CGFloat) -> Int {
 	return Int(((w + gap) / max(width + gap, 1) * 100).rounded())
 }
 
+/// Splits `items` into rows of at most `perRow`, as even as possible (5 → 3 + 2, 6 → 3 + 3, 7 → 4 + 3)
+fileprivate func viralBalancedRows(_ items: [Int], perRow: Int) -> [[Int]] {
+	guard !items.isEmpty else { return [] }
+	let rowCount = (items.count + perRow - 1) / perRow
+	var rows: [[Int]] = []
+	var start = 0
+	for r in 0..<rowCount {
+		let size = items.count / rowCount + (r < items.count % rowCount ? 1 : 0)
+		rows.append(Array(items[start..<start + size]))
+		start += size
+	}
+	return rows
+}
+
 fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings: BeatDocumentSettings?, override: [Int: CGFloat] = [:]) -> (frames: [NSRect], height: CGFloat) {
 	let gap = viralGap(width)
 	var frames = Array(repeating: NSRect.zero, count: items.count)
@@ -2945,7 +2962,23 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 		default: return 1
 		}
 	}
-	for (i, item) in items.enumerated() {
+	/// Rows of small links: they always fill the line, up to four side by side
+	var pillRows = Set<Int>()
+	var i = 0
+	while i < items.count {
+		let item = items[i]
+		if family(item) == 1 {
+			if !current.isEmpty { rows.append(current); current = []; rowPercent = 0 }
+			var end = i
+			while end < items.count && family(items[end]) == 1 { end += 1 }
+			for row in viralBalancedRows(Array(i..<end), perRow: 4) {
+				pillRows.insert(rows.count)
+				rows.append(row)
+			}
+			i = end
+			continue
+		}
+		defer { i += 1 }
 		let percent = override[i].map { viralItemPercent($0, width: width) } ?? item.width
 		let sameFamily = current.last.map { family(items[$0]) == family(item) && family(item) != 2 } ?? false
 		// Percentages add up to the row: 25 + 25 + 25 + 25 fits, the gaps are already part of each width
@@ -2964,8 +2997,9 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 	for (r, row) in rows.enumerated() {
 		var x: CGFloat = 0
 		var rowHeight: CGFloat = 0
+		let shared = floor((width - gap * CGFloat(row.count - 1)) / CGFloat(max(row.count, 1)))
 		for i in row {
-			let w = floor(min(width, override[i] ?? viralItemWidth(items[i].width, width: width)))
+			let w = pillRows.contains(r) ? shared : floor(min(width, override[i] ?? viralItemWidth(items[i].width, width: width)))
 			let h: CGFloat
 			if items[i].kind == .link {
 				h = ViralLinks.height(items[i].linkSize, width: w)
@@ -3160,6 +3194,8 @@ fileprivate final class ViralImageTile: NSView {
 	let menuButton = NSButton(frame: .zero)
 	var hovering = false
 	var resizing = false
+	/// 0 video or image, 1 card or live page, 2 small link
+	var menuButtonStyle = 0
 	var startX: CGFloat = 0
 	var startWidth: CGFloat = 0
 	
@@ -3379,22 +3415,37 @@ fileprivate final class ViralImageTile: NSView {
 		webView?.frame = mediaRect.insetBy(dx: linkURL != nil ? 1 : 0, dy: 0)
 		if let webView, linkURL == nil { ViralWeb.fitZoom(webView, url: videoURL) }
 		handle.frame = NSRect(x: bounds.maxX - EMetrics.handle - 2, y: bounds.maxY - EMetrics.handle - 2, width: EMetrics.handle, height: EMetrics.handle)
-		if linkURL != nil && linkSize == "pill" {
-			// Small pills: the menu button sits over the arrow
-			menuButton.frame = NSRect(x: bounds.maxX - 24, y: bounds.midY - 10, width: 20, height: 20)
+		let isPill = linkURL != nil && linkSize == "pill"
+		if isPill {
+			// Small links: a plain "•••" where the arrow is, inside the pill, no circle and no resize corner
+			menuButton.frame = NSRect(x: bounds.maxX - 22, y: bounds.midY - 8, width: 16, height: 16)
 		} else {
 			menuButton.frame = NSRect(x: bounds.maxX - 30, y: 6, width: 24, height: 24)
 		}
+		let style = isPill ? 2 : (linkURL != nil ? 1 : 0)
+		if menuButtonStyle != style {
+			menuButtonStyle = style
+			let name = isPill ? "ellipsis" : "ellipsis.circle.fill"
+			let size: CGFloat = isPill ? 11 : 18
+			if let image = NSImage(systemSymbolName: name, accessibilityDescription: "Options") {
+				menuButton.image = image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: isPill ? .bold : .regular)) ?? image
+			}
+			// White over videos, the text color over websites (white on a light card disappears)
+			menuButton.contentTintColor = linkURL != nil ? (group?.color ?? .textColor).withAlphaComponent(0.6) : .white
+		}
 		var radius = (item?.rounded ?? false) ? EmbedLine.cornerRadius(bounds) : 0
-		if linkURL != nil { radius = linkSize == "pill" ? bounds.height / 2 : 10 }
+		if linkURL != nil { radius = linkSize == "pill" ? bounds.height / 2 : 8 }
 		layer?.cornerRadius = radius
 		layer?.masksToBounds = radius > 0
 	}
 	
 	func updateChrome() {
 		let selected = isSelected || resizing
-		handle.isHidden = !(selected || hovering)
+		let wasHidden = menuButton.isHidden
+		// Small links don't resize, so they don't get the corner handle
+		handle.isHidden = !(selected || hovering) || (linkURL != nil && linkSize == "pill")
 		menuButton.isHidden = !((videoURL != nil || linkURL != nil) && (selected || hovering))
+		if linkURL != nil && wasHidden != menuButton.isHidden { needsDisplay = true }
 		layer?.borderWidth = selected ? 2 : (hovering ? 1 : 0)
 		layer?.borderColor = (selected ? NSColor.controlAccentColor : (group?.color ?? .textColor).withAlphaComponent(0.3)).cgColor
 		layoutChrome()
@@ -3402,7 +3453,8 @@ fileprivate final class ViralImageTile: NSView {
 	
 	override func draw(_ dirtyRect: NSRect) {
 		if let linkURL {
-			ViralLinks.draw(linkURL, size: linkSize, in: bounds, thumbnail: image, settings: group?.settings, textColor: group?.color ?? .textColor)
+			ViralLinks.draw(linkURL, size: linkSize, in: bounds, thumbnail: image, settings: group?.settings, textColor: group?.color ?? .textColor,
+						   showArrow: menuButton.isHidden)
 			return
 		}
 		// The bar stays while the video plays, so the numbers never go away

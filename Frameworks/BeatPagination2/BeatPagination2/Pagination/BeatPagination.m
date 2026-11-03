@@ -381,6 +381,8 @@
 		NSMutableArray<Line*>* row = nil;
 		NSInteger rowWidth = 0;
 		Line* previous = nil;
+		NSMutableArray<NSNumber*>* pillSizes = nil;
+		NSInteger pillLeft = 0;
 		NSArray<Line*>* allLines = self.lines;
 		for (NSInteger li = 0; li < allLines.count; li++) {
 			Line* l = allLines[li];
@@ -389,7 +391,32 @@
 			// Pages before the start index are reused as they are, so only reset the fit-to-page scale from here on
 			if (li >= index) l.embedScale = 0.0;
 			
-			if (l.type == action && l.isEmbedLinkLine && ![l.embedLinkSize isEqualToString:@"live"]) {
+			if (l.type == action && l.isEmbedLinkLine && [l.embedLinkSize isEqualToString:@"pill"]) {
+				// Small links fill the line, up to four side by side, in rows as even as possible (5 → 3 + 2)
+				bool continuesRun = (previous != nil && previous.type == action && previous.isEmbedLinkLine && [previous.embedLinkSize isEqualToString:@"pill"] && !l.beginsNewParagraph && pillSizes != nil);
+				if (!continuesRun) {
+					NSInteger n = 0;
+					for (NSInteger k = li; k < allLines.count; k++) {
+						Line* m = allLines[k];
+						if (m.type == action && m.isEmbedLinkLine && [m.embedLinkSize isEqualToString:@"pill"] && (k == li || !m.beginsNewParagraph)) n++;
+						else break;
+					}
+					NSInteger rowCount = (n + 3) / 4;
+					pillSizes = NSMutableArray.new;
+					for (NSInteger r = 0; r < rowCount; r++) [pillSizes addObject:@(n / rowCount + (r < n % rowCount ? 1 : 0))];
+					pillLeft = 0;
+				}
+				if (pillLeft <= 0 && pillSizes.count > 0) {
+					pillLeft = pillSizes.firstObject.integerValue;
+					[pillSizes removeObjectAtIndex:0];
+					row = [NSMutableArray arrayWithObject:l];
+					l.embedRow = row;
+				} else {
+					[row addObject:l];
+					l.embedHidden = true;
+				}
+				pillLeft--;
+			} else if (l.type == action && l.isEmbedLinkLine && ![l.embedLinkSize isEqualToString:@"live"]) {
 				// Small links and cards sit side by side (only with others of the same size)
 				NSInteger w = l.embedWidthPercent;
 				bool continues = (row != nil && previous != nil && previous.isEmbedLinkLine && [previous.embedLinkSize isEqualToString:l.embedLinkSize] && !l.beginsNewParagraph);
