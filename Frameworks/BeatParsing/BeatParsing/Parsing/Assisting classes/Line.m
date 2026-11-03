@@ -952,6 +952,14 @@ static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
 - (bool)isEmbedLinkLine { return BeatEmbedInner(self.string, @"![link](viral:") != nil; }
 - (bool)isEmbedLine { return self.isEmbedImageLine || self.isEmbedCarouselLine || self.isEmbedLinkLine; }
 
+- (bool)isBrandHeading
+{
+    if (self.type != heading) return false;
+    NSString* t = [self.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if ([t hasPrefix:@"."]) t = [t substringFromIndex:1];
+    return [t.lowercaseString hasPrefix:@"brand"];
+}
+
 - (NSString*)embedLinkSize
 {
     NSString* inner = self.embedInner;

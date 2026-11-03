@@ -237,6 +237,19 @@
         [attributedString addAttribute:NSStrikethroughStyleAttributeName value:@1 range:range];
     }];
         
+    // Viral: BRAND headings are printed bigger (BeatPaginationBlock measures them the same way)
+    if (line.isBrandHeading) {
+        NSMutableParagraphStyle* brandStyle = [attrs[NSParagraphStyleAttributeName] mutableCopy];
+        if (brandStyle != nil) {
+            CGFloat brandLineHeight = round(self.styles.page.lineHeight * 1.75);
+            brandStyle.minimumLineHeight = brandLineHeight;
+            brandStyle.maximumLineHeight = brandLineHeight;
+            [attributedString addAttribute:NSParagraphStyleAttributeName value:brandStyle range:NSMakeRange(0, attributedString.length)];
+            attrs = [attrs mutableCopy];
+            ((NSMutableDictionary*)attrs)[NSParagraphStyleAttributeName] = brandStyle;
+        }
+    }
+    
     // Remove top margin for first elements on a page (if this behavior isn't overridden)
     if (firstElementOnPage && !style.forcedMargin) {
         NSMutableParagraphStyle* pStyle = attrs[NSParagraphStyleAttributeName];
@@ -283,6 +296,16 @@
         }
     }];
         
+    // Viral: BRAND headings are printed bigger (after inline formatting, which can set fonts too)
+    if (line.isBrandHeading) {
+        [attributedString.copy enumerateAttribute:NSFontAttributeName inRange:NSMakeRange(0, attributedString.length) options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
+            BXFont* font = value;
+            if (font == nil) return;
+            BXFont* bigger = [BXFont fontWithName:font.fontName size:round(font.pointSize * 1.5)];
+            if (bigger != nil) [attributedString addAttribute:NSFontAttributeName value:bigger range:range];
+        }];
+    }
+    
     // Add hyperlink for the represented line
     if (!line.isTitlePage && self.settings.operation != ForQuickLook) {
         NSRange lineRange = NSMakeRange(0, attributedString.length - 1);

@@ -168,6 +168,10 @@ NSString* const BeatRepresentedLineKey = @"representedLine";
     // RTL text lines also need to have a specific rule
     // if (hasRightToLeftText) type += 300;
     
+    // Viral: BRAND headings are bigger, so they need their own line height
+    bool brandHeading = line.isBrandHeading;
+    if (brandHeading) type = type + 400;
+    
     // We'll cache the paragraph styles when possible
     NSNumber* paperSizeKey = @(paperSize);
     NSNumber* typeKey = @(type);
@@ -197,6 +201,7 @@ NSString* const BeatRepresentedLineKey = @"representedLine";
     }
     // Scale if needed
     lineHeight *= self.delegate.fonts.scale;
+    if (brandHeading) lineHeight = round(lineHeight * 1.75);
     
     style.minimumLineHeight = lineHeight;
     style.maximumLineHeight = lineHeight;
@@ -685,6 +690,8 @@ NSString* const BeatRepresentedLineKey = @"representedLine";
     CGFloat scale = self.delegate.fontScale;
     if (scale <= 0.0) scale = 1.0;
     CGFloat fontSize = scale * ((style.fontSize > 0) ? style.fontSize : 12.0);
+    // Viral: BRAND headings are bigger than other headings
+    if (line.isBrandHeading) fontSize = round(fontSize * 1.5);
     
     if ((fontName != nil && fontName.length > 0)) {
         font = nil;
@@ -727,7 +734,7 @@ NSString* const BeatRepresentedLineKey = @"representedLine";
         if (range.length > 0 && line.type != section && line.type != synopse) {
             [textStorage enumerateAttribute:NSFontAttributeName inRange:range options:0 usingBlock:^(id  _Nullable value, NSRange range, BOOL * _Nonnull stop) {
                 BXFont* currentFont = value;
-                if (![currentFont.familyName isEqualToString:font.familyName]) {
+                if (![currentFont.familyName isEqualToString:font.familyName] || fabs(currentFont.pointSize - font.pointSize) > 0.1) {
                     resetFont = true;
                     *stop = true;
                     return;

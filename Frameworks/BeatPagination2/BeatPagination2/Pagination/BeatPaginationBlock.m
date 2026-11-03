@@ -170,6 +170,10 @@
 	NSMutableParagraphStyle* pStyle = NSMutableParagraphStyle.new;
     CGFloat lineHeight = (self.delegate.styles.page.lineHeight >= 0) ? self.delegate.styles.page.lineHeight : BeatPagination.lineHeight;
     
+    // Viral: BRAND headings are printed bigger (same numbers as BeatRenderer)
+    bool brandHeading = line.isBrandHeading;
+    if (brandHeading) lineHeight = round(lineHeight * 1.75);
+    
     pStyle.minimumLineHeight    = lineHeight;
 	pStyle.maximumLineHeight    = lineHeight;
     pStyle.firstLineHeadIndent  = style.firstLineIndent;
@@ -181,6 +185,10 @@
     if (style.font) {
         BXFont* customFont = [self fontFor:style];
         if (customFont != nil) font = customFont;
+    }
+    if (brandHeading) {
+        BXFont* bigger = [BXFont fontWithName:font.fontName size:round(font.pointSize * 1.5)];
+        if (bigger != nil) font = bigger;
     }
     
     NSString* stringWithoutFormatting = [line stripFormattingWithSettings:self.delegate.settings];

@@ -466,6 +466,8 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (bool)isEmbedLinkLine;
 /// `pill`, `card` or `live` (default `card`)
 - (NSString*)embedLinkSize;
+/// Viral: `BRAND` headings are drawn bigger than the other headings
+- (bool)isBrandHeading;
 /// Image, video, website or carousel line
 - (bool)isEmbedLine;
 /// Image IDs on an image or carousel line
