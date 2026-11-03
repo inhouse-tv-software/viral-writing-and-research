@@ -462,7 +462,11 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 - (bool)isEmbedVideoLine;
 /// Viral carousels: `![carousel](viral:ID1,ID2 100)`
 - (bool)isEmbedCarouselLine;
-/// Image or carousel line
+/// Viral website embeds: `![link](viral:URL^THUMBNAIL 100 card)`. Sizes: `pill`, `card` or `live`.
+- (bool)isEmbedLinkLine;
+/// `pill`, `card` or `live` (default `card`)
+- (NSString*)embedLinkSize;
+/// Image, video, website or carousel line
 - (bool)isEmbedLine;
 /// Image IDs on an image or carousel line
 - (NSArray<NSString*>*)embedImageIDs;
@@ -476,6 +480,8 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 @property (nonatomic, nullable) NSArray<Line*>* embedRow;
 /// Set by pagination: this image is drawn by an earlier line on the same row
 @property (nonatomic) bool embedHidden;
+/// Set by pagination: the row is drawn this much smaller to fit at the bottom of a page (0 = full size)
+@property (nonatomic) CGFloat embedScale;
 /// Set by pagination: this row is followed by the header separator
 @property (nonatomic) bool tableHeaderRow;
 /// Set by pagination: this is the first row of a table

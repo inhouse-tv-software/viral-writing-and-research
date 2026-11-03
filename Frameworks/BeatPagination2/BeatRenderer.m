@@ -440,23 +440,361 @@
             if (total <= self.embedMaxHeight || height < 30) break;
             height = floor(height * 0.85);
         }
+    }
+#if TARGET_OS_OSX
+    else if (first.isEmbedLinkLine) {
+        // A website: a link pill, a card, or a big preview
+        NSString* entry = first.embedImageIDs.firstObject;
+        NSString* size = first.embedLinkSize;
+        CGFloat w = floor(MIN(width, (CGFloat)first.embedWidthPercent / 100.0 * (width + gap) - gap));
+        if ([size isEqualToString:@"pill"]) w = MAX(w, MIN(width, 160.0));
+        else w = MAX(w, MIN(width, 260.0));
+        CGFloat h = [self linkHeightForSize:size width:w];
+        NSImage* image = [self linkImageFor:entry size:size width:w height:h settings:settings];
+        [rows addObject:@[ @[ image, @(w), @(h), @NO, entry ?: @"" ] ]];
     } else {
-        NSMutableArray* current = NSMutableArray.new;
+        // Images and videos: every row fills the text width with one shared height (like a photo album),
+        // whatever widths were used in the editor. Rows that would get too tall are centered instead.
+        NSInteger n = row.count;
+        NSMutableArray<NSNumber*>* aspects = NSMutableArray.new;
+        NSMutableArray<NSNumber*>* bars = NSMutableArray.new;
+        CGFloat sumInverse = 0.0, sumBars = 0.0;
         for (Line* l in row) {
             NSString* entry = l.embedImageIDs.firstObject;
-            BXImage* image = [self embedImageForEntry:entry settings:settings];
-            // Same as the editor: 4 × 25% fill a row exactly, gaps included
-            CGFloat w = floor(MIN(width, (CGFloat)l.embedWidthPercent / 100.0 * (width + gap) - gap));
-            // Very tall images are made smaller so they fit on a page
-            CGFloat aspect = [self embedAspectForEntry:entry image:image];
-            if (w * aspect > self.embedMaxHeight) w = floor(self.embedMaxHeight / aspect);
-            NSArray* item = @[ (image != nil) ? image : NSNull.null, @(w), @(floor(w * aspect)) ];
-            [current addObject:[item arrayByAddingObject:@(l.embedRounded)]];
+            bool video = l.isEmbedVideoLine || [self embedEntryIsVideo:entry];
+            CGFloat aspect = video ? [self embedVideoAspect:entry] : [self embedAspect:[self embedImageWithID:entry settings:settings]];
+            aspect = MAX(0.2, MIN(aspect, 4.0));
+            CGFloat bar = video ? self.embedVideoBarHeight : 0.0;
+            [aspects addObject:@(aspect)];
+            [bars addObject:@(bar)];
+            sumInverse += 1.0 / aspect;
+            sumBars += bar / aspect;
+        }
+        CGFloat available = width - gap * (CGFloat)(n - 1);
+        CGFloat rowHeight = (available + sumBars) / MAX(sumInverse, 0.0001);
+        rowHeight = floor(MIN(rowHeight, self.embedMaxRowHeight));
+        
+        NSMutableArray* current = NSMutableArray.new;
+        for (NSInteger i = 0; i < n; i++) {
+            Line* l = row[i];
+            NSString* entry = l.embedImageIDs.firstObject;
+            CGFloat aspect = aspects[i].floatValue;
+            CGFloat bar = bars[i].floatValue;
+            CGFloat w = floor((rowHeight - bar) / aspect);
+            NSImage* image = (bar > 0.0) ? [self videoImageFor:entry width:w height:rowHeight bar:bar settings:settings] : [self embedImageWithID:entry settings:settings];
+            [current addObject:@[ (image != nil) ? image : NSNull.null, @(w), @(rowHeight), @(l.embedRounded), entry ?: @"" ]];
         }
         if (current.count > 0) [rows addObject:current];
     }
+    
+    // Shrunk a little to fit at the bottom of a page
+    CGFloat scale = first.embedScale;
+    if (scale > 0.0 && scale < 1.0) {
+        NSMutableArray* scaledRows = NSMutableArray.new;
+        for (NSArray<NSArray*>* items in rows) {
+            NSMutableArray* scaledItems = NSMutableArray.new;
+            for (NSArray* item in items) {
+                CGFloat w = floor([item[1] floatValue] * scale);
+                CGFloat h = floor([item[2] floatValue] * scale);
+                id image = item[0];
+                NSString* entry = (item.count > 4) ? item[4] : @"";
+                // Videos are redrawn at the new size so the numbers bar keeps its height
+                if ([image isKindOfClass:NSImage.class] && [self embedEntryIsVideo:entry] && !first.isEmbedLinkLine && !first.isEmbedCarouselLine) {
+                    image = [self videoImageFor:entry width:w height:h bar:self.embedVideoBarHeight * scale settings:settings];
+                }
+                NSMutableArray* copy = item.mutableCopy;
+                copy[0] = image;
+                copy[1] = @(w);
+                copy[2] = @(h);
+                [scaledItems addObject:copy];
+            }
+            [scaledRows addObject:scaledItems];
+        }
+        return scaledRows;
+    }
+#endif
     return rows;
 }
+
+/// Tallest row of images or videos in the preview
++ (CGFloat)embedMaxRowHeight { return 280.0; }
+/// The black bar under a video in the preview, for views and likes
++ (CGFloat)embedVideoBarHeight { return 15.0; }
+/// Space after a block of images, so the next paragraph doesn't stick to it
++ (CGFloat)embedSpacingAfter { return 10.0; }
+
+#pragma mark Preview drawing helpers
+
+/// 1234 → "1.2K", 3400000 → "3.4M"
++ (NSString*)shortNumber:(NSInteger)value
+{
+    double v = (double)value;
+    NSString* suffix = @"";
+    if (v >= 1e9) { v /= 1e9; suffix = @"B"; }
+    else if (v >= 1e6) { v /= 1e6; suffix = @"M"; }
+    else if (v >= 1e3) { v /= 1e3; suffix = @"K"; }
+    else return [NSString stringWithFormat:@"%ld", (long)value];
+    NSString* text = (v < 10) ? [NSString stringWithFormat:@"%.1f", v] : [NSString stringWithFormat:@"%.0f", v];
+    if ([text hasSuffix:@".0"]) text = [text substringToIndex:text.length - 2];
+    return [text stringByAppendingString:suffix];
+}
+
+/// The address part of an entry (`URL^THUMBNAIL`)
++ (NSString*)embedURLFor:(NSString*)entry
+{
+    NSRange caret = [entry rangeOfString:@"^"];
+    return (caret.location != NSNotFound) ? [entry substringToIndex:caret.location] : entry;
+}
+
++ (NSString*)embedThumbnailIDFor:(NSString*)entry
+{
+    NSRange caret = [entry rangeOfString:@"^" options:NSBackwardsSearch];
+    if (caret.location == NSNotFound) return nil;
+    NSString* ID = [entry substringFromIndex:NSMaxRange(caret)];
+    return (ID.length > 0) ? ID : nil;
+}
+
+/// "https://www.example.com/a/b" → "example.com"
++ (NSString*)embedDomainFor:(NSString*)url
+{
+    NSString* host = [NSURL URLWithString:url].host.lowercaseString;
+    if (host == nil) return url;
+    if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+    return host;
+}
+
+#if TARGET_OS_OSX
+/// Draws `image` filling `rect` (cropped to keep its shape)
++ (void)drawImage:(NSImage*)image fillingRect:(NSRect)rect
+{
+    NSSize size = image.size;
+    if (size.width <= 0 || size.height <= 0) return;
+    CGFloat scale = MAX(rect.size.width / size.width, rect.size.height / size.height);
+    NSRect r = NSMakeRect(NSMidX(rect) - size.width * scale / 2, NSMidY(rect) - size.height * scale / 2, size.width * scale, size.height * scale);
+    [NSGraphicsContext saveGraphicsState];
+    [[NSBezierPath bezierPathWithRect:rect] addClip];
+    [image drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+    [NSGraphicsContext restoreGraphicsState];
+}
+
++ (void)drawPlayButtonIn:(NSRect)rect
+{
+    CGFloat d = MIN(28.0, MAX(12.0, MIN(rect.size.width, rect.size.height) * 0.2));
+    NSRect circle = NSMakeRect(NSMidX(rect) - d / 2, NSMidY(rect) - d / 2, d, d);
+    [[NSColor colorWithWhite:0.0 alpha:0.5] setFill];
+    [[NSBezierPath bezierPathWithOvalInRect:circle] fill];
+    NSBezierPath* triangle = NSBezierPath.new;
+    [triangle moveToPoint:NSMakePoint(NSMidX(circle) - d * 0.14, NSMidY(circle) - d * 0.22)];
+    [triangle lineToPoint:NSMakePoint(NSMidX(circle) - d * 0.14, NSMidY(circle) + d * 0.22)];
+    [triangle lineToPoint:NSMakePoint(NSMidX(circle) + d * 0.25, NSMidY(circle))];
+    [triangle closePath];
+    [NSColor.whiteColor setFill];
+    [triangle fill];
+}
+
+/// A video for the preview: its thumbnail with a play button, and a black bar with views and likes under it
++ (NSImage*)videoImageFor:(NSString*)entry width:(CGFloat)w height:(CGFloat)h bar:(CGFloat)bar settings:(BeatExportSettings*)settings
+{
+    NSString* url = [self embedURLFor:entry];
+    NSString* thumbID = [self embedThumbnailIDFor:entry];
+    NSImage* thumbnail = (thumbID != nil) ? [self embedImageWithID:thumbID settings:settings] : nil;
+    
+    NSInteger views = -1, likes = -1;
+    NSDictionary* metrics = [settings.documentSettings get:@"ViralMetrics"];
+    if ([metrics isKindOfClass:NSDictionary.class]) {
+        NSDictionary* stats = metrics[url];
+        if ([stats isKindOfClass:NSDictionary.class]) {
+            if ([stats[@"views"] isKindOfClass:NSNumber.class]) views = [stats[@"views"] integerValue];
+            if ([stats[@"likes"] isKindOfClass:NSNumber.class]) likes = [stats[@"likes"] integerValue];
+        }
+    }
+    NSString* provider = @"Video";
+    NSString* lower = url.lowercaseString;
+    if ([lower containsString:@"instagram.com"]) provider = @"Instagram";
+    else if ([lower containsString:@"youtu"]) provider = @"YouTube";
+    else if ([lower containsString:@"facebook.com"] || [lower containsString:@"fb.watch"]) provider = @"Facebook";
+    else if ([lower containsString:@"vimeo.com"]) provider = @"Vimeo";
+    
+    return [NSImage imageWithSize:NSMakeSize(w, h) flipped:false drawingHandler:^BOOL(NSRect rect) {
+        NSRect picture = NSMakeRect(0, bar, w, MAX(h - bar, 1));
+        [[NSColor colorWithWhite:0.12 alpha:1.0] setFill];
+        NSRectFill(picture);
+        if (thumbnail != nil) [BeatRenderer drawImage:thumbnail fillingRect:picture];
+        [BeatRenderer drawPlayButtonIn:picture];
+        
+        // Numbers bar
+        NSRect barRect = NSMakeRect(0, 0, w, bar);
+        [NSColor.blackColor setFill];
+        NSRectFill(barRect);
+        CGFloat base = MAX(5.0, MIN(8.0, bar * 0.52));
+        NSMutableAttributedString* text = NSMutableAttributedString.new;
+        NSDictionary* big = @{ NSFontAttributeName: [NSFont systemFontOfSize:base + 0.5 weight:NSFontWeightBold], NSForegroundColorAttributeName: NSColor.whiteColor };
+        NSDictionary* small = @{ NSFontAttributeName: [NSFont systemFontOfSize:base weight:NSFontWeightSemibold], NSForegroundColorAttributeName: [NSColor colorWithWhite:1.0 alpha:0.85] };
+        NSDictionary* dim = @{ NSFontAttributeName: [NSFont systemFontOfSize:base - 0.5 weight:NSFontWeightMedium], NSForegroundColorAttributeName: [NSColor colorWithWhite:1.0 alpha:0.55] };
+        if (views >= 0) [text appendAttributedString:[NSAttributedString.alloc initWithString:[@"▶︎ " stringByAppendingString:[BeatRenderer shortNumber:views]] attributes:big]];
+        if (likes >= 0) {
+            if (text.length > 0) [text appendAttributedString:[NSAttributedString.alloc initWithString:@"   " attributes:small]];
+            [text appendAttributedString:[NSAttributedString.alloc initWithString:[@"♥︎ " stringByAppendingString:[BeatRenderer shortNumber:likes]] attributes:small]];
+        }
+        if (text.length == 0) [text appendAttributedString:[NSAttributedString.alloc initWithString:provider attributes:dim]];
+        NSSize size = text.size;
+        if (size.width > w - 8) {
+            // Too narrow for both: views only
+            if (views >= 0) text = [NSMutableAttributedString.alloc initWithString:[@"▶︎ " stringByAppendingString:[BeatRenderer shortNumber:views]] attributes:big];
+            size = text.size;
+        }
+        [NSGraphicsContext saveGraphicsState];
+        [[NSBezierPath bezierPathWithRect:barRect] addClip];
+        [text drawAtPoint:NSMakePoint(4.0, NSMidY(barRect) - size.height / 2)];
+        [NSGraphicsContext restoreGraphicsState];
+        return true;
+    }];
+}
+
+/// Height of a website in the preview
++ (CGFloat)linkHeightForSize:(NSString*)size width:(CGFloat)w
+{
+    if ([size isEqualToString:@"pill"]) return 24.0;
+    if ([size isEqualToString:@"live"]) return floor(w * 0.5625) + 22.0;
+    return 74.0;
+}
+
+/// Stored title, description and site name for a website (fetched by the editor)
++ (NSDictionary*)linkInfoFor:(NSString*)url settings:(BeatExportSettings*)settings
+{
+    NSDictionary* links = [settings.documentSettings get:@"ViralLinks"];
+    if (![links isKindOfClass:NSDictionary.class]) return @{};
+    NSDictionary* info = links[url];
+    return [info isKindOfClass:NSDictionary.class] ? info : @{};
+}
+
++ (NSImage*)linkIconFor:(NSDictionary*)info
+{
+    NSString* encoded = info[@"icon"];
+    if (![encoded isKindOfClass:NSString.class] || encoded.length == 0) return nil;
+    NSData* data = [NSData.alloc initWithBase64EncodedString:encoded options:NSDataBase64DecodingIgnoreUnknownCharacters];
+    return (data != nil) ? [NSImage.alloc initWithData:data] : nil;
+}
+
+/// Draws a site icon, or a round badge with the site's first letter
++ (void)drawLinkIcon:(NSImage*)icon domain:(NSString*)domain inRect:(NSRect)rect
+{
+    [NSGraphicsContext saveGraphicsState];
+    NSBezierPath* round = [NSBezierPath bezierPathWithRoundedRect:rect xRadius:rect.size.width * 0.22 yRadius:rect.size.height * 0.22];
+    [round addClip];
+    if (icon != nil) {
+        [icon drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+    } else {
+        [[NSColor colorWithCalibratedRed:0.23 green:0.42 blue:0.95 alpha:1.0] setFill];
+        NSRectFill(rect);
+        NSString* letter = (domain.length > 0) ? [domain substringToIndex:1].uppercaseString : @"•";
+        NSDictionary* attrs = @{ NSFontAttributeName: [NSFont systemFontOfSize:rect.size.height * 0.6 weight:NSFontWeightBold], NSForegroundColorAttributeName: NSColor.whiteColor };
+        NSSize s = [letter sizeWithAttributes:attrs];
+        [letter drawAtPoint:NSMakePoint(NSMidX(rect) - s.width / 2, NSMidY(rect) - s.height / 2) withAttributes:attrs];
+    }
+    [NSGraphicsContext restoreGraphicsState];
+}
+
++ (void)drawText:(NSString*)text font:(NSFont*)font color:(NSColor*)color inRect:(NSRect)rect lines:(NSInteger)lines
+{
+    if (text.length == 0) return;
+    NSMutableParagraphStyle* style = NSMutableParagraphStyle.new;
+    style.lineBreakMode = (lines == 1) ? NSLineBreakByTruncatingTail : NSLineBreakByWordWrapping;
+    NSDictionary* attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color, NSParagraphStyleAttributeName: style };
+    CGFloat lineHeight = ceil(font.ascender - font.descender + font.leading);
+    NSRect box = rect;
+    box.size.height = MIN(rect.size.height, lineHeight * lines + 1);
+    box.origin.y = NSMaxY(rect) - box.size.height;
+    [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine attributes:attrs];
+}
+
+/// A website for the preview: a pill, a card or a big preview
++ (NSImage*)linkImageFor:(NSString*)entry size:(NSString*)size width:(CGFloat)w height:(CGFloat)h settings:(BeatExportSettings*)settings
+{
+    NSString* url = [self embedURLFor:entry ?: @""];
+    NSString* thumbID = [self embedThumbnailIDFor:entry ?: @""];
+    NSImage* thumbnail = (thumbID != nil) ? [self embedImageWithID:thumbID settings:settings] : nil;
+    NSDictionary* info = [self linkInfoFor:url settings:settings];
+    NSImage* icon = [self linkIconFor:info];
+    NSString* domain = [self embedDomainFor:url];
+    NSString* title = [info[@"title"] isKindOfClass:NSString.class] && [info[@"title"] length] > 0 ? info[@"title"] : domain;
+    NSString* desc = [info[@"desc"] isKindOfClass:NSString.class] ? info[@"desc"] : @"";
+    NSString* site = [info[@"site"] isKindOfClass:NSString.class] && [info[@"site"] length] > 0 ? info[@"site"] : domain;
+    NSColor* border = [NSColor colorWithWhite:0.82 alpha:1.0];
+    
+    return [NSImage imageWithSize:NSMakeSize(w, h) flipped:false drawingHandler:^BOOL(NSRect rect) {
+        NSRect frame = NSInsetRect(rect, 0.5, 0.5);
+        if ([size isEqualToString:@"pill"]) {
+            NSBezierPath* shape = [NSBezierPath bezierPathWithRoundedRect:frame xRadius:frame.size.height / 2 yRadius:frame.size.height / 2];
+            [[NSColor colorWithWhite:0.965 alpha:1.0] setFill];
+            [shape fill];
+            [border setStroke];
+            shape.lineWidth = 0.6;
+            [shape stroke];
+            CGFloat d = 14.0;
+            [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(6, (h - d) / 2, d, d)];
+            NSFont* bold = [NSFont systemFontOfSize:8.5 weight:NSFontWeightSemibold];
+            NSFont* light = [NSFont systemFontOfSize:7.5];
+            NSString* line = ([title isEqualToString:domain]) ? domain : title;
+            NSMutableAttributedString* text = [NSMutableAttributedString.alloc initWithString:line attributes:@{ NSFontAttributeName: bold, NSForegroundColorAttributeName: [NSColor colorWithWhite:0.1 alpha:1.0] }];
+            if (![line isEqualToString:domain]) [text appendAttributedString:[NSAttributedString.alloc initWithString:[@"  " stringByAppendingString:domain] attributes:@{ NSFontAttributeName: light, NSForegroundColorAttributeName: [NSColor colorWithWhite:0.45 alpha:1.0] }]];
+            NSMutableParagraphStyle* style = NSMutableParagraphStyle.new;
+            style.lineBreakMode = NSLineBreakByTruncatingTail;
+            [text addAttribute:NSParagraphStyleAttributeName value:style range:NSMakeRange(0, text.length)];
+            CGFloat x = 6 + d + 6;
+            CGFloat textHeight = text.size.height;
+            [text drawWithRect:NSMakeRect(x, (h - textHeight) / 2, MAX(10, w - x - 10), textHeight) options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
+            return true;
+        }
+        
+        CGFloat radius = 7.0;
+        NSBezierPath* shape = [NSBezierPath bezierPathWithRoundedRect:frame xRadius:radius yRadius:radius];
+        [NSColor.whiteColor setFill];
+        [shape fill];
+        
+        if ([size isEqualToString:@"live"]) {
+            // Header with the site, then a big picture of the page
+            CGFloat header = 22.0;
+            NSRect picture = NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width, frame.size.height - header);
+            [NSGraphicsContext saveGraphicsState];
+            [shape addClip];
+            [[NSColor colorWithWhite:0.95 alpha:1.0] setFill];
+            NSRectFill(picture);
+            if (thumbnail != nil) [BeatRenderer drawImage:thumbnail fillingRect:picture];
+            [[NSColor colorWithWhite:0.975 alpha:1.0] setFill];
+            NSRectFill(NSMakeRect(frame.origin.x, NSMaxY(picture), frame.size.width, header));
+            [border setFill];
+            NSRectFill(NSMakeRect(frame.origin.x, NSMaxY(picture), frame.size.width, 0.5));
+            [NSGraphicsContext restoreGraphicsState];
+            CGFloat d = 12.0;
+            [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(8, NSMaxY(picture) + (header - d) / 2, d, d)];
+            [BeatRenderer drawText:[NSString stringWithFormat:@"%@  ·  %@", title, domain] font:[NSFont systemFontOfSize:8 weight:NSFontWeightSemibold] color:[NSColor colorWithWhite:0.15 alpha:1.0]
+                                inRect:NSMakeRect(8 + d + 6, NSMaxY(picture) + 4, w - 8 - d - 14, header - 7) lines:1];
+        } else {
+            // Card: picture on the left, title, description and site on the right
+            CGFloat thumbWidth = (thumbnail != nil) ? floor(MIN(h * 1.45, w * 0.36)) : 0.0;
+            if (thumbnail != nil) {
+                NSRect picture = NSMakeRect(frame.origin.x, frame.origin.y, thumbWidth, frame.size.height);
+                [NSGraphicsContext saveGraphicsState];
+                [shape addClip];
+                [BeatRenderer drawImage:thumbnail fillingRect:picture];
+                [NSGraphicsContext restoreGraphicsState];
+            }
+            CGFloat x = thumbWidth + 10.0;
+            CGFloat textWidth = MAX(20.0, w - x - 10.0);
+            CGFloat d = 10.0;
+            [BeatRenderer drawText:title font:[NSFont systemFontOfSize:9.5 weight:NSFontWeightSemibold] color:[NSColor colorWithWhite:0.08 alpha:1.0] inRect:NSMakeRect(x, h - 9 - 25, textWidth, 25) lines:2];
+            [BeatRenderer drawText:desc font:[NSFont systemFontOfSize:7.5] color:[NSColor colorWithWhite:0.38 alpha:1.0] inRect:NSMakeRect(x, h - 36 - 19, textWidth, 19) lines:2];
+            [BeatRenderer drawLinkIcon:icon domain:domain inRect:NSMakeRect(x, 8, d, d)];
+            [BeatRenderer drawText:site font:[NSFont systemFontOfSize:7 weight:NSFontWeightMedium] color:[NSColor colorWithWhite:0.45 alpha:1.0] inRect:NSMakeRect(x + d + 4, 7, textWidth - d - 4, 11) lines:1];
+        }
+        [border setStroke];
+        shape.lineWidth = 0.6;
+        [shape stroke];
+        return true;
+    }];
+}
+#endif
 
 /// Video entries are URLs, optionally followed by `^` and a thumbnail image ID
 + (bool)embedEntryIsVideo:(NSString*)entry { return [entry containsString:@"://"]; }
@@ -568,11 +906,13 @@
 + (CGFloat)embedHeightFor:(NSArray<Line*>*)row width:(CGFloat)width settings:(BeatExportSettings*)settings
 {
     CGFloat height = 0.0;
-    for (NSArray<NSArray*>* items in [self embedLayoutFor:row width:width settings:settings]) {
+    NSArray* rows = [self embedLayoutFor:row width:width settings:settings];
+    for (NSArray<NSArray*>* items in rows) {
         CGFloat rowHeight = 0.0;
         for (NSArray* item in items) rowHeight = MAX(rowHeight, [item[2] floatValue]);
         height += rowHeight + self.embedSpacing;
     }
+    if (rows.count > 0) height += self.embedSpacingAfter;
     return ceil(height);
 }
 
@@ -589,12 +929,19 @@
         CGFloat rowHeight = 0.0;
         for (NSArray* item in items) rowHeight = MAX(rowHeight, [item[2] floatValue]);
         
+        // Rows narrower than the text are centered
+        CGFloat rowWidth = 0.0;
+        for (NSArray* item in items) rowWidth += [item[1] floatValue];
+        rowWidth += gap * (CGFloat)(items.count - 1);
+        CGFloat offset = MAX(0.0, floor((width - rowWidth) / 2.0));
+        
         NSMutableParagraphStyle* pStyle = NSMutableParagraphStyle.new;
-        pStyle.firstLineHeadIndent = indent;
-        pStyle.headIndent = indent;
+        pStyle.firstLineHeadIndent = indent + offset;
+        pStyle.headIndent = indent + offset;
         pStyle.minimumLineHeight = rowHeight;
         pStyle.maximumLineHeight = rowHeight;
         pStyle.paragraphSpacingBefore = (r == 0 && firstOnPage) ? 0.0 : self.embedSpacing;
+        pStyle.paragraphSpacing = (r == rows.count - 1) ? self.embedSpacingAfter : 0.0;
         pStyle.lineBreakMode = NSLineBreakByClipping;
         
         NSMutableAttributedString* rowString = NSMutableAttributedString.new;
@@ -605,14 +952,16 @@
             NSImage* image = [item[0] isKindOfClass:NSImage.class] ? item[0] : [self embedPlaceholder];
             
             bool rounded = (item.count > 3) ? [item[3] boolValue] : false;
+            NSString* entry = (item.count > 4) ? item[4] : @"";
+            bool isLink = row.firstObject.isEmbedLinkLine;
             
             // Attachments sit on the baseline, so shorter images get empty space below them to align the row at the top.
-            // Rounded corners are drawn into the image too.
-            if (h < rowHeight || rounded) {
+            // Corners are always softened a little in the preview (more when the image is set to rounded). Websites draw their own shape.
+            if (h < rowHeight || !isLink) {
                 NSImage* original = image;
                 CGFloat padded = MAX(rowHeight, h);
                 CGFloat imageHeight = h;
-                CGFloat radius = rounded ? MIN(12.0, MIN(w, h) * 0.1) : 0.0;
+                CGFloat radius = isLink ? 0.0 : (rounded ? MIN(12.0, MIN(w, h) * 0.1) : MIN(4.0, MIN(w, h) * 0.05));
                 image = [NSImage imageWithSize:NSMakeSize(w, padded) flipped:false drawingHandler:^BOOL(NSRect rect) {
                     NSRect imageRect = NSMakeRect(0, padded - imageHeight, w, imageHeight);
                     [NSGraphicsContext saveGraphicsState];
@@ -627,7 +976,14 @@
             NSTextAttachment* attachment = NSTextAttachment.new;
             attachment.image = image;
             attachment.bounds = CGRectMake(0, 0, w, h);
-            [rowString appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
+            NSMutableAttributedString* piece = [NSAttributedString attributedStringWithAttachment:attachment].mutableCopy;
+            // Videos and websites stay clickable in exported PDFs
+            NSString* address = [self embedURLFor:entry];
+            if ([address containsString:@"://"]) {
+                NSURL* link = [NSURL URLWithString:address];
+                if (link != nil) [piece addAttribute:NSLinkAttributeName value:link range:NSMakeRange(0, piece.length)];
+            }
+            [rowString appendAttributedString:piece];
             
             if (i < items.count - 1) {
                 [rowString appendAttributedString:[NSAttributedString.alloc initWithString:@" " attributes:@{ NSKernAttributeName: @(gap) }]];

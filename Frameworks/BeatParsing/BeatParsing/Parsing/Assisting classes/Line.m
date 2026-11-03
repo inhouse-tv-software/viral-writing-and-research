@@ -941,6 +941,7 @@ static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
     NSString* inner = BeatEmbedInner(self.string, @"![image](viral:");
     if (inner == nil) inner = BeatEmbedInner(self.string, @"![video](viral:");
     if (inner == nil) inner = BeatEmbedInner(self.string, @"![carousel](viral:");
+    if (inner == nil) inner = BeatEmbedInner(self.string, @"![link](viral:");
     return inner;
 }
 
@@ -948,7 +949,17 @@ static NSString* BeatEmbedInner(NSString* string, NSString* prefix)
 - (bool)isEmbedImageLine { return BeatEmbedInner(self.string, @"![image](viral:") != nil || self.isEmbedVideoLine; }
 - (bool)isEmbedVideoLine { return BeatEmbedInner(self.string, @"![video](viral:") != nil; }
 - (bool)isEmbedCarouselLine { return BeatEmbedInner(self.string, @"![carousel](viral:") != nil; }
-- (bool)isEmbedLine { return self.isEmbedImageLine || self.isEmbedCarouselLine; }
+- (bool)isEmbedLinkLine { return BeatEmbedInner(self.string, @"![link](viral:") != nil; }
+- (bool)isEmbedLine { return self.isEmbedImageLine || self.isEmbedCarouselLine || self.isEmbedLinkLine; }
+
+- (NSString*)embedLinkSize
+{
+    NSString* inner = self.embedInner;
+    for (NSString* part in [inner componentsSeparatedByString:@" "]) {
+        if ([part isEqualToString:@"pill"] || [part isEqualToString:@"card"] || [part isEqualToString:@"live"]) return part;
+    }
+    return @"card";
+}
 
 - (NSArray<NSString*>*)embedImageIDs
 {

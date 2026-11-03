@@ -518,7 +518,7 @@ static NSInteger BeatEmbedKindForString(NSString* string)
     if (BeatIsTableRowString(string)) return 1;
     NSString* t = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     if (![t hasSuffix:@")"]) return 0;
-    if ([t hasPrefix:@"![image](viral:"] || [t hasPrefix:@"![video](viral:"]) return 2;
+    if ([t hasPrefix:@"![image](viral:"] || [t hasPrefix:@"![video](viral:"] || [t hasPrefix:@"![link](viral:"]) return 2;
     if ([t hasPrefix:@"![carousel](viral:"]) return 3;
     return 0;
 }

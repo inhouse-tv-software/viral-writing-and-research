@@ -1336,9 +1336,13 @@ public extension BeatTextView {
 		carouselItem.tag = BeatTableMenuItemTag
 		carouselItem.target = self
 		menu.insertItem(carouselItem, at: 2)
+		let websiteItem = NSMenuItem(title: "Insert Website…", action: #selector(viralInsertWebsite(_:)), keyEquivalent: "")
+		websiteItem.tag = BeatTableMenuItemTag
+		websiteItem.target = self
+		menu.insertItem(websiteItem, at: 3)
 		let separator = NSMenuItem.separator()
 		separator.tag = BeatTableMenuItemTag
-		menu.insertItem(separator, at: 3)
+		menu.insertItem(separator, at: 4)
 	}
 	
 	@objc func tableInsert(_ sender: Any?) {
@@ -1376,7 +1380,7 @@ fileprivate enum EMetrics {
 }
 
 fileprivate enum EmbedKind {
-	case image, video, carousel
+	case image, video, carousel, link
 	var isGroupItem: Bool { return self != .carousel }
 }
 
@@ -1387,8 +1391,11 @@ fileprivate struct EmbedLine {
 	/// Carousel height in percent of the text width
 	var height: Int = 40
 	var rounded: Bool = false
+	/// Websites: `pill` (just the link), `card` (picture, title, description) or `live` (the page itself)
+	var linkSize: String = "card"
 	
 	static let imagePrefix = "![image](viral:"
+	static let linkPrefix = "![link](viral:"
 	static let videoPrefix = "![video](viral:"
 	static let carouselPrefix = "![carousel](viral:"
 	
@@ -1400,6 +1407,7 @@ fileprivate struct EmbedLine {
 		if t.hasPrefix(imagePrefix) { kind = .image; prefix = imagePrefix }
 		else if t.hasPrefix(videoPrefix) { kind = .video; prefix = videoPrefix }
 		else if t.hasPrefix(carouselPrefix) { kind = .carousel; prefix = carouselPrefix }
+		else if t.hasPrefix(linkPrefix) { kind = .link; prefix = linkPrefix }
 		else { return nil }
 		guard t.count > prefix.count else { return nil }
 		
@@ -1411,12 +1419,14 @@ fileprivate struct EmbedLine {
 		var width = 100
 		var height = 40
 		var rounded = false
+		var linkSize = "card"
 		for part in parts.dropFirst() {
 			if part == "r" { rounded = true }
+			else if ViralLinks.sizes.contains(part) { linkSize = part }
 			else if part.hasPrefix("h"), let h = Int(part.dropFirst()), h > 0 { height = min(max(h, 10), 150) }
 			else if let w = Int(part), w > 0 { width = w }
 		}
-		return EmbedLine(kind: kind, ids: ids, width: min(max(width, 5), 100), height: height, rounded: rounded)
+		return EmbedLine(kind: kind, ids: ids, width: min(max(width, 5), 100), height: height, rounded: rounded, linkSize: linkSize)
 	}
 	
 	var text: String {
@@ -1425,7 +1435,9 @@ fileprivate struct EmbedLine {
 		case .image: prefix = EmbedLine.imagePrefix
 		case .video: prefix = EmbedLine.videoPrefix
 		case .carousel: prefix = EmbedLine.carouselPrefix
+		case .link: prefix = EmbedLine.linkPrefix
 		}
+		if kind == .link { return prefix + ids.joined(separator: ",") + " \(width) \(linkSize))" }
 		let size = (kind == .carousel) ? "h\(height)" : "\(width)"
 		return prefix + ids.joined(separator: ",") + " " + size + (rounded ? " r" : "") + ")"
 	}
@@ -1542,8 +1554,11 @@ fileprivate final class ViralWebView: WKWebView {
 		}
 	}
 	
+	/// Websites: scroll the page itself once you've clicked into it
+	var scrollsInside: (() -> Bool)?
+	
 	override func scrollWheel(with event: NSEvent) {
-		if isPlaying { super.scrollWheel(with: event) }
+		if isPlaying || scrollsInside?() == true { super.scrollWheel(with: event) }
 		else { nextResponder?.scrollWheel(with: event) }
 	}
 	
@@ -1683,6 +1698,8 @@ fileprivate final class ViralVideoLoader: NSObject, WKNavigationDelegate, WKUIDe
 	/// 1 = loading the Instagram embed page, 2 = showing the plain player
 	var instagramStage = 0
 	var autoplay = false
+	/// Live websites: links open inside the embed instead of the browser
+	var allowsNavigation = false
 	
 	func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
 		if instagramStage == 1 {
@@ -1726,7 +1743,7 @@ fileprivate final class ViralVideoLoader: NSObject, WKNavigationDelegate, WKUIDe
 			decisionHandler(.cancel)
 			return
 		}
-		if navigationAction.navigationType == .linkActivated, navigationAction.targetFrame?.isMainFrame ?? true,
+		if !allowsNavigation, navigationAction.navigationType == .linkActivated, navigationAction.targetFrame?.isMainFrame ?? true,
 		   let url = navigationAction.request.url {
 			NSWorkspace.shared.open(url)
 			decisionHandler(.cancel)
@@ -1780,6 +1797,349 @@ fileprivate let ViralMetricsChangedNotification = Notification.Name("ViralMetric
 /// Views and likes for a video, read once and kept in the document.
 /// Instagram: with your Instagram sign-in (right-click a video ▸ Sign In to Instagram) Viral reads the exact numbers the Instagram app shows,
 /// views included. Without it, only the public like count is available. YouTube: views and likes. Saves are never public.
+fileprivate let ViralLinksKey = "ViralLinks"
+fileprivate let ViralLinksChangedNotification = Notification.Name("ViralLinksChanged")
+/// userInfo: "url" (String), "image" (NSImage)
+fileprivate let ViralLinkImageNotification = Notification.Name("ViralLinkImage")
+
+/// Websites embedded in a document: the page's title, description, site name and icon are read once and kept in the document.
+/// The page's picture is stored as a document image, its ID after `^` in the line (like a video thumbnail).
+fileprivate enum ViralLinks {
+	struct Info {
+		var title: String
+		var desc: String
+		var site: String
+		var icon: NSImage?
+	}
+	
+	static let sizes = ["pill", "card", "live"]
+	static let liveHeader: CGFloat = 34
+	
+	static func defaultWidth(_ size: String) -> Int { return size == "pill" ? 50 : 100 }
+	
+	static func height(_ size: String, width: CGFloat) -> CGFloat {
+		switch size {
+		case "pill": return 40
+		case "live": return floor(width * 0.5625) + liveHeader
+		default: return 112
+		}
+	}
+	
+	/// A pasted link that isn't a video
+	static func isWebsite(_ string: String) -> Bool {
+		let t = string.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !t.isEmpty, !t.contains(" "), !t.contains("\n"), let url = URL(string: t), let host = url.host, host.contains("."),
+			  url.scheme == "https" || url.scheme == "http" else { return false }
+		return ViralVideo.info(t) == nil
+	}
+	
+	static func domain(_ url: String) -> String {
+		guard var host = URL(string: url)?.host?.lowercased() else { return url }
+		if host.hasPrefix("www.") { host.removeFirst(4) }
+		return host
+	}
+	
+	private static var iconCache: [String: NSImage] = [:]
+	private static var attempted = Set<String>()
+	
+	static func info(_ url: String, settings: BeatDocumentSettings?) -> Info {
+		let domain = self.domain(url)
+		guard let all = settings?.get(ViralLinksKey) as? NSDictionary, let entry = all[url] as? NSDictionary else {
+			return Info(title: domain, desc: "", site: domain, icon: nil)
+		}
+		func text(_ key: String) -> String? {
+			guard let value = entry[key] as? String else { return nil }
+			let t = value.trimmingCharacters(in: .whitespacesAndNewlines)
+			return t.isEmpty ? nil : t
+		}
+		var icon = iconCache[url]
+		if icon == nil, let encoded = entry["icon"] as? String, let data = Data(base64Encoded: encoded), let image = NSImage(data: data) {
+			icon = image
+			iconCache[url] = image
+		}
+		return Info(title: text("title") ?? domain, desc: text("desc") ?? "", site: text("site") ?? domain, icon: icon)
+	}
+	
+	/// Reads the page once per session. `needsImage`: the line has no picture yet.
+	static func ensure(_ url: String, settings: BeatDocumentSettings?, needsImage: Bool, force: Bool = false) {
+		guard let settings, let address = URL(string: url) else { return }
+		if !force {
+			if attempted.contains(url) { return }
+			let known = (settings.get(ViralLinksKey) as? NSDictionary)?[url] != nil
+			if known && !needsImage { return }
+		}
+		attempted.insert(url)
+		
+		var request = URLRequest(url: address, timeoutInterval: 15)
+		request.setValue(ViralWeb.userAgent, forHTTPHeaderField: "User-Agent")
+		request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+		request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+		URLSession.shared.dataTask(with: request) { data, response, _ in
+			let base = response?.url ?? address
+			guard let data else { return }
+			let html = String(decoding: data.prefix(600_000), as: UTF8.self)
+			let title = meta(html, ["og:title", "twitter:title"]) ?? tagText(html, "title")
+			let desc = meta(html, ["og:description", "twitter:description", "description"])
+			let site = meta(html, ["og:site_name", "application-name"])
+			let imageURL = meta(html, ["og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src"]).flatMap { URL(string: $0, relativeTo: base)?.absoluteURL }
+			let iconURL = iconHref(html).flatMap { URL(string: $0, relativeTo: base)?.absoluteURL }
+				?? URL(string: "/favicon.ico", relativeTo: base)?.absoluteURL
+			
+			let group = DispatchGroup()
+			var iconData: String? = nil
+			if let iconURL {
+				group.enter()
+				download(iconURL) { image in
+					iconData = image.flatMap { squarePNG($0, size: 64)?.base64EncodedString() }
+					group.leave()
+				}
+			}
+			var picture: NSImage? = nil
+			if needsImage, let imageURL {
+				group.enter()
+				download(imageURL) { image in
+					picture = image
+					group.leave()
+				}
+			}
+			group.notify(queue: .main) {
+				store(url, title: title, desc: desc, site: site, icon: iconData, settings: settings)
+				if let picture {
+					NotificationCenter.default.post(name: ViralLinkImageNotification, object: nil, userInfo: ["url": url, "image": picture])
+				}
+			}
+		}.resume()
+	}
+	
+	private static func download(_ url: URL, completion: @escaping (NSImage?) -> Void) {
+		var request = URLRequest(url: url, timeoutInterval: 15)
+		request.setValue(ViralWeb.userAgent, forHTTPHeaderField: "User-Agent")
+		URLSession.shared.dataTask(with: request) { data, response, _ in
+			guard let data, (response as? HTTPURLResponse)?.statusCode ?? 200 < 400, let image = NSImage(data: data),
+				  image.size.width > 4, image.size.height > 4 else { completion(nil); return }
+			completion(image)
+		}.resume()
+	}
+	
+	private static func squarePNG(_ image: NSImage, size: Int) -> Data? {
+		guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8, samplesPerPixel: 4,
+										 hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+		rep.size = NSSize(width: size, height: size)
+		NSGraphicsContext.saveGraphicsState()
+		NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+		NSGraphicsContext.current?.imageInterpolation = .high
+		image.draw(in: NSRect(x: 0, y: 0, width: size, height: size), from: .zero, operation: .copy, fraction: 1)
+		NSGraphicsContext.restoreGraphicsState()
+		return rep.representation(using: .png, properties: [:])
+	}
+	
+	private static func store(_ url: String, title: String?, desc: String?, site: String?, icon: String?, settings: BeatDocumentSettings) {
+		let all = ((settings.get(ViralLinksKey) as? NSDictionary)?.mutableCopy() as? NSMutableDictionary) ?? NSMutableDictionary()
+		let entry = ((all[url] as? NSDictionary)?.mutableCopy() as? NSMutableDictionary) ?? NSMutableDictionary()
+		if let title { entry["title"] = String(title.prefix(300)) }
+		if let desc { entry["desc"] = String(desc.prefix(400)) }
+		if let site { entry["site"] = String(site.prefix(100)) }
+		if let icon { entry["icon"] = icon }
+		all[url] = entry
+		settings.set(ViralLinksKey, as: all)
+		iconCache[url] = nil
+		NotificationCenter.default.post(name: ViralLinksChangedNotification, object: nil)
+	}
+	
+	// MARK: Reading the page
+	
+	private static func firstMatch(_ text: String, _ pattern: String) -> String? {
+		guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+			  let m = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)), m.numberOfRanges > 1 else { return nil }
+		for i in 1..<m.numberOfRanges {
+			if let r = Range(m.range(at: i), in: text) { return String(text[r]) }
+		}
+		return nil
+	}
+	
+	/// `<meta property="og:title" content="...">`, in either attribute order
+	static func meta(_ html: String, _ keys: [String]) -> String? {
+		for key in keys {
+			let k = NSRegularExpression.escapedPattern(for: key)
+			let patterns = [
+				#"<meta[^>]*?(?:property|name)\s*=\s*["']"# + k + #"["'][^>]*?content\s*=\s*"([^"]*)""#,
+				#"<meta[^>]*?(?:property|name)\s*=\s*["']"# + k + #"["'][^>]*?content\s*=\s*'([^']*)'"#,
+				#"<meta[^>]*?content\s*=\s*"([^"]*)"[^>]*?(?:property|name)\s*=\s*["']"# + k + #"["']"#,
+				#"<meta[^>]*?content\s*=\s*'([^']*)'[^>]*?(?:property|name)\s*=\s*["']"# + k + #"["']"#,
+			]
+			for pattern in patterns {
+				if let value = firstMatch(html, pattern) {
+					let clean = decodeEntities(value).trimmingCharacters(in: .whitespacesAndNewlines)
+					if !clean.isEmpty { return clean }
+				}
+			}
+		}
+		return nil
+	}
+	
+	static func tagText(_ html: String, _ tag: String) -> String? {
+		guard let value = firstMatch(html, "<\(tag)[^>]*>(.*?)</\(tag)>") else { return nil }
+		let clean = decodeEntities(value).replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+		return clean.isEmpty ? nil : clean
+	}
+	
+	/// The best icon link: apple-touch-icon first (it's bigger), then any icon
+	static func iconHref(_ html: String) -> String? {
+		guard let regex = try? NSRegularExpression(pattern: "<link\\b[^>]*>", options: [.caseInsensitive]) else { return nil }
+		var touch: String? = nil
+		var icon: String? = nil
+		for m in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+			guard let r = Range(m.range, in: html) else { continue }
+			let tag = String(html[r])
+			guard let rel = firstMatch(tag, #"rel\s*=\s*["']([^"']*)["']"#)?.lowercased(), rel.contains("icon"),
+				  let href = firstMatch(tag, #"href\s*=\s*["']([^"']*)["']"#) else { continue }
+			if rel.contains("apple-touch-icon") { if touch == nil { touch = decodeEntities(href) } }
+			else if icon == nil, !rel.contains("mask") { icon = decodeEntities(href) }
+		}
+		return touch ?? icon
+	}
+	
+	static func decodeEntities(_ text: String) -> String {
+		guard text.contains("&") else { return text }
+		var result = text
+		let named = ["&amp;": "&", "&quot;": "\"", "&#39;": "'", "&apos;": "'", "&lt;": "<", "&gt;": ">", "&nbsp;": " ", "&ndash;": "–", "&mdash;": "—", "&hellip;": "…", "&rsquo;": "’", "&lsquo;": "‘", "&rdquo;": "”", "&ldquo;": "“"]
+		for (k, v) in named { result = result.replacingOccurrences(of: k, with: v) }
+		if let regex = try? NSRegularExpression(pattern: "&#(x?)([0-9a-fA-F]+);") {
+			let ns = result as NSString
+			var out = ""
+			var last = 0
+			for m in regex.matches(in: result, range: NSRange(location: 0, length: ns.length)) {
+				out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+				let hex = ns.substring(with: m.range(at: 1)) == "x" || ns.substring(with: m.range(at: 1)) == "X"
+				if let code = UInt32(ns.substring(with: m.range(at: 2)), radix: hex ? 16 : 10), let scalar = Unicode.Scalar(code) {
+					out += String(Character(scalar))
+				}
+				last = m.range.location + m.range.length
+			}
+			out += ns.substring(from: last)
+			result = out
+		}
+		return result
+	}
+	
+	// MARK: Drawing (editor)
+	
+	static func drawIcon(_ icon: NSImage?, domain: String, in rect: NSRect) {
+		NSGraphicsContext.saveGraphicsState()
+		NSBezierPath(roundedRect: rect, xRadius: rect.width * 0.22, yRadius: rect.height * 0.22).addClip()
+		if let icon {
+			icon.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+		} else {
+			NSColor(calibratedRed: 0.23, green: 0.42, blue: 0.95, alpha: 1).setFill()
+			rect.fill()
+			let letter = domain.first.map { String($0).uppercased() } ?? "•"
+			let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: rect.height * 0.6, weight: .bold), .foregroundColor: NSColor.white]
+			let size = (letter as NSString).size(withAttributes: attrs)
+			(letter as NSString).draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2), withAttributes: attrs)
+		}
+		NSGraphicsContext.restoreGraphicsState()
+	}
+	
+	static func drawText(_ text: String, font: NSFont, color: NSColor, in rect: NSRect, lines: Int) {
+		guard !text.isEmpty, rect.width > 4 else { return }
+		let style = NSMutableParagraphStyle()
+		style.lineBreakMode = lines == 1 ? .byTruncatingTail : .byWordWrapping
+		let lineHeight = ceil(font.ascender - font.descender + font.leading)
+		var box = rect
+		box.size.height = min(rect.height, lineHeight * CGFloat(lines) + 1)
+		(text as NSString).draw(with: box, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+								attributes: [.font: font, .foregroundColor: color, .paragraphStyle: style])
+	}
+	
+	/// Draws a website in a flipped view
+	static func draw(_ url: String, size: String, in bounds: NSRect, thumbnail: NSImage?, settings: BeatDocumentSettings?, textColor: NSColor) {
+		let info = self.info(url, settings: settings)
+		let domain = self.domain(url)
+		let secondary = textColor.withAlphaComponent(0.55)
+		let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+		
+		if size == "pill" {
+			let shape = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
+			textColor.withAlphaComponent(0.06).setFill()
+			shape.fill()
+			textColor.withAlphaComponent(0.16).setStroke()
+			shape.lineWidth = 1
+			shape.stroke()
+			let d: CGFloat = 20
+			drawIcon(info.icon, domain: domain, in: NSRect(x: rect.minX + 10, y: rect.midY - d / 2, width: d, height: d))
+			let arrow = NSAttributedString(string: "↗", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: secondary])
+			arrow.draw(at: NSPoint(x: rect.maxX - 14 - arrow.size().width / 2, y: rect.midY - arrow.size().height / 2))
+			let text = NSMutableAttributedString(string: info.title == domain ? domain : info.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: textColor])
+			if info.title != domain { text.append(NSAttributedString(string: "   " + domain, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: secondary])) }
+			let style = NSMutableParagraphStyle()
+			style.lineBreakMode = .byTruncatingTail
+			text.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: text.length))
+			let x = rect.minX + 10 + d + 8
+			let h = text.size().height
+			text.draw(with: NSRect(x: x, y: rect.midY - h / 2, width: max(10, rect.maxX - 30 - x), height: h), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+			return
+		}
+		
+		let radius: CGFloat = 10
+		let shape = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+		
+		if size == "live" {
+			// Header above the page
+			let header = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: liveHeader)
+			NSGraphicsContext.saveGraphicsState()
+			shape.addClip()
+			NSColor.white.setFill()
+			rect.fill()
+			if let thumbnail { drawFilling(thumbnail, in: NSRect(x: rect.minX, y: header.maxY, width: rect.width, height: rect.height - liveHeader)) }
+			ThemeManager.shared().backgroundColor.effectiveColor().setFill()
+			header.fill()
+			textColor.withAlphaComponent(0.06).setFill()
+			header.fill()
+			NSGraphicsContext.restoreGraphicsState()
+			let d: CGFloat = 16
+			drawIcon(info.icon, domain: domain, in: NSRect(x: header.minX + 10, y: header.midY - d / 2, width: d, height: d))
+			let title = info.title == domain ? domain : "\(info.title)  ·  \(domain)"
+			drawText(title, font: NSFont.systemFont(ofSize: 12, weight: .semibold), color: textColor,
+					 in: NSRect(x: header.minX + 10 + d + 8, y: header.midY - 8, width: header.width - d - 60, height: 18), lines: 1)
+			textColor.withAlphaComponent(0.16).setStroke()
+			shape.lineWidth = 1
+			shape.stroke()
+			return
+		}
+		
+		// Card
+		NSGraphicsContext.saveGraphicsState()
+		shape.addClip()
+		textColor.withAlphaComponent(0.035).setFill()
+		rect.fill()
+		let thumbWidth: CGFloat = thumbnail != nil ? floor(min(rect.height * 1.5, rect.width * 0.36)) : 0
+		if let thumbnail { drawFilling(thumbnail, in: NSRect(x: rect.minX, y: rect.minY, width: thumbWidth, height: rect.height)) }
+		NSGraphicsContext.restoreGraphicsState()
+		textColor.withAlphaComponent(0.15).setStroke()
+		shape.lineWidth = 1
+		shape.stroke()
+		
+		let x = rect.minX + thumbWidth + 14
+		let width = max(20, rect.maxX - 14 - x)
+		drawText(info.title, font: NSFont.systemFont(ofSize: 14, weight: .semibold), color: textColor, in: NSRect(x: x, y: rect.minY + 12, width: width, height: 38), lines: 2)
+		drawText(info.desc, font: NSFont.systemFont(ofSize: 12), color: secondary, in: NSRect(x: x, y: rect.minY + 50, width: width, height: 32), lines: 2)
+		let d: CGFloat = 14
+		drawIcon(info.icon, domain: domain, in: NSRect(x: x, y: rect.maxY - 12 - d, width: d, height: d))
+		drawText(info.site, font: NSFont.systemFont(ofSize: 11, weight: .medium), color: secondary, in: NSRect(x: x + d + 6, y: rect.maxY - 12 - d, width: width - d - 6, height: 16), lines: 1)
+	}
+	
+	static func drawFilling(_ image: NSImage, in rect: NSRect) {
+		let size = image.size
+		guard size.width > 0, size.height > 0 else { return }
+		let scale = max(rect.width / size.width, rect.height / size.height)
+		let target = NSRect(x: rect.midX - size.width * scale / 2, y: rect.midY - size.height * scale / 2, width: size.width * scale, height: size.height * scale)
+		NSGraphicsContext.saveGraphicsState()
+		NSBezierPath(rect: rect).addClip()
+		image.draw(in: target, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
+		NSGraphicsContext.restoreGraphicsState()
+	}
+}
+
 /// Tools ▸ Sign In to Instagram… so views are easy to turn on without hunting for the right-click menu
 fileprivate final class ViralAccountsMenu: NSObject {
 	static let shared = ViralAccountsMenu()
@@ -2268,6 +2628,19 @@ fileprivate func viralVideoLinks(from pasteboard: NSPasteboard) -> [String] {
 	return candidates
 }
 
+/// Website links on the pasteboard (one per line, none of them videos)
+fileprivate func viralWebsiteLinks(from pasteboard: NSPasteboard) -> [String] {
+	var candidates: [String] = []
+	if let string = pasteboard.string(forType: .string) {
+		candidates = string.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+	}
+	if candidates.isEmpty, let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+		candidates = urls.filter { !$0.isFileURL }.map { $0.absoluteString }
+	}
+	guard !candidates.isEmpty, candidates.count <= 20, candidates.allSatisfy({ ViralLinks.isWebsite($0) }) else { return [] }
+	return candidates
+}
+
 // MARK: Image group layout
 
 /// Lays out images in rows. An image fits on a row if the widths (plus 2% gaps) stay within 100%.
@@ -2313,8 +2686,13 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 		var rowHeight: CGFloat = 0
 		for i in row {
 			let w = floor(min(width, override[i] ?? viralItemWidth(items[i].width, width: width)))
-			let isVideo = items[i].ids.first.map { ViralMedia.isVideo($0) } ?? false
-			let h = floor(w * ViralImages.aspect(items[i].ids.first, settings: settings)) + (isVideo ? ViralMetrics.barHeight : 0)
+			let h: CGFloat
+			if items[i].kind == .link {
+				h = ViralLinks.height(items[i].linkSize, width: w)
+			} else {
+				let isVideo = items[i].ids.first.map { ViralMedia.isVideo($0) } ?? false
+				h = floor(w * ViralImages.aspect(items[i].ids.first, settings: settings)) + (isVideo ? ViralMetrics.barHeight : 0)
+			}
 			frames[i] = NSRect(x: x, y: y, width: w, height: h)
 			x += w + gap
 			rowHeight = max(rowHeight, h)
@@ -2481,6 +2859,8 @@ fileprivate final class ViralImageTile: NSView {
 	var index = 0
 	var image: NSImage?
 	var videoURL: String?
+	/// Set when this tile is a website
+	var linkURL: String?
 	var webView: WKWebView?
 	/// The link the web view was loaded with
 	var webViewURL: String?
@@ -2501,6 +2881,7 @@ fileprivate final class ViralImageTile: NSView {
 		wantsLayer = true
 		layerContentsRedrawPolicy = .onSetNeedsDisplay
 		NotificationCenter.default.addObserver(self, selector: #selector(metricsChanged(_:)), name: ViralMetricsChangedNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(linksChanged(_:)), name: ViralLinksChangedNotification, object: nil)
 		
 		handle.onBegin = { [weak self] event in self?.beginResize(event) }
 		handle.onDrag = { [weak self] event in self?.dragResize(event) }
@@ -2531,8 +2912,15 @@ fileprivate final class ViralImageTile: NSView {
 	}
 	var isSelected: Bool { return group?.isActive == true && group?.selectedIndex == index }
 	
+	var linkSize: String { return item?.linkSize ?? "card" }
+	
 	func configure(entry: String?, settings: BeatDocumentSettings?) {
 		guard let entry else { image = nil; return }
+		if item?.kind == .link {
+			configureLink(entry: entry, settings: settings)
+			return
+		}
+		linkURL = nil
 		if ViralMedia.isVideo(entry) {
 			let url = ViralMedia.url(entry)
 			let thumbnail = ViralMedia.thumbnail(entry)
@@ -2575,6 +2963,62 @@ fileprivate final class ViralImageTile: NSView {
 		needsDisplay = true
 	}
 	
+	/// Websites: a pill or card drawn here, or the live page in a web view
+	func configureLink(entry: String, settings: BeatDocumentSettings?) {
+		let url = ViralMedia.url(entry)
+		let thumbnail = ViralMedia.thumbnail(entry)
+		videoURL = nil
+		playerActive = false
+		linkURL = url
+		image = thumbnail.flatMap { ViralImages.image($0, settings: settings) }
+		ViralLinks.ensure(url, settings: settings, needsImage: thumbnail == nil)
+		
+		if linkSize == "live" {
+			if webView == nil || webViewURL != url {
+				webView?.removeFromSuperview()
+				let web = ViralWeb.makeView()
+				web.underPageBackgroundColor = .white
+				web.layer?.backgroundColor = NSColor.white.cgColor
+				web.navigationDelegate = loader
+				web.uiDelegate = loader
+				loader.allowsNavigation = true
+				(web as? ViralWebView)?.scrollsInside = { [weak web] in
+					guard let web, let responder = web.window?.firstResponder as? NSView else { return false }
+					return responder.isDescendant(of: web)
+				}
+				addSubview(web, positioned: .below, relativeTo: handle)
+				webView = web
+				webViewURL = url
+				if let address = URL(string: url) { web.load(URLRequest(url: address)) }
+			}
+			// No picture yet: a snapshot of the page is used for printing
+			loader.wantsSnapshot = (thumbnail == nil)
+			let tileIndex = index
+			loader.onSnapshot = { [weak self] snapshot in
+				guard let self, let group = self.group else { return }
+				group.setThumbnail(snapshot, at: tileIndex)
+			}
+		} else {
+			webView?.removeFromSuperview()
+			webView = nil
+			webViewURL = nil
+			loader.wantsSnapshot = false
+			loader.allowsNavigation = false
+		}
+		layoutChrome()
+		updateChrome()
+		needsDisplay = true
+	}
+	
+	@objc func linksChanged(_ notification: Notification) {
+		if linkURL != nil { needsDisplay = true }
+	}
+	
+	func openLinkInBrowser() {
+		guard let address = webView?.url ?? linkURL.flatMap({ URL(string: $0) }) else { return }
+		NSWorkspace.shared.open(address)
+	}
+	
 	func reloadVideo() {
 		guard let webView, let videoURL else { return }
 		ViralWeb.load(webView, url: videoURL)
@@ -2589,7 +3033,8 @@ fileprivate final class ViralImageTile: NSView {
 	
 	/// Closes the player and shows the thumbnail again (only when there is one)
 	func closePlayer() {
-		guard let webView, let entry = item?.ids.first, ViralMedia.thumbnail(entry) != nil else { return }
+		// Live websites stay loaded
+		guard linkURL == nil, let webView, let entry = item?.ids.first, ViralMedia.thumbnail(entry) != nil else { return }
 		webView.removeFromSuperview()
 		self.webView = nil
 		webViewURL = nil
@@ -2605,6 +3050,10 @@ fileprivate final class ViralImageTile: NSView {
 	
 	/// The picture or player. Videos keep a black bar under it for the numbers.
 	var mediaRect: NSRect {
+		if linkURL != nil {
+			// Live websites: the page sits under the header
+			return NSRect(x: 0, y: ViralLinks.liveHeader, width: bounds.width, height: max(bounds.height - ViralLinks.liveHeader, 1))
+		}
 		guard videoURL != nil else { return bounds }
 		return NSRect(x: 0, y: 0, width: bounds.width, height: max(bounds.height - ViralMetrics.barHeight, 1))
 	}
@@ -2613,11 +3062,12 @@ fileprivate final class ViralImageTile: NSView {
 	}
 	
 	func layoutChrome() {
-		webView?.frame = mediaRect
-		if let webView { ViralWeb.fitZoom(webView, url: videoURL) }
+		webView?.frame = mediaRect.insetBy(dx: linkURL != nil ? 1 : 0, dy: 0)
+		if let webView, linkURL == nil { ViralWeb.fitZoom(webView, url: videoURL) }
 		handle.frame = NSRect(x: bounds.maxX - EMetrics.handle - 2, y: bounds.maxY - EMetrics.handle - 2, width: EMetrics.handle, height: EMetrics.handle)
 		menuButton.frame = NSRect(x: bounds.maxX - 30, y: 6, width: 24, height: 24)
-		let radius = (item?.rounded ?? false) ? EmbedLine.cornerRadius(bounds) : 0
+		var radius = (item?.rounded ?? false) ? EmbedLine.cornerRadius(bounds) : 0
+		if linkURL != nil { radius = linkSize == "pill" ? bounds.height / 2 : 10 }
 		layer?.cornerRadius = radius
 		layer?.masksToBounds = radius > 0
 	}
@@ -2625,13 +3075,17 @@ fileprivate final class ViralImageTile: NSView {
 	func updateChrome() {
 		let selected = isSelected || resizing
 		handle.isHidden = !(selected || hovering)
-		menuButton.isHidden = !(videoURL != nil && (selected || hovering))
+		menuButton.isHidden = !((videoURL != nil || linkURL != nil) && (selected || hovering))
 		layer?.borderWidth = selected ? 2 : (hovering ? 1 : 0)
 		layer?.borderColor = (selected ? NSColor.controlAccentColor : (group?.color ?? .textColor).withAlphaComponent(0.3)).cgColor
 		layoutChrome()
 	}
 	
 	override func draw(_ dirtyRect: NSRect) {
+		if let linkURL {
+			ViralLinks.draw(linkURL, size: linkSize, in: bounds, thumbnail: image, settings: group?.settings, textColor: group?.color ?? .textColor)
+			return
+		}
 		// The bar stays while the video plays, so the numbers never go away
 		drawMetrics()
 		guard webView == nil else { return }
@@ -2663,6 +3117,11 @@ fileprivate final class ViralImageTile: NSView {
 	
 	override func mouseDown(with event: NSEvent) {
 		group?.select(index)
+		// Websites open in the browser with a double-click (pills and cards), or from the header of a live page
+		if linkURL != nil {
+			if event.clickCount == 2 { openLinkInBrowser() }
+			return
+		}
 		openPlayer()
 	}
 	
@@ -2739,6 +3198,38 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	override init(host: BeatTextView) {
 		super.init(host: host)
 		kind = .image
+		NotificationCenter.default.addObserver(self, selector: #selector(linkImageArrived(_:)), name: ViralLinkImageNotification, object: nil)
+	}
+	
+	/// A website's picture arrived: store it in the line, like a video thumbnail
+	@objc func linkImageArrived(_ notification: Notification) {
+		guard let url = notification.userInfo?["url"] as? String, let image = notification.userInfo?["image"] as? NSImage else { return }
+		for (i, item) in items.enumerated() where item.kind == .link {
+			if let entry = item.ids.first, ViralMedia.url(entry) == url, ViralMedia.thumbnail(entry) == nil {
+				setThumbnail(image, at: i)
+				return
+			}
+		}
+	}
+	
+	func addLinks(_ urls: [String]) {
+		insertItems(urls.map { EmbedLine(kind: .link, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: ViralLinks.defaultWidth("card"), linkSize: "card") })
+	}
+	
+	@objc func setLinkSize(_ sender: NSMenuItem) {
+		guard selectedIndex < items.count, items[selectedIndex].kind == .link, let size = sender.representedObject as? String else { return }
+		let old = items[selectedIndex].linkSize
+		items[selectedIndex].linkSize = size
+		// Pills are short, cards and live pages use the full width (unless you changed it)
+		if items[selectedIndex].width == ViralLinks.defaultWidth(old) { items[selectedIndex].width = ViralLinks.defaultWidth(size) }
+		reloadTiles()
+		write(items.map { $0.text })
+	}
+	
+	@objc func refreshLink(_ sender: Any?) {
+		guard selectedIndex < items.count, let entry = items[selectedIndex].ids.first else { return }
+		ViralLinks.ensure(ViralMedia.url(entry), settings: settings, needsImage: ViralMedia.thumbnail(entry) == nil, force: true)
+		if selectedIndex < tiles.count, let web = tiles[selectedIndex].webView { web.reload() }
 	}
 	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 	
@@ -2819,8 +3310,8 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	}
 	
 	func setThumbnail(_ image: NSImage, at index: Int) {
-		guard index < items.count, let settings, let entry = items[index].ids.first,
-			  ViralMedia.isVideo(entry), ViralMedia.thumbnail(entry) == nil,
+		guard index < items.count, let settings, let entry = items[index].ids.first, entry.contains("://"),
+			  ViralMedia.thumbnail(entry) == nil,
 			  let id = ViralImages.add(image, settings: settings)
 		else { return }
 		items[index].ids[0] = ViralMedia.make(url: ViralMedia.url(entry), thumbnail: id)
@@ -2878,7 +3369,7 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	}
 	
 	@objc func refreshMetrics(_ sender: Any?) {
-		for item in items {
+		for item in items where item.kind == .video {
 			guard let entry = item.ids.first, ViralMedia.isVideo(entry) else { continue }
 			ViralMetrics.ensure(ViralMedia.url(entry), settings: settings, force: true)
 		}
@@ -2897,6 +3388,30 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 	
 	func contextMenu() -> NSMenu {
 		let menu = NSMenu()
+		if selectedIndex < items.count, items[selectedIndex].kind == .link {
+			let current = items[selectedIndex].linkSize
+			for (size, title) in [("pill", "Small: Just the Link"), ("card", "Medium: Picture and Title"), ("live", "Large: Live Page")] {
+				let item = NSMenuItem(title: title, action: #selector(setLinkSize(_:)), keyEquivalent: "")
+				item.target = self
+				item.representedObject = size
+				item.state = (size == current) ? .on : .off
+				menu.addItem(item)
+			}
+			menu.addItem(NSMenuItem.separator())
+			widthMenu(into: menu)
+			menu.addItem(NSMenuItem.separator())
+			let open = NSMenuItem(title: "Open in Browser", action: #selector(openInBrowser(_:)), keyEquivalent: "")
+			open.target = self
+			menu.addItem(open)
+			let refresh = NSMenuItem(title: "Refresh Title & Picture", action: #selector(refreshLink(_:)), keyEquivalent: "")
+			refresh.target = self
+			menu.addItem(refresh)
+			menu.addItem(NSMenuItem.separator())
+			let delete = NSMenuItem(title: "Delete Website", action: #selector(deleteImageFromMenu(_:)), keyEquivalent: "")
+			delete.target = self
+			menu.addItem(delete)
+			return menu
+		}
 		let isVideo = selectedIndex < items.count && items[selectedIndex].kind == .video
 		widthMenu(into: menu)
 		let round = NSMenuItem(title: "Rounded Corners", action: #selector(toggleRounded(_:)), keyEquivalent: "")
@@ -3809,6 +4324,51 @@ public extension BeatTextView {
 		insertEmbedLines(lines)
 	}
 	
+	fileprivate func insertLinks(_ urls: [String], size: String = "card") {
+		let lines = urls.map { EmbedLine(kind: .link, ids: [ViralMedia.make(url: $0, thumbnail: nil)], width: ViralLinks.defaultWidth(size), linkSize: size).text }
+		insertEmbedLines(lines)
+	}
+	
+	/// True when the caret is on an empty line (pasting a website link there makes a website embed; inside text it stays text)
+	fileprivate var caretLineIsEmpty: Bool {
+		let ns = self.string as NSString
+		let location = min(self.selectedRange().location, ns.length)
+		var line = ns.lineRange(for: NSRange(location: location, length: 0))
+		if line.length > 0 && ns.character(at: NSMaxRange(line) - 1) == 10 { line.length -= 1 }
+		return ns.substring(with: line).trimmingCharacters(in: .whitespaces).isEmpty && self.selectedRange().length == 0
+	}
+	
+	/// Asks for a website address and the size to show it at
+	fileprivate func promptForWebsite() {
+		let alert = NSAlert()
+		alert.messageText = "Insert Website"
+		alert.informativeText = "Paste a link. You can change the size later from the website's menu."
+		alert.addButton(withTitle: "Insert")
+		alert.addButton(withTitle: "Cancel")
+		let field = NSTextField(frame: NSRect(x: 0, y: 30, width: 320, height: 24))
+		field.placeholderString = "https://"
+		if let clip = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), ViralLinks.isWebsite(clip) { field.stringValue = clip }
+		let sizes = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26), pullsDown: false)
+		sizes.addItems(withTitles: ["Small: Just the Link", "Medium: Picture and Title", "Large: Live Page"])
+		sizes.selectItem(at: 1)
+		let box = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 56))
+		box.addSubview(field)
+		box.addSubview(sizes)
+		alert.accessoryView = box
+		alert.window.initialFirstResponder = field
+		let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+			guard response == .alertFirstButtonReturn, let self else { return }
+			var address = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+			if !address.isEmpty, !address.contains("://") { address = "https://" + address }
+			guard !address.isEmpty else { return }
+			if ViralVideo.info(address) != nil { self.insertVideos([address]); return }
+			guard ViralLinks.isWebsite(address) else { NSSound.beep(); return }
+			self.insertLinks([address], size: ViralLinks.sizes[max(0, min(2, sizes.indexOfSelectedItem))])
+		}
+		if let window { alert.beginSheetModal(for: window, completionHandler: finish) }
+		else { finish(alert.runModal()) }
+	}
+	
 	fileprivate func insertCarousel() {
 		insertEmbedLines([EmbedLine(kind: .carousel, ids: [], width: 100, height: 40).text], focus: true)
 	}
@@ -3838,6 +4398,12 @@ public extension BeatTextView {
 		let command = ns.substring(with: lineRange).trimmingCharacters(in: .whitespaces).lowercased()
 		guard let textActions = editorDelegate?.textActions else { return false }
 		
+		if command == "/link" || command == "/website" || command == "/web" {
+			textActions.replace(lineRange, with: "")
+			self.setSelectedRange(NSRange(location: lineRange.location, length: 0))
+			promptForWebsite()
+			return true
+		}
 		if command == "/carousel" {
 			textActions.replace(lineRange, with: "")
 			self.setSelectedRange(NSRange(location: lineRange.location, length: 0))
@@ -3856,8 +4422,10 @@ public extension BeatTextView {
 	/// Called from `paste:`. Returns `true` if images were pasted.
 	@objc func pasteImagesIfNeeded(_ pasteboard: NSPasteboard) -> Bool {
 		let links = viralVideoLinks(from: pasteboard)
+		let sites = links.isEmpty ? viralWebsiteLinks(from: pasteboard) : []
 		if let embed = window?.firstResponder as? ViralEmbedView, embed.host === self {
 			if !links.isEmpty { embed.addVideos(links); return true }
+			if !sites.isEmpty, let group = embed as? ViralImageGroupView { group.addLinks(sites); return true }
 			let images = viralImages(from: pasteboard)
 			if images.isEmpty { return false }
 			embed.addImages(images)
@@ -3865,6 +4433,11 @@ public extension BeatTextView {
 		}
 		if !links.isEmpty {
 			insertVideos(links)
+			return true
+		}
+		// A website link pasted on an empty line becomes a website card. Inside a sentence it stays a plain link.
+		if !sites.isEmpty && caretLineIsEmpty {
+			insertLinks(sites)
 			return true
 		}
 		let images = viralImages(from: pasteboard)
@@ -3895,6 +4468,10 @@ public extension BeatTextView {
 	
 	@objc func viralInsertImage(_ sender: Any?) {
 		chooseImages { [weak self] images in self?.insertImages(images) }
+	}
+	
+	@objc func viralInsertWebsite(_ sender: Any?) {
+		promptForWebsite()
 	}
 	
 	@objc func viralInsertCarousel(_ sender: Any?) {

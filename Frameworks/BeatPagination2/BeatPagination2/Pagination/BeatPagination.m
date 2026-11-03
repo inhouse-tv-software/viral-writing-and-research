@@ -381,11 +381,16 @@
 		NSMutableArray<Line*>* row = nil;
 		NSInteger rowWidth = 0;
 		Line* previous = nil;
-		for (Line* l in self.lines) {
+		NSArray<Line*>* allLines = self.lines;
+		for (NSInteger li = 0; li < allLines.count; li++) {
+			Line* l = allLines[li];
 			l.embedRow = nil;
 			l.embedHidden = false;
+			// Pages before the start index are reused as they are, so only reset the fit-to-page scale from here on
+			if (li >= index) l.embedScale = 0.0;
 			
-			if (l.type == action && l.isEmbedCarouselLine) {
+			if (l.type == action && (l.isEmbedCarouselLine || l.isEmbedLinkLine)) {
+				// Carousels and websites always get a row of their own
 				l.embedRow = @[l];
 				row = nil;
 			} else if (l.type == action && l.isEmbedImageLine) {
@@ -564,6 +569,22 @@
 	}
     
 	// Nothing fit, let's break it apart
+    
+    // Viral: a row of images or videos that almost fits is drawn a little smaller, instead of leaving a big gap at the bottom of the page
+    if (pageBlocks.count == 1 && pageBlocks.firstObject.lines.count == 1) {
+        Line* only = pageBlocks.firstObject.lines.firstObject;
+        CGFloat full = group.height;
+        if (only.type == action && only.isEmbedLine && !only.isEmbedLinkLine && only.embedRow != nil && only.embedScale == 0.0 &&
+            full > 0.0 && remainingSpace >= full * 0.72 && remainingSpace > 80.0) {
+            only.embedScale = MAX(0.5, MIN(1.0, (remainingSpace - 2.0) / full));
+            BeatPaginationBlock* scaled = [BeatPaginationBlock withLines:@[only] delegate:self];
+            if (scaled.height <= remainingSpace + lineHeight * 0.2) {
+                [_currentPage addBlock:scaled];
+                return;
+            }
+            only.embedScale = 0.0;
+        }
+    }
     
 	// If remaining space is less than 1 line OR we're just leaving one line on this page, just roll on to next page
     if (remainingSpace < lineHeight || (remainingSpace <= lineHeight + group.topMargin)) {
