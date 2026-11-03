@@ -25,6 +25,11 @@
 #import <CoreText/CoreText.h>
 #import "BeatEditorFormatting.h"
 
+#if TARGET_OS_OSX
+static NSInteger BeatStatusMarkKind(unichar c);
+static NSColor* BeatStatusMarkColor(NSInteger kind);
+#endif
+
 #import "BeatRevisions.h"
 
 @interface BeatLayoutManager()
@@ -99,7 +104,11 @@
 
 - (void)drawGlyphsForGlyphRange:(NSRange)glyphsToShow atPoint:(BXPoint)origin
 {
+#if TARGET_OS_OSX
+	[self drawGlyphsSkippingStatusMarks:glyphsToShow atPoint:origin];
+#else
 	[super drawGlyphsForGlyphRange:glyphsToShow atPoint:origin];
+#endif
         
     CGSize inset = self.inset;
 	NSRange charRange = [self characterRangeForGlyphRange:glyphsToShow actualGlyphRange:nil];
@@ -867,6 +876,61 @@ static NSInteger BeatEmbedKindForString(NSString* string)
     return attrs;
 }
 
+#if TARGET_OS_OSX
+/// 1 = done (✅ ☑ ✔), 2 = not done (❌ ✖ ✗ ✘), 0 = anything else
+static NSInteger BeatStatusMarkKind(unichar c)
+{
+    switch (c) {
+        case 0x2705: case 0x2611: case 0x2714: case 0x2713: return 1;
+        case 0x274C: case 0x2716: case 0x2717: case 0x2718: case 0x274E: return 2;
+        default: return 0;
+    }
+}
+
+static NSColor* BeatStatusMarkColor(NSInteger kind)
+{
+    return (kind == 1) ? [NSColor colorWithCalibratedRed:0.20 green:0.66 blue:0.38 alpha:1.0] : [NSColor colorWithCalibratedRed:0.89 green:0.30 blue:0.27 alpha:1.0];
+}
+
+/// Draws glyphs, except ✅ and ❌, which become small green and red dots in the space the emoji takes
+- (void)drawGlyphsSkippingStatusMarks:(NSRange)glyphsToShow atPoint:(BXPoint)origin
+{
+    NSString* string = self.textStorage.string;
+    // Most of the time there's nothing to do
+    static NSCharacterSet* marks;
+    if (marks == nil) marks = [NSCharacterSet characterSetWithCharactersInString:@"\u2705\u2611\u2714\u2713\u274C\u2716\u2717\u2718\u274E"];
+    NSRange chars = [self characterRangeForGlyphRange:glyphsToShow actualGlyphRange:nil];
+    if (NSMaxRange(chars) > string.length || [string rangeOfCharacterFromSet:marks options:0 range:chars].location == NSNotFound) {
+        [super drawGlyphsForGlyphRange:glyphsToShow atPoint:origin];
+        return;
+    }
+    NSUInteger start = glyphsToShow.location;
+    NSUInteger end = NSMaxRange(glyphsToShow);
+    bool any = false;
+    for (NSUInteger g = glyphsToShow.location; g < end; g++) {
+        NSUInteger ci = [self characterIndexForGlyphAtIndex:g];
+        if (ci >= string.length) continue;
+        NSInteger kind = BeatStatusMarkKind([string characterAtIndex:ci]);
+        if (kind == 0) continue;
+        any = true;
+        if (g > start) [super drawGlyphsForGlyphRange:NSMakeRange(start, g - start) atPoint:origin];
+        start = g + 1;
+        
+        NSTextContainer* container = [self textContainerForGlyphAtIndex:g effectiveRange:nil];
+        if (container == nil) continue;
+        CGRect box = [self boundingRectForGlyphRange:NSMakeRange(g, 1) inTextContainer:container];
+        BXFont* font = [self.textStorage attribute:NSFontAttributeName atIndex:ci effectiveRange:nil];
+        CGFloat size = (font != nil) ? font.pointSize : 12.0;
+        CGFloat d = round(size * 0.55);
+        CGRect dot = CGRectMake(origin.x + box.origin.x + (box.size.width - d) / 2.0, origin.y + CGRectGetMidY(box) - d / 2.0, d, d);
+        [BeatStatusMarkColor(kind) setFill];
+        [[NSBezierPath bezierPathWithOvalInRect:dot] fill];
+    }
+    if (!any) { [super drawGlyphsForGlyphRange:glyphsToShow atPoint:origin]; return; }
+    if (start < end) [super drawGlyphsForGlyphRange:NSMakeRange(start, end - start) atPoint:origin];
+}
+#endif
+
 - (NSUInteger)foldSelectionIfNeeded:(BXFont * _Nonnull)aFont charIndexes:(const NSUInteger * _Nonnull)charIndexes glyphRange:(const NSRange *)glyphRange props:(const NSGlyphProperty * _Nonnull)props {
     NSDictionary* attrs = [self.textStorage attributesAtIndex:charIndexes[0] effectiveRange:nil];
     if (attrs[@"BeatFolded"]) {
@@ -946,6 +1010,7 @@ static NSInteger BeatEmbedKindForString(NSString* string)
     // Check for folded/collapsed sections
     NSInteger foldedCharacters = [self foldSelectionIfNeeded:aFont charIndexes:charIndexes glyphRange:&glyphRange props:props];
     if (foldedCharacters != NSNotFound) return foldedCharacters;
+
     
     LineType type = line.type;
     bool currentlyEditing = NSLocationInRange(_editorDelegate.selectedRange.location, line.range) || NSIntersectionRange(_editorDelegate.selectedRange, line.range).length > 0;

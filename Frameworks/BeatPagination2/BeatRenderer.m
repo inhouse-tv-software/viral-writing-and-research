@@ -397,9 +397,40 @@
             [attributedString addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, attributedString.length)];
         }
     }
-        
+    
+#if TARGET_OS_OSX
+    [BeatRenderer styleStatusMarks:attributedString];
+#endif
     return attributedString;
 }
+
+#if TARGET_OS_OSX
+/// ✅ and ❌ print as small green and red dots
++ (void)styleStatusMarks:(NSMutableAttributedString*)string
+{
+    NSString* text = string.string;
+    for (NSInteger i = 0; i < text.length; i++) {
+        unichar c = [text characterAtIndex:i];
+        NSInteger kind = 0;
+        switch (c) {
+            case 0x2705: case 0x2611: case 0x2714: case 0x2713: kind = 1; break;
+            case 0x274C: case 0x2716: case 0x2717: case 0x2718: case 0x274E: kind = 2; break;
+            default: break;
+        }
+        if (kind == 0) continue;
+        NSFont* font = [string attribute:NSFontAttributeName atIndex:i effectiveRange:nil];
+        CGFloat size = (font != nil) ? font.pointSize : 12.0;
+        NSColor* color = (kind == 1) ? [NSColor colorWithCalibratedRed:0.20 green:0.66 blue:0.38 alpha:1.0] : [NSColor colorWithCalibratedRed:0.89 green:0.30 blue:0.27 alpha:1.0];
+        [string replaceCharactersInRange:NSMakeRange(i, 1) withString:@"\u25CF"];
+        [string addAttributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:MAX(5.0, size * 0.62)], NSForegroundColorAttributeName: color } range:NSMakeRange(i, 1)];
+        // The emoji style selector after it would otherwise keep an emoji-sized gap
+        if (i + 1 < text.length && [text characterAtIndex:i + 1] == 0xFE0F) {
+            [string replaceCharactersInRange:NSMakeRange(i + 1, 1) withString:@"\u200B"];
+        }
+        text = string.string;
+    }
+}
+#endif
 
 #pragma mark Tables
 
@@ -1253,6 +1284,7 @@
     }
     if (last < text.length) [result appendAttributedString:[NSAttributedString.alloc initWithString:[text substringFromIndex:last] attributes:plain]];
     if (result.length == 0) [result appendAttributedString:[NSAttributedString.alloc initWithString:@" " attributes:plain]];
+    [self styleStatusMarks:result];
     return result;
 }
 

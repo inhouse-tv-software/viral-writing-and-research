@@ -11,6 +11,7 @@ import AppKit
 import UniformTypeIdentifiers
 import WebKit
 import ImageIO
+import CoreText
 import BeatCore
 
 public extension BeatTextView {
@@ -244,10 +245,60 @@ fileprivate func btTableHeight(_ model: BeatTableModel, tableWidth: CGFloat, fon
 
 // MARK: Cell view
 
+/// ✅ and ❌ in table cells are drawn as small green and red dots (the main editor does the same in BeatLayoutManager)
+fileprivate final class ViralMarksLayoutManager: NSLayoutManager {
+	/// 1 = done, 2 = not done, 0 = anything else
+	static func kind(_ c: unichar) -> Int {
+		switch c {
+		case 0x2705, 0x2611, 0x2714, 0x2713: return 1
+		case 0x274C, 0x2716, 0x2717, 0x2718, 0x274E: return 2
+		default: return 0
+		}
+	}
+	static func color(_ kind: Int) -> NSColor {
+		return kind == 1 ? NSColor(calibratedRed: 0.20, green: 0.66, blue: 0.38, alpha: 1) : NSColor(calibratedRed: 0.89, green: 0.30, blue: 0.27, alpha: 1)
+	}
+	
+	override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+		guard let storage = textStorage else { super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin); return }
+		let string = storage.string as NSString
+		var start = glyphsToShow.location
+		let end = NSMaxRange(glyphsToShow)
+		var any = false
+		var g = glyphsToShow.location
+		while g < end {
+			let ci = characterIndexForGlyph(at: g)
+			let k = ci < string.length ? ViralMarksLayoutManager.kind(string.character(at: ci)) : 0
+			if k != 0 {
+				any = true
+				if g > start { super.drawGlyphs(forGlyphRange: NSRange(location: start, length: g - start), at: origin) }
+				start = g + 1
+				if let container = textContainer(forGlyphAt: g, effectiveRange: nil) {
+					let box = boundingRect(forGlyphRange: NSRange(location: g, length: 1), in: container)
+					let size = (storage.attribute(.font, at: ci, effectiveRange: nil) as? NSFont)?.pointSize ?? 12
+					let d = (size * 0.55).rounded()
+					ViralMarksLayoutManager.color(k).setFill()
+					NSBezierPath(ovalIn: NSRect(x: origin.x + box.minX + (box.width - d) / 2, y: origin.y + box.midY - d / 2, width: d, height: d)).fill()
+				}
+			}
+			g += 1
+		}
+		if !any { super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin); return }
+		if start < end { super.drawGlyphs(forGlyphRange: NSRange(location: start, length: end - start), at: origin) }
+	}
+}
+
 fileprivate final class BeatTableCellView: NSTextView {
 	var row = 0
 	var col = 0
 	weak var table: BeatTableView?
+	
+	override func viewDidMoveToWindow() {
+		super.viewDidMoveToWindow()
+		if let container = textContainer, !(layoutManager is ViralMarksLayoutManager) {
+			container.replaceLayoutManager(ViralMarksLayoutManager())
+		}
+	}
 	
 	override func becomeFirstResponder() -> Bool {
 		let result = super.becomeFirstResponder()
