@@ -526,7 +526,9 @@
         }
         CGFloat available = width - gap * (CGFloat)(n - 1);
         CGFloat rowHeight = (available + sumBars) / MAX(sumInverse, 0.0001);
-        rowHeight = floor(MIN(rowHeight, self.embedMaxRowHeight));
+        // Videos print as thumbnails, not posters
+        CGFloat maxHeight = (sumBars > 0.0) ? self.embedMaxVideoRowHeight : self.embedMaxRowHeight;
+        rowHeight = floor(MIN(rowHeight, maxHeight));
         
         NSMutableArray* current = NSMutableArray.new;
         for (NSInteger i = 0; i < n; i++) {
@@ -572,6 +574,8 @@
 
 /// Tallest row of images or videos in the preview
 + (CGFloat)embedMaxRowHeight { return 280.0; }
+/// Tallest row of videos in the preview (thumbnail plus the numbers bar)
++ (CGFloat)embedMaxVideoRowHeight { return 125.0; }
 /// The black bar under a video in the preview, for views and likes
 + (CGFloat)embedVideoBarHeight { return 15.0; }
 /// Space after a block of images, so the next paragraph doesn't stick to it
@@ -1134,8 +1138,7 @@
     if (font == nil) font = baseFont;
     
     CGFloat padX = 6.0, padY = 4.5, border = 0.5;
-    CGFloat columnWidth = floor(width / n);
-    CGFloat contentWidth = MAX(10.0, columnWidth - padX * 2);
+    NSArray<NSNumber*>* weights = (line.tableColumnWeights.count == n) ? line.tableColumnWeights : nil;
     BXColor* borderColor = [BXColor colorWithWhite:0.84 alpha:1.0];
     BXColor* strongBorder = [BXColor colorWithWhite:0.55 alpha:1.0];
     
@@ -1193,6 +1196,8 @@
             if (text.length == 0) text = @" ";
             
             NSTextTableBlock* cell = [NSTextTableBlock.alloc initWithTable:table startingRow:r rowSpan:1 startingColumn:c+1 columnSpan:1];
+            CGFloat columnWidth = (weights != nil) ? floor(width * weights[c].floatValue) : floor(width / n);
+            CGFloat contentWidth = MAX(10.0, columnWidth - padX * 2);
             [cell setContentWidth:contentWidth type:NSTextBlockAbsoluteValueType];
             [cell setWidth:padX type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMinXEdge];
             [cell setWidth:padX type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMaxXEdge];

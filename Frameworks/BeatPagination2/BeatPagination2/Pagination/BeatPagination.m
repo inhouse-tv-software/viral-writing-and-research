@@ -355,6 +355,38 @@
 	[_pages addObjectsFromArray:reusablePages];
 }
 
+/// Share of the width for each column: by the longest text in it (capped, so one long cell doesn't squeeze the rest),
+/// but never narrower than its longest word
++ (NSArray<NSNumber*>*)columnWeightsFor:(NSArray<Line*>*)rows
+{
+	NSInteger columns = 0;
+	for (Line* row in rows) if (!row.isTableSeparator) columns = MAX(columns, (NSInteger)row.tableCells.count);
+	if (columns == 0) return nil;
+	CGFloat longest[columns];
+	CGFloat longestWord[columns];
+	for (NSInteger c = 0; c < columns; c++) { longest[c] = 1; longestWord[c] = 1; }
+	for (Line* row in rows) {
+		if (row.isTableSeparator) continue;
+		NSArray<NSString*>* cells = row.tableCells;
+		for (NSInteger c = 0; c < cells.count && c < columns; c++) {
+			NSString* text = [[cells[c] stringByReplacingOccurrencesOfString:@"*" withString:@""] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+			longest[c] = MAX(longest[c], (CGFloat)text.length);
+			for (NSString* word in [text componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]) {
+				longestWord[c] = MAX(longestWord[c], (CGFloat)word.length);
+			}
+		}
+	}
+	CGFloat total = 0;
+	CGFloat want[columns];
+	for (NSInteger c = 0; c < columns; c++) {
+		want[c] = MAX(MAX(MIN(longest[c], 42.0), longestWord[c]), 3.0) + 2.0;
+		total += want[c];
+	}
+	NSMutableArray* weights = NSMutableArray.new;
+	for (NSInteger c = 0; c < columns; c++) [weights addObject:@(want[c] / total)];
+	return weights;
+}
+
 /// Begin pagination from given line index
 - (bool)paginateFromIndex:(NSInteger)index
 {
@@ -373,6 +405,17 @@
 			l.tableFirstRow = isTable && !prevTable;
 			l.tableHeaderRow = isTable && !l.isTableSeparator && next != nil && next.type == action && next.isTableSeparator && ![next.string containsString:@":"];
 			l.followsTable = !isTable && prevTable && l.string.length > 0;
+			// Column widths follow the content: an icon column stays narrow, long text gets room
+			if (isTable && l.tableFirstRow) {
+				NSMutableArray<Line*>* tableLines = NSMutableArray.new;
+				for (NSInteger k = i; k < all.count; k++) {
+					Line* m = all[k];
+					if (!(m.type == action && (m.isTableRow || m.isTableSeparator))) break;
+					[tableLines addObject:m];
+				}
+				NSArray* weights = [BeatPagination columnWeightsFor:tableLines];
+				for (Line* m in tableLines) m.tableColumnWeights = weights;
+			}
 			// Text after a blank line after a table gets the extra room too
 			if (!isTable && !prevTable && l.string.length > 0 && prev != nil && prev.string.length == 0 && i >= 2) {
 				Line* before = all[i-2];
@@ -440,6 +483,8 @@
 				row = nil;
 			} else if (l.type == action && l.isEmbedImageLine) {
 				NSInteger w = l.embedWidthPercent;
+				// Videos print at least three to a row (four when vertical), so they stay thumbnail sized
+				if (l.isEmbedVideoLine) w = MIN(w, 33);
 				bool continues = (row != nil && previous != nil && previous.isEmbedImageLine && !l.beginsNewParagraph);
 				if (continues && rowWidth + w <= 100) {
 					[row addObject:l];

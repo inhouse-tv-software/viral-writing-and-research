@@ -493,6 +493,8 @@ JSExportAs(setCustomData, - (NSDictionary*)setCustomData:(NSString*)key value:(i
 /// Set by pagination: the row of pictures or links right above/below belongs to the same block (so the gap is the same as between items)
 @property (nonatomic) bool embedJoinsPrevious;
 @property (nonatomic) bool embedJoinsNext;
+/// Set by pagination: share of the table width for each column (from what's in them), same for every row of the table
+@property (nonatomic, nullable) NSArray<NSNumber*>* tableColumnWeights;
 
 #pragma mark - Debugging
 
