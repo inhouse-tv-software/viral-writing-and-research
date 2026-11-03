@@ -233,6 +233,9 @@ minimumLengthAtInput:(NSInteger)minimumLengthAtInput
             NSString* fullPrefix = [prefix stringByAppendingString:required];
             if ([string hasPrefix:fullPrefix]) fulfillsRequirements = true;
         }
+        // A section word on its own line ("INSIGHT", "FACT") is a heading too
+        if (!fulfillsRequirements && self.resultingType == heading && prefix.length > 3 && [prefix rangeOfString:@"/"].location == NSNotFound &&
+            [[string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] isEqualToString:prefix]) fulfillsRequirements = true;
         
         if (allowedCharacters && fulfillsRequirements) return true;
     }

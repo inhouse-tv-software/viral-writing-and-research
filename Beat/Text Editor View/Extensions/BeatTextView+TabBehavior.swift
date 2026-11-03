@@ -1880,6 +1880,33 @@ fileprivate enum ViralLinks {
 		}
 	}
 	
+	/// A readable title from the address when the page's own title isn't known:
+	/// ".../ge-launches-ct-scanner-made-in-india" → "Ge launches ct scanner made in india"
+	static func slugTitle(_ url: String) -> String? {
+		guard let address = URL(string: url) else { return nil }
+		let isSeparator: (Character) -> Bool = { $0 == "-" || $0 == "_" }
+		var best = ""
+		var bestCount = 0
+		for component in address.pathComponents {
+			let part = (component as NSString).deletingPathExtension
+			let count = part.split(whereSeparator: isSeparator).count
+			if count > bestCount { best = part; bestCount = count }
+		}
+		guard bestCount >= 3 else { return nil }
+		// Long numbers are ids, not words
+		let words = best.split(whereSeparator: isSeparator).map(String.init).filter { !($0.count > 4 && $0.allSatisfy { $0.isNumber }) }
+		guard words.count >= 3 else { return nil }
+		let text = words.joined(separator: " ").removingPercentEncoding ?? words.joined(separator: " ")
+		return text.prefix(1).uppercased() + text.dropFirst()
+	}
+	
+	/// The size a link is shown at. A card with nothing to show (no picture, no description) is shown as a small link.
+	static func effectiveSize(_ item: EmbedLine, settings: BeatDocumentSettings?) -> String {
+		guard item.linkSize == "card", let entry = item.ids.first else { return item.linkSize }
+		if ViralMedia.thumbnail(entry) != nil { return "card" }
+		return info(ViralMedia.url(entry), settings: settings).desc.isEmpty ? "pill" : "card"
+	}
+	
 	/// Links start small. News stories and blog posts get a card so the picture and headline show.
 	static func defaultSize(_ url: String) -> String {
 		return isArticle(url) ? "card" : "pill"
@@ -1940,7 +1967,7 @@ fileprivate enum ViralLinks {
 	static func info(_ url: String, settings: BeatDocumentSettings?) -> Info {
 		let domain = self.domain(url)
 		guard let all = settings?.get(ViralLinksKey) as? NSDictionary, let entry = all[url] as? NSDictionary else {
-			return Info(title: domain, desc: "", site: domain, icon: nil)
+			return Info(title: slugTitle(url) ?? domain, desc: "", site: domain, icon: nil)
 		}
 		func text(_ key: String) -> String? {
 			guard let value = entry[key] as? String else { return nil }
@@ -1952,7 +1979,7 @@ fileprivate enum ViralLinks {
 			icon = image
 			iconCache[url] = image
 		}
-		return Info(title: text("title") ?? domain, desc: text("desc") ?? "", site: text("site") ?? domain, icon: icon)
+		return Info(title: text("title") ?? slugTitle(url) ?? domain, desc: text("desc") ?? "", site: text("site") ?? domain, icon: icon)
 	}
 	
 	/// Reads the page once per session. `needsImage`: the line has no picture yet.
@@ -2956,7 +2983,7 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 	/// Websites never share a row with pictures or videos, and live pages stand alone, so rows stay tidy
 	func family(_ item: EmbedLine) -> Int {
 		guard item.kind == .link else { return 0 }
-		switch item.linkSize {
+		switch ViralLinks.effectiveSize(item, settings: settings) {
 		case "live": return 2
 		case "card": return 3
 		default: return 1
@@ -3002,7 +3029,7 @@ fileprivate func viralGroupLayout(_ items: [EmbedLine], width: CGFloat, settings
 			let w = pillRows.contains(r) ? shared : floor(min(width, override[i] ?? viralItemWidth(items[i].width, width: width)))
 			let h: CGFloat
 			if items[i].kind == .link {
-				h = ViralLinks.height(items[i].linkSize, width: w)
+				h = ViralLinks.height(ViralLinks.effectiveSize(items[i], settings: settings), width: w)
 			} else {
 				let isVideo = items[i].ids.first.map { ViralMedia.isVideo($0) } ?? false
 				h = floor(w * ViralImages.aspect(items[i].ids.first, settings: settings)) + (isVideo ? ViralMetrics.barHeight : 0)
@@ -3240,7 +3267,10 @@ fileprivate final class ViralImageTile: NSView {
 	}
 	var isSelected: Bool { return group?.isActive == true && group?.selectedIndex == index }
 	
-	var linkSize: String { return item?.linkSize ?? "pill" }
+	var linkSize: String {
+		guard let item else { return "pill" }
+		return ViralLinks.effectiveSize(item, settings: group?.settings)
+	}
 	
 	func configure(entry: String?, settings: BeatDocumentSettings?) {
 		guard let entry else { image = nil; return }
@@ -3351,7 +3381,10 @@ fileprivate final class ViralImageTile: NSView {
 	}
 	
 	@objc func linksChanged(_ notification: Notification) {
-		if linkURL != nil { needsDisplay = true }
+		guard linkURL != nil else { return }
+		needsDisplay = true
+		// A card that had nothing to show may have just got its description (or the other way round)
+		group?.relayoutSoon()
 	}
 	
 	@objc func thumbReady(_ notification: Notification) {
@@ -3631,6 +3664,19 @@ fileprivate final class ViralImageGroupView: ViralEmbedView {
 		}
 		selectedIndex = min(selectedIndex, max(items.count - 1, 0))
 		relayout()
+	}
+	
+	private var relayoutScheduled = false
+	/// Lays the tiles out again once the current burst of changes is over, and lets the text make room
+	func relayoutSoon() {
+		if relayoutScheduled { return }
+		relayoutScheduled = true
+		DispatchQueue.main.async { [weak self] in
+			guard let self else { return }
+			self.relayoutScheduled = false
+			self.relayout()
+			self.host?.scheduleTableUpdate()
+		}
 	}
 	
 	func relayout() {

@@ -468,6 +468,14 @@
     else if (first.isEmbedLinkLine) {
         // Websites: link pills or cards side by side, or one big preview
         NSString* size = first.embedLinkSize;
+        // Cards with nothing to show (the page couldn't be read: no picture, no description) print as small links
+        if ([size isEqualToString:@"card"]) {
+            bool anyContent = false;
+            for (Line* l in row) {
+                if ([self linkHasCardContent:l.embedImageIDs.firstObject settings:settings]) { anyContent = true; break; }
+            }
+            if (!anyContent) size = @"pill";
+        }
         bool live = [size isEqualToString:@"live"];
         CGFloat minimum = [size isEqualToString:@"pill"] ? 130.0 : 220.0;
         NSMutableArray<NSNumber*>* widths = NSMutableArray.new;
@@ -705,6 +713,43 @@
     return 62.0;
 }
 
+/// True when a card has a picture or a description to show
++ (bool)linkHasCardContent:(NSString*)entry settings:(BeatExportSettings*)settings
+{
+    if (entry == nil) return false;
+    if ([self embedThumbnailIDFor:entry] != nil) return true;
+    NSDictionary* info = [self linkInfoFor:[self embedURLFor:entry] settings:settings];
+    NSString* desc = info[@"desc"];
+    return [desc isKindOfClass:NSString.class] && [desc stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length > 0;
+}
+
+/// A readable title from the address when the page's own title isn't known:
+/// ".../ge-launches-ct-scanner-made-in-india" → "Ge launches ct scanner made in india"
++ (NSString*)linkSlugTitle:(NSString*)url
+{
+    NSURL* address = [NSURL URLWithString:url];
+    if (address == nil) return nil;
+    NSString* best = nil;
+    NSInteger bestCount = 0;
+    NSCharacterSet* separators = [NSCharacterSet characterSetWithCharactersInString:@"-_"];
+    for (NSString* component in address.pathComponents) {
+        NSString* part = component.stringByDeletingPathExtension;
+        NSInteger count = [part componentsSeparatedByCharactersInSet:separators].count;
+        if (count > bestCount) { best = part; bestCount = count; }
+    }
+    if (best == nil || bestCount < 3) return nil;
+    NSMutableArray* words = NSMutableArray.new;
+    for (NSString* word in [best componentsSeparatedByCharactersInSet:separators]) {
+        if (word.length == 0) continue;
+        // Long numbers are ids, not words
+        if (word.length > 4 && [word rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location == NSNotFound) continue;
+        [words addObject:word];
+    }
+    if (words.count < 3) return nil;
+    NSString* text = [[words componentsJoinedByString:@" "] stringByRemovingPercentEncoding] ?: [words componentsJoinedByString:@" "];
+    return [[text substringToIndex:1].uppercaseString stringByAppendingString:[text substringFromIndex:1]];
+}
+
 /// Stored title, description and site name for a website (fetched by the editor)
 + (NSDictionary*)linkInfoFor:(NSString*)url settings:(BeatExportSettings*)settings
 {
@@ -763,7 +808,7 @@
     NSDictionary* info = [self linkInfoFor:url settings:settings];
     NSImage* icon = [self linkIconFor:info];
     NSString* domain = [self embedDomainFor:url];
-    NSString* title = [info[@"title"] isKindOfClass:NSString.class] && [info[@"title"] length] > 0 ? info[@"title"] : domain;
+    NSString* title = [info[@"title"] isKindOfClass:NSString.class] && [info[@"title"] length] > 0 ? info[@"title"] : ([self linkSlugTitle:url] ?: domain);
     NSString* desc = [info[@"desc"] isKindOfClass:NSString.class] ? info[@"desc"] : @"";
     NSString* site = [info[@"site"] isKindOfClass:NSString.class] && [info[@"site"] length] > 0 ? info[@"site"] : domain;
     NSColor* border = [NSColor colorWithWhite:0.82 alpha:1.0];
@@ -1063,17 +1108,15 @@
     NSArray<NSString*>* cells = line.tableCells;
     NSInteger n = MAX(1, cells.count);
     
-    BXFont* font = [BXFont fontWithDescriptor:baseFont.fontDescriptor size:self.tableFontSize];
+    // Clean sans-serif tables: rules between rows only, a light header, no grid of boxes
+    BXFont* font = header ? [BXFont systemFontOfSize:self.tableFontSize - 1.0 weight:NSFontWeightSemibold] : [BXFont systemFontOfSize:self.tableFontSize - 0.5];
     if (font == nil) font = baseFont;
-    if (header) {
-        BXFont* bold = [NSFontManager.sharedFontManager convertFont:font toHaveTrait:NSBoldFontMask];
-        if (bold != nil) font = bold;
-    }
     
-    CGFloat padX = 5.0, padY = 4.0, border = 0.5;
+    CGFloat padX = 6.0, padY = 4.5, border = 0.5;
     CGFloat columnWidth = floor(width / n);
-    CGFloat contentWidth = MAX(10.0, columnWidth - padX * 2 - border);
-    BXColor* borderColor = [BXColor colorWithWhite:0.55 alpha:1.0];
+    CGFloat contentWidth = MAX(10.0, columnWidth - padX * 2);
+    BXColor* borderColor = [BXColor colorWithWhite:0.84 alpha:1.0];
+    BXColor* strongBorder = [BXColor colorWithWhite:0.55 alpha:1.0];
     
     NSTextTable* table = NSTextTable.new;
     table.numberOfColumns = n + 1;
@@ -1082,7 +1125,7 @@
     
     NSMutableAttributedString* result = NSMutableAttributedString.new;
     
-    CGFloat lineHeight = ceil(self.tableFontSize * 1.25);
+    CGFloat lineHeight = ceil(font.pointSize * 1.4);
     
     // Line breaks inside cells are rendered as sub-rows without borders between them,
     // because multi-paragraph cells get extra height in TextKit.
@@ -1123,13 +1166,18 @@
             [cell setWidth:padX type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMaxXEdge];
             [cell setWidth:(firstSub ? padY : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMinYEdge];
             [cell setWidth:(lastSub ? padY : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockPadding edge:NSMaxYEdge];
-            [cell setWidth:border type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMinXEdge];
-            [cell setWidth:border type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMaxXEdge];
-            [cell setWidth:(lastSub ? border : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMaxYEdge];
-            [cell setWidth:((firstSub && topBorder) ? border : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMinYEdge];
-            [cell setBorderColor:borderColor];
+            [cell setWidth:0.0 type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMinXEdge];
+            [cell setWidth:0.0 type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMaxXEdge];
+            [cell setWidth:(lastSub ? (header ? 0.8 : border) : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMaxYEdge];
+            [cell setWidth:((firstSub && topBorder) ? 0.8 : 0.0) type:NSTextBlockAbsoluteValueType forLayer:NSTextBlockBorder edge:NSMinYEdge];
+            [cell setBorderColor:((header || (firstSub && topBorder && !lastSub)) ? strongBorder : borderColor)];
+            if (!header) {
+                // The row rule is light, the line above the table (top of the first row) strong
+                [cell setBorderColor:borderColor forEdge:NSMaxYEdge];
+                if (firstSub && topBorder) [cell setBorderColor:strongBorder forEdge:NSMinYEdge];
+            }
             cell.verticalAlignment = NSTextBlockTopAlignment;
-            if (header) cell.backgroundColor = [BXColor colorWithWhite:0.93 alpha:1.0];
+            if (header) cell.backgroundColor = [BXColor colorWithWhite:0.965 alpha:1.0];
             
             NSMutableParagraphStyle* pStyle = NSMutableParagraphStyle.new;
             pStyle.textBlocks = @[cell];
@@ -1137,16 +1185,37 @@
             pStyle.maximumLineHeight = lineHeight;
             pStyle.lineBreakMode = NSLineBreakByWordWrapping;
             
-            [result appendAttributedString:[NSAttributedString.alloc initWithString:[text stringByAppendingString:@"\n"] attributes:@{
-                NSFontAttributeName: font,
-                NSForegroundColorAttributeName: header ? [BXColor colorWithWhite:0.2 alpha:1.0] : BXColor.blackColor,
-                NSParagraphStyleAttributeName: pStyle
-            }]];
+            NSMutableAttributedString* cellText = [self tableCellText:text font:font color:(header ? [BXColor colorWithWhite:0.25 alpha:1.0] : [BXColor colorWithWhite:0.1 alpha:1.0])];
+            [cellText appendAttributedString:[NSAttributedString.alloc initWithString:@"\n" attributes:@{ NSFontAttributeName: font }]];
+            [cellText addAttribute:NSParagraphStyleAttributeName value:pStyle range:NSMakeRange(0, cellText.length)];
+            [result appendAttributedString:cellText];
         }
     }
     
     // Mark table text so the render layout manager won't clamp cell line fragments
     [result addAttribute:@"BeatTableCell" value:@YES range:NSMakeRange(0, result.length)];
+    return result;
+}
+
+/// Cell text with **bold** and *italic* turned into real bold and italic (the markers are removed)
++ (NSMutableAttributedString*)tableCellText:(NSString*)text font:(BXFont*)font color:(BXColor*)color
+{
+    NSMutableAttributedString* result = NSMutableAttributedString.new;
+    NSDictionary* plain = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color };
+    BXFont* bold = [NSFontManager.sharedFontManager convertFont:font toHaveTrait:NSBoldFontMask] ?: font;
+    BXFont* italic = [NSFontManager.sharedFontManager convertFont:font toHaveTrait:NSItalicFontMask] ?: font;
+    NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:@"\\*\\*(.+?)\\*\\*|\\*(?!\\s)(.+?)\\*" options:0 error:nil];
+    NSInteger last = 0;
+    for (NSTextCheckingResult* m in [regex matchesInString:text options:0 range:NSMakeRange(0, text.length)]) {
+        if (m.range.location > last) [result appendAttributedString:[NSAttributedString.alloc initWithString:[text substringWithRange:NSMakeRange(last, m.range.location - last)] attributes:plain]];
+        NSRange inner = [m rangeAtIndex:1];
+        BXFont* f = bold;
+        if (inner.location == NSNotFound) { inner = [m rangeAtIndex:2]; f = italic; }
+        [result appendAttributedString:[NSAttributedString.alloc initWithString:[text substringWithRange:inner] attributes:@{ NSFontAttributeName: f, NSForegroundColorAttributeName: color }]];
+        last = NSMaxRange(m.range);
+    }
+    if (last < text.length) [result appendAttributedString:[NSAttributedString.alloc initWithString:[text substringFromIndex:last] attributes:plain]];
+    if (result.length == 0) [result appendAttributedString:[NSAttributedString.alloc initWithString:@" " attributes:plain]];
     return result;
 }
 
